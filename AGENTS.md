@@ -83,7 +83,7 @@ Full field-level detail: `docs/domain-model.md`.
 | Task contract, planner↔critic loop, builder slice loop | `packages/planning` |
 | Verification command runner + evidence freshness/waivers | `packages/verification` |
 | Browser/CLI/API/library QA executors | `packages/qa` |
-| Adversarial reviewer | `packages/review` |
+| Adversarial reviewer (review-runner, Challenge gates, finding lifecycle) | `packages/review` |
 | GitHub push/PR/feedback/video-upload | `packages/github` |
 | Runtime/token/event telemetry schema | `packages/observability` |
 | Human-gate trigger policy | `packages/policy` |
