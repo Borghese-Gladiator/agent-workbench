@@ -42,6 +42,17 @@ event/usage normalization.
 
 `@awb/domain`, `@anthropic-ai/claude-agent-sdk`.
 
+## SDK quirk worth knowing
+
+The SDK has two similarly-named options: `tools` (restricts the session to
+exactly this tool set) and `allowedTools` (an auto-approve list — tools
+outside it still exist, they just require interactive confirmation). Our
+`CreateAgentSessionInput.allowedTools` (the capability-broker's output) maps
+to the SDK's `tools` option, not its `allowedTools` — mapping to the wrong
+one would silently turn a hard restriction into a soft confirmation
+prompt/allowlist, which is the opposite of what the capability broker
+requires.
+
 ## Known issue
 
 `@anthropic-ai/claude-agent-sdk` declares a peer dependency on `zod@^4.0.0`;
