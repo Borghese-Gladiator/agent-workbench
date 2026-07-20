@@ -1,0 +1,15 @@
+rtk proxy python -m pytest tests/ --collect-only -q
+python -m pytest tests/ -q
+python -m pytest tests/test_scope_check.py -v
+python -m pytest tests/test_run_ids.py -v
+python -m pytest tests/test_yaml_io.py -v
+python -m pytest tests/test_followups.py -v
+python -m pytest tests/test_doc_claims.py -v
+python -m pytest tests/test_lifecycle.py -v
+python -m pytest tests/test_cmd_board.py -v
+python -m pytest tests/test_board_snapshot.py -v
+python -m pytest tests/test_events.py -v
+python -m pytest tests/test_metadata.py -v
+git diff --stat tests/
+git diff tests/test_cmd_board.py
+git diff tests/test_e2e.py

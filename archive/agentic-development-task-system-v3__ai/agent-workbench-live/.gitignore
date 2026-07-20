@@ -1,0 +1,13 @@
+# Worktrees live here (managed by `agent-workbench start`).
+# Track the folder marker but not the contents.
+/worktrees/*
+!/worktrees/.gitkeep
+
+# Local-only / transient
+.claude/scheduled_tasks.lock
+.playwright-mcp/
+
+# Metrics: rollup index is regenerated on demand; per-run metrics-summary.json
+# is a derived cache. prices.yaml and per-run metrics.jsonl ARE committed.
+/metrics/index.json
+runs/*/metrics-summary.json

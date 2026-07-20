@@ -1,0 +1,40 @@
+# config/repos.yaml — registry of product repositories controlled by ai-workbench.
+#
+# Copy this file to config/repos.yaml and edit the entries to match your machine.
+#
+# Rules:
+#   - Use ABSOLUTE paths only. Do NOT use ~ or relative paths.
+#   - "path" is the GIT ROOT (where .git lives) — this is what git worktree
+#     operations target.
+#   - "project_subpath" (optional) is a relative path inside the git root. Set
+#     it when the project lives in a subdirectory of a larger git repo (e.g.
+#     one project inside a monorepo, or a sample inside a playground repo).
+#     Leave it unset/empty when the project IS the git repo (the common case).
+#   - "github" is "<org>/<repo>" of the git repo at "path". PRs always land
+#     against this repo; for subdirectory projects you typically point this
+#     at the parent monorepo's GitHub repo.
+#   - "default_branch" is the branch that feature branches are cut from.
+#   - The "repo_key" is the YAML key under "repos" (e.g. "frontend"). Pass it
+#     as the first argument to scripts/new-feature.sh.
+
+repos:
+  # Standalone repo (the common case): project root == git root.
+  frontend:
+    path: /ABSOLUTE/PATH/TO/frontend
+    github: org/frontend
+    default_branch: main
+
+  backend:
+    path: /ABSOLUTE/PATH/TO/backend
+    github: org/backend
+    default_branch: main
+
+  # Subdirectory project: the project lives inside a larger git repo.
+  # Worktrees are still cut from the git root (path), but agents work inside
+  # path/<project_subpath>. PRs land against `github`, which is the parent
+  # monorepo's GitHub repo.
+  # cards-game:
+  #   path: /ABSOLUTE/PATH/TO/playground-monorepo
+  #   project_subpath: cards-president-first
+  #   github: org/playground-monorepo
+  #   default_branch: master

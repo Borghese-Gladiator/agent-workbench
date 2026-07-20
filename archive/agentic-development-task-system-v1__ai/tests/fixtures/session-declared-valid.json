@@ -1,0 +1,23 @@
+{
+  "event_id": "c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f",
+  "event_type": "session.declared",
+  "occurred_at": "2026-03-31T14:00:00.000Z",
+  "source": "claude-code",
+  "actor": {
+    "type": "agent",
+    "id": "executor-agent-001"
+  },
+  "payload": {
+    "session_id": "e4f5a6b7-c8d9-4e0f-1a2b-3c4d5e6f7a8b",
+    "title": "Auth middleware implementation session",
+    "cwd": "/home/user/projects/my-app",
+    "repo_path": "/home/user/projects/my-app",
+    "directory_path": "/home/user/projects/my-app/src/auth",
+    "worktree_path": null,
+    "branch_name": "feature/auth-middleware",
+    "shell_name": "zsh",
+    "command_line": "claude --task 'implement auth middleware'",
+    "claude_session_id": "claude-sess-abc123",
+    "primary_task_id": null
+  }
+}

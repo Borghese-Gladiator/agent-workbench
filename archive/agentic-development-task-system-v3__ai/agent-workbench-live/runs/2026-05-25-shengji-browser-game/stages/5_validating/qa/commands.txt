@@ -1,0 +1,12 @@
+pnpm install
+pnpm --filter @shengji/shared test
+pnpm --filter @shengji/shared typecheck
+pnpm --filter @shengji/server typecheck
+pnpm --filter @shengji/server test
+pnpm --filter @shengji/client typecheck
+pnpm --filter @shengji/client build
+pnpm --filter @shengji/e2e exec playwright install chromium --with-deps
+pnpm --filter @shengji/e2e test
+pnpm typecheck
+pnpm test
+pnpm test:e2e

@@ -1,0 +1,119 @@
+diff --git a/client/app/performance-dashboard/src/Components/Modals/DataViewLibraryModal.test.tsx b/client/app/performance-dashboard/src/Components/Modals/DataViewLibraryModal.test.tsx
+index 851e744ff8fd2..e736a46986ab2 100644
+--- a/client/app/performance-dashboard/src/Components/Modals/DataViewLibraryModal.test.tsx
++++ b/client/app/performance-dashboard/src/Components/Modals/DataViewLibraryModal.test.tsx
+@@ -113,11 +113,27 @@ describe('Performance Dashboard - Data View Library Modal', () => {
+   });
+ 
+   it.each([
+-    { gateEnabled: true, shouldRender: true },
+-    { gateEnabled: false, shouldRender: false },
++    {
++      gateEnabled: false,
++      present: [
++        'Email Funnel Summary',
++        'SMS Funnel Summary',
++        'Mobile Push Funnel Summary',
++      ] as const,
++      absent: ['Funnel Summary by Channel'] as const,
++    },
++    {
++      gateEnabled: true,
++      present: ['Funnel Summary by Channel'] as const,
++      absent: [
++        'Email Funnel Summary',
++        'SMS Funnel Summary',
++        'Mobile Push Funnel Summary',
++      ] as const,
++    },
+   ])(
+-    'shouldRender=$shouldRender when BY_CHANNEL gate is $gateEnabled',
+-    async ({ gateEnabled, shouldRender }) => {
++    'shows correct funnel summary options when multi-channel gate is $gateEnabled',
++    async ({ gateEnabled, present, absent }) => {
+       const { resolveClientLoadComplete, TestStatsigProvider } =
+         createTestStatsigProvider({
+           featureFlags: {
+@@ -150,14 +166,12 @@ describe('Performance Dashboard - Data View Library Modal', () => {
+       );
+       await resolveClientLoadComplete();
+ 
+-      if (shouldRender) {
+-        expect(
+-          await screen.findByText('Funnel Summary by Channel'),
+-        ).toBeInTheDocument();
+-      } else {
+-        expect(
+-          screen.queryByText('Funnel Summary by Channel'),
+-        ).not.toBeInTheDocument();
++      expect(await screen.findByText(present[0])).toBeInTheDocument();
++      for (const text of present.slice(1)) {
++        expect(screen.getByText(text)).toBeInTheDocument();
++      }
++      for (const text of absent) {
++        expect(screen.queryByText(text)).not.toBeInTheDocument();
+       }
+     },
+   );
+diff --git a/client/app/performance-dashboard/src/Components/Modals/DataViewLibraryModal.tsx b/client/app/performance-dashboard/src/Components/Modals/DataViewLibraryModal.tsx
+index 2818d66f4bb4c..8571ab017f45d 100644
+--- a/client/app/performance-dashboard/src/Components/Modals/DataViewLibraryModal.tsx
++++ b/client/app/performance-dashboard/src/Components/Modals/DataViewLibraryModal.tsx
+@@ -80,24 +80,11 @@ const DataViewWidgetOptions = (
+     type: WidgetType.PERFORMANCE_DETAIL,
+     subtype: WidgetSubtype.FORM,
+   },
+-  {
+-    title: t('dataViewLibrary.title.emailFunnelSummary'),
+-    description: t('dataViewLibrary.description.emailFunnel'),
+-    type: WidgetType.FUNNEL_SUMMARY,
+-    subtype: WidgetSubtype.EMAIL,
+-  },
+-  {
+-    title: t('dataViewLibrary.title.smsFunnelSummary'),
+-    description: t('dataViewLibrary.description.smsFunnel'),
+-    type: WidgetType.FUNNEL_SUMMARY,
+-    subtype: WidgetSubtype.SMS,
+-  },
+-  {
+-    title: t('dataViewLibrary.title.pushFunnelSummary'),
+-    description: t('dataViewLibrary.description.pushFunnel'),
+-    type: WidgetType.FUNNEL_SUMMARY,
+-    subtype: WidgetSubtype.PUSH,
+-  },
++  // CORE-587: When the multi-channel funnel summary gate is ON, only the
++  // unified BY_CHANNEL row is offered. When OFF, the legacy per-channel rows
++  // (Email/SMS/Push) are offered instead. Once the SCD fender PR (#58560)
++  // lands the toolbar widget-count plumbing, this filter will compose with the
++  // SCD-introduced add-button gating automatically.
+   ...(isFunnelSummaryByChannelEnabled
+     ? [
+         {
+@@ -109,7 +96,26 @@ const DataViewWidgetOptions = (
+           subtype: WidgetSubtype.BY_CHANNEL,
+         },
+       ]
+-    : []),
++    : [
++        {
++          title: t('dataViewLibrary.title.emailFunnelSummary'),
++          description: t('dataViewLibrary.description.emailFunnel'),
++          type: WidgetType.FUNNEL_SUMMARY,
++          subtype: WidgetSubtype.EMAIL,
++        },
++        {
++          title: t('dataViewLibrary.title.smsFunnelSummary'),
++          description: t('dataViewLibrary.description.smsFunnel'),
++          type: WidgetType.FUNNEL_SUMMARY,
++          subtype: WidgetSubtype.SMS,
++        },
++        {
++          title: t('dataViewLibrary.title.pushFunnelSummary'),
++          description: t('dataViewLibrary.description.pushFunnel'),
++          type: WidgetType.FUNNEL_SUMMARY,
++          subtype: WidgetSubtype.PUSH,
++        },
++      ]),
+   {
+     title: t('dataViewLibrary.title.emailDeliverability'),
+     description: t('dataViewLibrary.description.emailDeliverability'),

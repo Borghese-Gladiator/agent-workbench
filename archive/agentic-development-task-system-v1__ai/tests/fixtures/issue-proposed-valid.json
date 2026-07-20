@@ -1,0 +1,46 @@
+{
+  "event_id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+  "event_type": "issue.proposed",
+  "occurred_at": "2026-03-31T12:00:00.000Z",
+  "source": "claude-code",
+  "actor": {
+    "type": "agent",
+    "id": "planner-agent-001"
+  },
+  "payload": {
+    "issue_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+    "title": "Implement user authentication module",
+    "goal": "Add JWT-based authentication with login, logout, and token refresh endpoints",
+    "planner_agent_id": "planner-agent-001",
+    "repo_path": "/home/user/projects/my-app",
+    "directory_path": "/home/user/projects/my-app/src/auth",
+    "worktree_path": null,
+    "raw_markdown": "# Auth Plan\n\n## Tasks\n1. Create auth middleware\n2. Implement login endpoint",
+    "tasks": [
+      {
+        "draft_id": "d290f1ee-6c54-4b01-90e6-d701748f0851",
+        "ordinal": 1,
+        "title": "Create JWT authentication middleware",
+        "contents": "Implement Express middleware that validates JWT tokens from the Authorization header. Should handle expired tokens, malformed tokens, and missing tokens with appropriate error responses.",
+        "suggested_agent_id": "executor-agent-001",
+        "suggested_directory_path": "/home/user/projects/my-app/src/auth/middleware",
+        "suggested_repo_path": "/home/user/projects/my-app",
+        "suggested_worktree_path": null,
+        "acceptance_criteria": "Middleware correctly validates JWTs and returns 401 for invalid tokens",
+        "tags": ["auth", "middleware", "security"]
+      },
+      {
+        "draft_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "ordinal": 2,
+        "title": "Implement login and token refresh endpoints",
+        "contents": "Create POST /auth/login and POST /auth/refresh endpoints. Login accepts email/password and returns access + refresh tokens. Refresh accepts a valid refresh token and returns a new access token.",
+        "suggested_agent_id": "executor-agent-002",
+        "suggested_directory_path": "/home/user/projects/my-app/src/auth/routes",
+        "suggested_repo_path": "/home/user/projects/my-app",
+        "suggested_worktree_path": null,
+        "acceptance_criteria": "Login returns valid JWT pair; refresh endpoint issues new access token",
+        "tags": ["auth", "api", "endpoints"]
+      }
+    ]
+  }
+}

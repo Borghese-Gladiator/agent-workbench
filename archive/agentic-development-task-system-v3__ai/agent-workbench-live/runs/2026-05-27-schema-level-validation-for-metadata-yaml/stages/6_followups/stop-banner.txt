@@ -1,0 +1,21 @@
+============================================================
+STOP. State: human_review (human-owned).
+The run is staged for human review and decision.
+
+Review:
+file:///Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agentic-development-task-system-v3-ai/20260527__schema-level-validation-for-metadata-yaml/agentic-development-task-system-v3__ai/agent-workbench-live/runs/2026-05-27-schema-level-validation-for-metadata-yaml/HUMAN_REVIEW.md
+
+Summary of changes (≤3 bullets):
+  - 2 doc(s) touched:
+
+Summary of testing (≤2 sentences, or "None recorded."):
+  Unit tests passed; no known issues.
+
+Diffstat:
+  0 files changed, +0 / −0 lines
+
+Next moves (human-triggered, type in a session):
+  /complete 2026-05-27-schema-level-validation-for-metadata-yaml  — accept; auto-merges worktree branch into parent
+  /bounce 2026-05-27-schema-level-validation-for-metadata-yaml    — send back to building with structured feedback
+  /abandon 2026-05-27-schema-level-validation-for-metadata-yaml   — discard the run
+============================================================

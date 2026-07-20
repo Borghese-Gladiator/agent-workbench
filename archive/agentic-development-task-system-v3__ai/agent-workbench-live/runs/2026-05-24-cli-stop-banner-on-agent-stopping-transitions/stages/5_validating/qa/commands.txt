@@ -1,0 +1,5 @@
+python3 -m pytest tests/test_stop_banner.py -v
+python3 -m pytest tests/
+python3 -m pytest tests/test_human_review.py::TestSnapshotRender -v  # master baseline
+PYTHONPATH=<worktree>/agent-workbench-live python3 -c "from lib.cli._stop_banner import print_stop_banner; [print_stop_banner(s, 'SAMPLE-RUN-ID') or print() for s in ('ready','human_review','done','abandoned')]"
+python3 -m py_compile lib/cli/_stop_banner.py lib/cli/cmd_plan.py lib/cli/cmd_validate.py lib/cli/cmd_followups.py lib/cli/cmd_complete.py lib/cli/cmd_abandon.py

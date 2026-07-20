@@ -1,0 +1,32 @@
+# Keep the build context small + force a clean install in-image (host
+# node_modules has a host-ABI better-sqlite3 binding we must NOT reuse).
+node_modules
+**/node_modules
+dist
+**/dist
+
+# Local-first runtime state — must not bake into the image (compose bind-mounts
+# a fresh ./data instead).
+data
+*.sqlite
+*.sqlite-journal
+*.db
+
+# Test / automation output.
+e2e-artifacts
+**/e2e-artifacts
+playwright-report
+test-results
+.playwright-mcp
+
+# VCS + editor + OS noise.
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+*.log
+
+# Claude Code machine-local bits.
+.claude/worktrees
+.claude/settings.local.json

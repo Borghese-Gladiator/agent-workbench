@@ -1,0 +1,8 @@
+python -m pytest tests/test_build_context.py -v
+python -m pytest tests/ --tb=short
+agent-workbench new-run --repo-path <wt> --worktree-name bctx-smoke --idea-file /tmp/aw-idea-bctx-smoke.md
+agent-workbench shape 2026-05-25-bctx-smoke --init
+agent-workbench shape 2026-05-25-bctx-smoke
+agent-workbench plan 2026-05-25-bctx-smoke --init
+agent-workbench plan 2026-05-25-bctx-smoke
+agent-workbench start 2026-05-25-bctx-smoke --approved-by qa-smoke

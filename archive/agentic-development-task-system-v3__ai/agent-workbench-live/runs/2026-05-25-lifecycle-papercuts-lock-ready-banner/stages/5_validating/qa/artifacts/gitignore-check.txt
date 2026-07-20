@@ -1,0 +1,4 @@
+$ git check-ignore -v agentic-development-task-system-v3__ai/agent-workbench-live/runs/2026-05-25-lifecycle-papercuts-lock-ready-banner/.lock
+.gitignore:318:agentic-development-task-system-v3__ai/agent-workbench-live/runs/*/.lock	agentic-development-task-system-v3__ai/agent-workbench-live/runs/2026-05-25-lifecycle-papercuts-lock-ready-banner/.lock
+
+The `.lock` file inside the run directory matches the new workbench-scoped gitignore pattern at .gitignore:318. `worktree_dirty_files` (which uses `git status --porcelain`) therefore returns an empty list when only the lock file is present in the run dir.

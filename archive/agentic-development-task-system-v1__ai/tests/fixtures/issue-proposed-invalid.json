@@ -1,0 +1,8 @@
+{
+  "event_id": "not-a-valid-uuid",
+  "event_type": "issue.proposed",
+  "source": "claude-code",
+  "payload": {
+    "title": "Missing required fields"
+  }
+}

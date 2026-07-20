@@ -1,0 +1,4 @@
+python3 -m unittest discover -s tests
+bin/agent-workbench doctor
+bin/agent-workbench metrics --rebuild
+bin/agent-workbench metrics --all

@@ -1,0 +1,13 @@
+$ PYTHONPATH=. python -c "from lib.cli._stop_banner import print_stop_banner; print_stop_banner('ready', 'EXAMPLE-RUN-ID')"
+============================================================
+STOP. State: ready (human-owned).
+The plan is staged and waiting for human approval.
+
+Next moves (human-triggered, type in a session):
+  /start EXAMPLE-RUN-ID  — approve the plan and create the worktree
+============================================================
+
+Compare to the pre-fix rendering, which read:
+  agent-workbench start EXAMPLE-RUN-ID  - approve the plan and create the worktree
+
+Three changes in the new shape: slash-form prefix (`/start` vs `agent-workbench start`), em-dash separator (`—` vs ASCII `-`), and the "Next moves (human-triggered, type in a session):" header that mirrors what `_render_next_moves_slash_form` (the human_review body) emits.

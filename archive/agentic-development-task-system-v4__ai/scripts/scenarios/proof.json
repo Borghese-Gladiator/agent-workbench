@@ -1,0 +1,18 @@
+{
+  "description": "Deterministic, CI-able proof run: drive a seed repo through the full lifecycle and assemble a durable bundle with a single PASS/FAIL verdict. Mock runtime by default; --live uses real claude + a real PR.",
+  "defaultMode": "proof",
+  "project": {
+    "create": true,
+    "seed": true,
+    "name": "Proof Project",
+    "defaultBranch": "main",
+    "agentRuntime": "mock",
+    "deliveryPolicy": "merge_to_master",
+    "testCommand": "sh check.sh",
+    "typecheckCommand": "true"
+  },
+  "task": {
+    "title": "Proof: add a dark-mode toggle",
+    "request": ["Add a dark mode toggle to settings."]
+  }
+}

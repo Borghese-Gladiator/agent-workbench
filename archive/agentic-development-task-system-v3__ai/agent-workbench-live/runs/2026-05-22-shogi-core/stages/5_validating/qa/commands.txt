@@ -1,0 +1,1 @@
+python3 -m pytest /Users/timothy.shee/GitHub/LOCAL_worktrees/202605_agent_workbench_v2/agentic-development-task-system-v2__ai/agent-workbench-live/worktrees/repo/20260522__shogi-core/backend/tests -v

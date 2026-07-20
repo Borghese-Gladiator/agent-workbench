@@ -1,0 +1,25 @@
+===== stage=discovery mode=stage-packet =====
+taskId: task_CuisJsUJI_
+contextArtifactIds: art_h7BeBztQBS, art_f7nebJLAPj, art_I2hZClm_bI
+reviewerFeedback: (none)
+skillText: (none)
+----- PROMPT (751 chars) -----
+# Stage: discovery
+
+## Task
+Title: Add divide with divide-by-zero handling
+
+Request:
+Add a divide(a, b) function to the calc library in src/calc.js that throws a clear error on divide-by-zero. Follow the existing style of the other functions.
+
+## Your job
+Do Discovery: explore the codebase to find the files, modules, and conventions relevant to this task. Read-only — do not modify any files.
+
+
+Context artifacts available to you (ids): art_h7BeBztQBS, art_f7nebJLAPj, art_I2hZClm_bI
+
+## Output
+Write your discovery as clear Markdown. Then, as the LAST thing in your
+response, emit a single fenced ```json block with a structured summary
+of the discovery (keys appropriate to the stage). The json block is parsed
+and stored as a structured artifact.

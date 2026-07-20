@@ -1,0 +1,532 @@
+test_dry_run_reports_change_but_writes_nothing (test_backfill_base_ref_sha.TestBackfillBaseRefSha) ... ok
+test_missing_source_repo_skipped_not_failed (test_backfill_base_ref_sha.TestBackfillBaseRefSha) ... ok
+test_orphan_branch_uses_root_commit (test_backfill_base_ref_sha.TestBackfillBaseRefSha) ... ok
+test_second_run_is_noop (test_backfill_base_ref_sha.TestBackfillBaseRefSha) ... ok
+test_write_populates_sha_and_summarizes (test_backfill_base_ref_sha.TestBackfillBaseRefSha) ... ok
+test_burst_coalesces_to_one_refresh (test_board_debounce.TestDebounceDrain)
+100 events in a 50ms burst -> exactly one refresh after the ... ok
+test_clean_state_does_nothing (test_board_debounce.TestDebounceDrain) ... ok
+test_event_resets_quiet_window (test_board_debounce.TestDebounceDrain)
+A second event mid-window resets the clock — drain must wait ... ok
+test_inside_window_does_not_fire (test_board_debounce.TestDebounceDrain) ... ok
+test_outside_window_fires_once (test_board_debounce.TestDebounceDrain) ... ok
+test_archive_path_dropped (test_board_debounce.TestHandlerFilters) ... ok
+test_dot_prefixed_basename_dropped (test_board_debounce.TestHandlerFilters) ... ok
+test_real_metadata_event_marks_dirty (test_board_debounce.TestHandlerFilters) ... ok
+test_tmp_suffix_dropped (test_board_debounce.TestHandlerFilters) ... ok
+test_schedule_path_handles_observer_exception (test_board_freshness.TestMultiRootScheduling) ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at f8bc4d5 init
+ok
+test_schedule_path_is_idempotent (test_board_freshness.TestMultiRootScheduling) ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at f8bc4d5 init
+ok
+test_schedule_worktree_runs_dirs_dedupes_multiple_runs (test_board_freshness.TestMultiRootScheduling) ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at f8bc4d5 init
+ok
+test_schedule_worktree_runs_dirs_picks_up_existing_worktrees (test_board_freshness.TestMultiRootScheduling) ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at f8bc4d5 init
+ok
+test_schedule_worktree_runs_dirs_skips_worktree_with_no_runs_dir (test_board_freshness.TestMultiRootScheduling) ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at d02a8b5 init
+ok
+test_rescan_idempotent (test_board_freshness.TestPeriodicRescan) ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at d02a8b5 init
+ok
+test_rescan_picks_up_new_worktree_via_ttl_not_reset_caches (test_board_freshness.TestPeriodicRescan)
+End-to-end TTL path: rescan after the cache TTL expires (advanced ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at d02a8b5 init
+Preparing worktree (new branch 'agent/wt2')
+HEAD is now at d02a8b5 init
+ok
+test_real_watchdog_filters_tmp_suffix (test_board_freshness.TestRealWatchdogDelivery)
+A `.tmp` file write must NOT trigger a post (atomic-rename noise ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at b2a507d init
+ok
+test_real_watchdog_fires_handler_on_file_write (test_board_freshness.TestRealWatchdogDelivery) ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at b2a507d init
+ok
+test_ac_coverage_cases (test_board_snapshot.TestAcceptanceCoverage)
+Three AC-table branches in one fixture pass: full table, missing ... ok
+test_bounced_from_when_latest_transition_is_bounce (test_board_snapshot.TestBounceOrigin) ... ok
+test_no_bounce_when_initial_entry (test_board_snapshot.TestBounceOrigin) ... ok
+test_build_progress_fields (test_board_snapshot.TestBuildProgress) ... ok
+test_canonical_order (test_board_snapshot.TestColumnsAndOrdering) ... ok
+test_status_filter (test_board_snapshot.TestColumnsAndOrdering) ... ok
+test_terminal_states_hidden_by_default (test_board_snapshot.TestColumnsAndOrdering) ... ok
+test_terminal_states_with_show_all (test_board_snapshot.TestColumnsAndOrdering) ... ok
+test_within_column_oldest_first (test_board_snapshot.TestColumnsAndOrdering) ... ok
+test_abandoned_reason (test_board_snapshot.TestCompletionPassthrough) ... ok
+test_completion_ref_passthrough (test_board_snapshot.TestCompletionPassthrough)
+RunSnapshot.completion_ref carries the raw label from metadata. ... ok
+test_done_card_completion_fields (test_board_snapshot.TestCompletionPassthrough) ... ok
+test_diff_caches_per_run_updated_at (test_board_snapshot.TestDiffShortstat) ... ok
+test_parse_shortstat (test_board_snapshot.TestDiffShortstat) ... ok
+test_followups_categories_counts (test_board_snapshot.TestFollowupsCategories) ... ok
+test_followups_categories_empty_when_no_event (test_board_snapshot.TestFollowupsCategories) ... ok
+test_followups_count_from_event (test_board_snapshot.TestFollowupsCount) ... ok
+test_buckets (test_board_snapshot.TestFormatAge) ... ok
+test_sha_takes_precedence_over_symbolic_branch (test_board_snapshot.TestGitShortstatPrefersSha)
+Even when base_ref points to a real ref ('HEAD'), the SHA wins. ... ok
+test_with_sha_reports_real_counts (test_board_snapshot.TestGitShortstatPrefersSha) ... ok
+test_without_sha_is_empty (test_board_snapshot.TestGitShortstatPrefersSha)
+With base_ref='HEAD' alone the diff is HEAD...HEAD → zero counts. ... ok
+test_builder_gave_up (test_board_snapshot.TestHealthFlags) ... ok
+test_failing_tests_flag (test_board_snapshot.TestHealthFlags) ... ok
+test_stale_human_review (test_board_snapshot.TestHealthFlags) ... ok
+test_avg_iteration_none_with_single_start (test_board_snapshot.TestIterationTiming) ... ok
+test_avg_iteration_seconds (test_board_snapshot.TestIterationTiming) ... ok
+test_live_signal_cases (test_board_snapshot.TestLiveSignal)
+Three is_live branches share the same seed-then-assert shape; ... ok
+test_bad_metadata_yaml_skipped (test_board_snapshot.TestMalformedRunSkipped) ... ok
+test_bounce_count_and_reason (test_board_snapshot.TestRecentEvents) ... ok
+test_error_before_transition_is_not_recent (test_board_snapshot.TestRecentEvents) ... ok
+test_recent_error_after_transition (test_board_snapshot.TestRecentEvents) ... ok
+test_recent_events_newest_first (test_board_snapshot.TestRecentEvents) ... ok
+test_time_in_stage_from_last_transition (test_board_snapshot.TestRecentEvents) ... ok
+test_repo_path_tail (test_board_snapshot.TestScopeAndIdentity) ... ok
+test_repo_path_tail_short_path (test_board_snapshot.TestScopeAndIdentity) ... ok
+test_scope_kind_passthrough (test_board_snapshot.TestScopeAndIdentity) ... ok
+test_tests_age_from_qa_completed (test_board_snapshot.TestTestsRecordedAge) ... ok
+test_local_branch_completion_ref_renders_warning (test_board_snapshot.TestUnmergedBadge) ... ok
+test_merge_completion_ref_does_not_warn (test_board_snapshot.TestUnmergedBadge) ... ok
+test_null_completion_ref_does_not_warn (test_board_snapshot.TestUnmergedBadge)
+Legacy fixture without completion_ref should not crash or warn. ... ok
+test_worktree_missing_by_status (test_board_snapshot.TestWorktreeMissingFlag)
+Flag fires for `building` runs without a worktree; stays off for ... ok
+test_empty_set_clears_all (test_board_status_column_diff.TestStatusColumnDiff) ... ok
+test_new_card_added_to_dict (test_board_status_column_diff.TestStatusColumnDiff) ... ok
+test_same_set_preserves_card_identity (test_board_status_column_diff.TestStatusColumnDiff) ... ok
+test_vanished_card_removed (test_board_status_column_diff.TestStatusColumnDiff) ... ok
+test_brief_sections_inlined (test_build_context.TestBuildContextBuild) ... ok
+test_decisions_block_includes_all_dr_and_asm (test_build_context.TestBuildContextBuild) ... ok
+test_missing_brief_file_does_not_crash (test_build_context.TestBuildContextBuild) ... ok
+test_missing_brief_section_emits_fallback (test_build_context.TestBuildContextBuild) ... ok
+test_missing_meta_fields_render_fallback (test_build_context.TestBuildContextBuild) ... ok
+test_missing_plan_section_emits_fallback (test_build_context.TestBuildContextBuild) ... ok
+test_missing_template_emits_fallback (test_build_context.TestBuildContextBuild) ... ok
+test_plan_sections_inlined (test_build_context.TestBuildContextBuild) ... ok
+test_renders_all_sections (test_build_context.TestBuildContextBuild) ... ok
+test_returns_string (test_build_context.TestBuildContextBuild) ... ok
+test_rules_block_load_bearing_one_liners (test_build_context.TestBuildContextBuild) ... ok
+test_template_inlined (test_build_context.TestBuildContextBuild) ... ok
+test_worktree_block_renders_metadata (test_build_context.TestBuildContextBuild) ... ok
+test_write_creates_parent_dir (test_build_context.TestBuildContextBuild) ... ok
+test_swallows_builder_exception (test_build_context.TestWriteBuildContextArtifacts) ... ok
+test_writes_build_context_md_for_flat_run (test_build_context.TestWriteBuildContextArtifacts) ... ok
+test_empty_workbench (test_cmd_board.TestEmpty) ... ok
+test_abbreviation_cases (test_cmd_board.TestPathAbbreviation) ... ok
+test_severity_cases (test_cmd_board.TestSeverityClassification) ... ok
+test_stale_marker_and_footer (test_cmd_board.TestStaleHumanReviewStatic) ... ok
+test_events_band_uses_column_aligned_mmss_timestamps (test_cmd_board.TestStaticCardBands)
+[mm:ss ago] timestamps render in a fixed-width column. ... ok
+test_files_band_off_by_default (test_cmd_board.TestStaticCardBands) ... ok
+test_files_band_renders_when_show_paths (test_cmd_board.TestStaticCardBands) ... ok
+test_followup_count_uses_n_follow_ups_phrasing (test_cmd_board.TestStaticCardBands)
+The body band's 'one question per band' rule prefers the ... ok
+test_meta_band_includes_repo_and_branch (test_cmd_board.TestStaticCardBands) ... ok
+test_severity_reason_appears_in_body (test_cmd_board.TestStaticCardBands) ... ok
+test_title_severity_markers (test_cmd_board.TestStaticCardBands) ... ok
+test_followups_status_also_includes_breakdown (test_cmd_board.TestStaticCardStack)
+Sanity: the followups column has always rendered the ... ok
+test_human_review_includes_followups_category_breakdown (test_cmd_board.TestStaticCardStack)
+Regression: the dogfood run (2026-05-22-s2-attrs) showed that ... ok
+test_human_review_without_followups_omits_lines (test_cmd_board.TestStaticCardStack)
+No follow-up data → no follow-up lines (avoid empty noise). ... ok
+test_columns_appear_in_canonical_order (test_cmd_board.TestStaticDumpStructure) ... ok
+test_status_filter (test_cmd_board.TestStaticDumpStructure) ... ok
+test_terminal_states_hidden_by_default (test_cmd_board.TestStaticDumpStructure) ... ok
+test_terminal_states_with_all (test_cmd_board.TestStaticDumpStructure) ... ok
+test_column_subtitle_present (test_cmd_board.TestStaticHeaderSubtitle) ... ok
+test_default_hides_paths_band_in_static (test_cmd_board.TestStaticVerbosePaths) ... ok
+test_verbose_shows_paths_band (test_cmd_board.TestStaticVerbosePaths) ... ok
+test_bad_metadata_is_skipped_not_fatal (test_cmd_board.TestUnreadableRunSkippedStatic) ... ok
+test_all_rollup (test_cmd_metrics.TestMetricsCLI) ... ok
+test_rebuild (test_cmd_metrics.TestMetricsCLI) ... ok
+test_single_run_json (test_cmd_metrics.TestMetricsCLI) ... ok
+test_single_run_plain (test_cmd_metrics.TestMetricsCLI) ... ok
+test_single_run_plain_pre_acceptance_warning (test_cmd_metrics.TestMetricsCLI)
+When status != done, the report must lead with an acceptance-pending note. ... ok
+test_assumption_body_wraps_across_lines (test_cmd_plan_parser.TestFieldParserMultiLine) ... ok
+test_continuation_does_not_leak_into_next_field (test_cmd_plan_parser.TestFieldParserMultiLine) ... ok
+test_decision_body_wraps_across_lines (test_cmd_plan_parser.TestFieldParserMultiLine) ... ok
+test_captures_single_line_body (test_cmd_plan_parser.TestFieldParserSingleLine) ... ok
+test_every_required_file_exists (test_context_library.TestDirectoryTree) ... ok
+test_no_workflows_subdir (test_context_library.TestDirectoryTree) ... ok
+test_each_non_readme_has_four_markers (test_context_library.TestLeafFileTemplate) ... ok
+test_each_non_readme_within_line_cap (test_context_library.TestLeafFileTemplate) ... ok
+test_readme_indexes_every_leaf (test_context_library.TestReadmeIndex) ... ok
+test_extract_cases (test_doc_claims.TestExtract) ... ok
+test_verify_cases (test_doc_claims.TestVerify) ... ok
+test_verify_falls_back_when_sha_missing (test_doc_claims.TestVerify)
+SHA-less calls still resolve a valid symbolic ref. ... ok
+test_verify_prefers_base_ref_sha (test_doc_claims.TestVerify)
+2b regression: when base_ref is the literal 'HEAD' but base_ref_sha ... ok
+test_abandon_at_building (test_e2e.TestE2EAbandon) ... ok
+test_abandon_at_draft (test_e2e.TestE2EAbandon) ... ok
+test_abandon_at_shaping (test_e2e.TestE2EAbandon) ... ok
+test_bounce_loop (test_e2e.TestE2EBounceLoop) ... ok
+test_dirty_worktree_refuses (test_e2e.TestE2ECompleteMerge)
+`complete` with uncommitted changes in the worktree stays in human_review. ... ok
+test_merge_conflict_aborts_and_stays_in_human_review (test_e2e.TestE2ECompleteMerge)
+A conflicting commit on main forces `git merge --abort` + MergeConflict. ... ok
+test_no_merge_flag_records_local_branch_label (test_e2e.TestE2ECompleteMerge)
+`--no-merge` keeps the old behavior so legacy/edge paths stay open. ... ok
+test_happy_path (test_e2e.TestE2EHappyPath) ... ok
+test_append_valid_event (test_events.TestEvents) ... ok
+test_rejects_invalid_appends (test_events.TestEvents) ... ok
+test_seq_increments (test_events.TestEvents) ... ok
+test_categories_helper (test_followups.TestExtract) ... ok
+test_multiple_entries (test_followups.TestExtract) ... ok
+test_no_blocks_returns_empty (test_followups.TestExtract) ... ok
+test_one_entry (test_followups.TestExtract) ... ok
+test_accepts_valid_inputs (test_followups.TestValidate) ... ok
+test_rejects_bad_inputs (test_followups.TestValidate) ... ok
+test_docs_touched_none_entry_skipped (test_human_review.TestExtractBuildSummary) ... ok
+test_docs_touched_renders_as_nested_list (test_human_review.TestExtractBuildSummary) ... ok
+test_missing_file_returns_empty (test_human_review.TestExtractBuildSummary) ... ok
+test_no_headers_returns_empty (test_human_review.TestExtractBuildSummary) ... ok
+test_pulls_implementation_files_and_ac_count (test_human_review.TestExtractBuildSummary) ... ok
+test_bounce_row_includes_reason (test_human_review.TestProjectTimeline) ... ok
+test_denylist_rejects_generic_descriptions (test_human_review.TestProjectTimeline) ... ok
+test_every_row_has_required_fields (test_human_review.TestProjectTimeline) ... ok
+test_handoff_row_uses_handed_off_phrase (test_human_review.TestProjectTimeline) ... ok
+test_template_staged_artifactwritten_dropped (test_human_review.TestProjectTimeline) ... ok
+test_files_section_format_one_line_per_artifact (test_human_review.TestRender) ... ok
+test_files_section_omits_missing_files (test_human_review.TestRender) ... ok
+test_files_touched_renders_as_nested_list (test_human_review.TestRender) ... ok
+test_files_touched_truncates_above_cap (test_human_review.TestRender) ... ok
+test_manual_testing_falls_back_to_none_recorded (test_human_review.TestRender) ... ok
+test_manual_testing_inlines_qa_manual_section_when_present (test_human_review.TestRender) ... ok
+test_render_is_idempotent (test_human_review.TestRender) ... ok
+test_render_writes_all_required_headings (test_human_review.TestRender) ... ok
+test_testing_section_has_unit_and_manual_subheadings (test_human_review.TestRender) ... ok
+test_testing_section_inlines_qa_report_as_fenced_block (test_human_review.TestRender) ... ok
+test_bounce_pass2_snapshot (test_human_review.TestSnapshotRender) ... FAIL
+test_happy_snapshot (test_human_review.TestSnapshotRender) ... FAIL
+test_followups_stdout_contains_absolute_human_review_path (test_human_review.TestTransitionStdoutHasAbsolutePath) ... ok
+test_abandon_at_various_states (test_integration.TestAbandon) ... ok
+test_bounce_back_to_building (test_integration.TestBounceLoop) ... ok
+test_bounce_with_change_request_path (test_integration.TestBounceLoop) ... ok
+test_bounce_with_empty_change_request_file_fails (test_integration.TestBounceLoop) ... ok
+test_bounce_with_missing_change_request_file_fails (test_integration.TestBounceLoop) ... ok
+test_flat_run_loads_and_show_works (test_integration.TestFlatLayoutBackCompat) ... ok
+test_full_lifecycle (test_integration.TestHappyPath) ... ok
+test_new_repo_flow (test_integration.TestNewRepo) ... ok
+test_first_bounce_versions_at_v1 (test_lifecycle.TestArchiveForBounce) ... ok
+test_second_bounce_versions_at_v2 (test_lifecycle.TestArchiveForBounce) ... ok
+test_validation_cases (test_lifecycle.TestHumanReviewValidation) ... ok
+test_flat_run_detected_as_flat (test_lifecycle.TestLayoutDetection) ... ok
+test_staged_run_detected_after_init (test_lifecycle.TestLayoutDetection) ... ok
+test_on_transition_is_idempotent (test_lifecycle.TestOnTransition) ... ok
+test_planning_to_ready_moves_plan_and_anchors_other_keys (test_lifecycle.TestOnTransition) ... ok
+test_shaping_to_planning_moves_brief (test_lifecycle.TestOnTransition) ... ok
+test_sorted_stage_dirs_match_lifecycle_flow (test_lifecycle.TestOnTransition) ... ok
+test_stage_dir_prefers_legacy_unnumbered_dir (test_lifecycle.TestOnTransition) ... ok
+test_stage_dirs_are_numbered (test_lifecycle.TestOnTransition) ... ok
+test_validating_to_human_review_moves_qa_dir (test_lifecycle.TestOnTransition) ... ok
+test_empty_archive_removed (test_lifecycle.TestPruneEmptyDirs) ... ok
+test_non_empty_archive_preserved (test_lifecycle.TestPruneEmptyDirs) ... ok
+test_pruning_collapses_nested_empties (test_lifecycle.TestPruneEmptyDirs) ... ok
+test_duplicate_metadata_hard_fails_strict_mode (test_metadata.TestDuplicateMetadataIntegrity) ... ok
+test_duplicate_metadata_hard_fails_warn_mode (test_metadata.TestDuplicateMetadataIntegrity) ... ok
+test_create_and_load (test_metadata.TestMetadata) ... ok
+test_create_includes_build_block (test_metadata.TestMetadata)
+TODO §1e: new runs have a build: telemetry block. ... ok
+test_list_runs (test_metadata.TestMetadata) ... ok
+test_load_without_build_block_backcompat (test_metadata.TestMetadata)
+A flat-layout run.yaml missing the build: key must still load ... ok
+test_metadata_error_cases (test_metadata.TestMetadata)
+create() refuses a second call for the same run_id; load() ... ok
+test_round_trip_preserves_artifacts (test_metadata.TestMetadata) ... ok
+test_set_status_invalid (test_metadata.TestMetadata) ... ok
+test_set_status_valid (test_metadata.TestMetadata) ... ok
+test_each_real_run_validates_clean (test_metadata.TestRealRunsLoadClean) ... ok
+test_strict_mode_raises_on_real_violation (test_metadata.TestValidationMode) ... ok
+test_strict_mode_raises_on_unknown_key (test_metadata.TestValidationMode) ... ok
+test_unrecognized_mode_falls_back_to_warn (test_metadata.TestValidationMode) ... ok
+test_warn_mode_emits_stderr_for_real_violations (test_metadata.TestValidationMode) ... ok
+test_warn_mode_silent_on_unknown_key (test_metadata.TestValidationMode) ... ok
+test_clean_metadata_has_no_problems (test_metadata.TestValidator) ... ok
+test_enum_violation_on_repo_mode (test_metadata.TestValidator) ... ok
+test_enum_violation_on_status (test_metadata.TestValidator) ... ok
+test_eq_violation_on_schema_version (test_metadata.TestValidator) ... ok
+test_int_does_not_accept_bool (test_metadata.TestValidator) ... ok
+test_missing_nested_required_field (test_metadata.TestValidator) ... ok
+test_missing_top_level_required_field (test_metadata.TestValidator) ... ok
+test_mistyped_nested_scalar (test_metadata.TestValidator) ... ok
+test_mistyped_scalar (test_metadata.TestValidator) ... ok
+test_scope_and_artifacts_are_free_form (test_metadata.TestValidator) ... ok
+test_unknown_extra_nested_key_flagged_as_unknown (test_metadata.TestValidator) ... ok
+test_unknown_extra_top_level_key_flagged_as_unknown (test_metadata.TestValidator) ... ok
+test_claude_md_marker_attributes (test_metrics_buckets.TestAttribute) ... ok
+test_command_block_attributes (test_metrics_buckets.TestAttribute) ... ok
+test_context_imports_attributes (test_metrics_buckets.TestAttribute) ... ok
+test_merge_sums_dicts (test_metrics_buckets.TestAttribute) ... ok
+test_no_text_means_all_other (test_metrics_buckets.TestAttribute) ... ok
+test_sum_equals_input_tokens (test_metrics_buckets.TestAttribute) ... ok
+test_tool_results_attributes (test_metrics_buckets.TestAttribute) ... ok
+test_user_messages_falls_through_to_user_bucket (test_metrics_buckets.TestAttribute) ... ok
+test_zero_input_returns_all_zeros (test_metrics_buckets.TestAttribute) ... ok
+test_attribute_returns_input_only_dict (test_metrics_cache_buckets.TestBackCompatAttribute) ... ok
+test_assistant_with_headers_attributes_to_generated_drafts (test_metrics_cache_buckets.TestCacheBucketAttribution) ... ok
+test_assistant_without_headers_attributes_to_assistant_history (test_metrics_cache_buckets.TestCacheBucketAttribution) ... ok
+test_attribute_all_returns_three_dicts (test_metrics_cache_buckets.TestCacheBucketAttribution) ... ok
+test_cache_creation_uses_same_scaler (test_metrics_cache_buckets.TestCacheBucketAttribution) ... ok
+test_claude_md_marker_in_prefix (test_metrics_cache_buckets.TestCacheBucketAttribution) ... ok
+test_no_cache_returns_all_zeros (test_metrics_cache_buckets.TestCacheBucketAttribution) ... ok
+test_no_prefix_means_all_other (test_metrics_cache_buckets.TestCacheBucketAttribution) ... ok
+test_proportional_attribution_within_tolerance (test_metrics_cache_buckets.TestCacheBucketAttribution)
+Synthetic prefix with known proportions; assert ±5% per bucket. ... ok
+test_repo_files_attributes_to_repo_files (test_metrics_cache_buckets.TestCacheBucketAttribution) ... ok
+test_validate_command_folds_tool_results_to_validation_context (test_metrics_cache_buckets.TestCacheBucketAttribution) ... ok
+test_accepted_from_merged_commit (test_metrics_lines.TestAccepted) ... ok
+test_accepted_zero_when_completion_ref_empty (test_metrics_lines.TestAccepted) ... ok
+test_accepted_zero_when_no_merge (test_metrics_lines.TestAccepted) ... ok
+test_accepted_with_base_ref_sha_pins_symbolic_head (test_metrics_lines.TestBaseRefShaResolution) ... ok
+test_generated_lazy_resolver_falls_back_on_bad_ref (test_metrics_lines.TestBaseRefShaResolution) ... ok
+test_generated_lazy_resolver_uses_symbolic_branch (test_metrics_lines.TestBaseRefShaResolution) ... ok
+test_generated_with_base_ref_sha_pins_symbolic_head (test_metrics_lines.TestBaseRefShaResolution) ... ok
+test_colon_suffix_sha (test_metrics_lines.TestExtractSha) ... ok
+test_full_40_char_sha (test_metrics_lines.TestExtractSha) ... ok
+test_garbage_returns_none (test_metrics_lines.TestExtractSha) ... ok
+test_local_branch_prefix (test_metrics_lines.TestExtractSha) ... ok
+test_plain_hex (test_metrics_lines.TestExtractSha) ... ok
+test_generated_includes_artifact_writes (test_metrics_lines.TestGenerated) ... ok
+test_generated_lines_from_log (test_metrics_lines.TestGenerated) ... ok
+test_generated_zero_when_no_commits (test_metrics_lines.TestGenerated) ... ok
+test_basic_math (test_metrics_prices.TestCost) ... ok
+test_empty_model_string_no_warning (test_metrics_prices.TestCost) ... ok
+test_unknown_model_warns_once_and_returns_zero (test_metrics_prices.TestCost) ... ok
+test_zero_usage_zero_cost (test_metrics_prices.TestCost) ... ok
+test_missing_file (test_metrics_prices.TestLoad) ... ok
+test_missing_models_key (test_metrics_prices.TestLoad) ... ok
+test_missing_rate_key (test_metrics_prices.TestLoad) ... ok
+test_negative_rate_rejected (test_metrics_prices.TestLoad) ... ok
+test_valid_file (test_metrics_prices.TestLoad) ... ok
+test_basic_totals (test_metrics_summary.TestSummarize) ... ok
+test_no_approves_means_tpb_none (test_metrics_summary.TestSummarize) ... ok
+test_pass2_fields_cache_misses_billable_net_largest_session (test_metrics_summary.TestSummarize)
+Pass-2 A6/A7/A8 — summary surfaces the new fields. ... ok
+test_repair_tokens_after_request_changes (test_metrics_summary.TestSummarize) ... ok
+test_repair_tokens_zero_with_single_outcome (test_metrics_summary.TestSummarize) ... ok
+test_summary_cache_round_trip (test_metrics_summary.TestSummarize) ... ok
+test_v1_rows_tolerated (test_metrics_summary.TestSummarize)
+schema_version=1 rows pass through; cache buckets are empty. ... ok
+test_assistant_without_command_marker_is_other_stage (test_metrics_transcript.TestCorrelate) ... ok
+test_correlator_inherits_command_across_files (test_metrics_transcript.TestCorrelate)
+Pass-2 A1. A slash command issued in file 1 continues to attribute ... ok
+test_prefix_accumulators_grow_monotonically (test_metrics_transcript.TestCorrelate)
+Pass-2 A3. prefix_* fields on each CorrelatedTurn carry the full ... ok
+test_single_command_attributes_assistant_turn (test_metrics_transcript.TestCorrelate) ... ok
+test_skips_non_assistant_records (test_metrics_transcript.TestCorrelate) ... ok
+test_subdirectory_cwd_matches (test_metrics_transcript.TestCorrelate) ... ok
+test_window_excludes_outside_turns (test_metrics_transcript.TestCorrelate) ... ok
+test_workbench_fallback_attributes_known_command (test_metrics_transcript.TestCorrelate)
+Pass-2 A1. When cwd doesn't match the run but the slash command is ... ok
+test_workbench_fallback_off_when_no_command (test_metrics_transcript.TestCorrelate)
+The fallback only fires when a known slash command is active. ... ok
+test_wrong_cwd_falls_into_other (test_metrics_transcript.TestCorrelate) ... ok
+test_missing_dir_returns_empty (test_metrics_transcript.TestFindTranscripts) ... ok
+test_returns_jsonl_sorted (test_metrics_transcript.TestFindTranscripts) ... ok
+test_basic_slash_to_dash (test_metrics_transcript.TestSlugify) ... ok
+test_underscores_and_dots (test_metrics_transcript.TestSlugify) ... ok
+test_writer_creates_metrics_jsonl (test_metrics_writer.TestRecordRunMetrics) ... ok
+test_writer_is_idempotent (test_metrics_writer.TestRecordRunMetrics) ... ok
+test_detached_head_returns_none (test_repos.TestCurrentBranch) ... ok
+test_returns_branch_name (test_repos.TestCurrentBranch) ... ok
+test_delete_branch_removes_ref (test_repos.TestDeleteBranch) ... ok
+test_delete_missing_branch_raises (test_repos.TestDeleteBranch) ... ok
+test_conflict_aborts_and_raises (test_repos.TestMergeNoFf)
+A conflicting merge runs `git merge --abort` and raises with file list. ... ok
+test_dirty_repo_refuses (test_repos.TestMergeNoFf) ... ok
+test_happy_merge_records_no_ff (test_repos.TestMergeNoFf) ... ok
+test_happy_merge_restores_original_branch (test_repos.TestMergeNoFf)
+When we start on a different branch, success restores it via `checkout -`. ... ok
+test_missing_parent_branch_refuses (test_repos.TestMergeNoFf) ... ok
+test_missing_worktree_branch_refuses (test_repos.TestMergeNoFf) ... ok
+test_remove_worktree_cleans_up_path (test_repos.TestRemoveWorktree) ... ok
+test_remove_worktree_missing_path_raises (test_repos.TestRemoveWorktree) ... ok
+test_explicit_branch_returns_as_is (test_repos.TestResolveParentBranch) ... ok
+test_head_resolves_to_current_branch (test_repos.TestResolveParentBranch) ... ok
+test_missing_branch_raises (test_repos.TestResolveParentBranch) ... ok
+test_branch_name_resolves_to_full_sha (test_repos.TestResolveRefToSha) ... ok
+test_head_resolves_to_full_sha (test_repos.TestResolveRefToSha) ... ok
+test_missing_ref_raises (test_repos.TestResolveRefToSha) ... ok
+test_clean_after_init_with_commits (test_repos.TestWorktreeDirtyHelpers) ... ok
+test_dirty_with_staged_change (test_repos.TestWorktreeDirtyHelpers) ... ok
+test_dirty_with_unstaged_change (test_repos.TestWorktreeDirtyHelpers) ... ok
+test_dirty_with_untracked_file (test_repos.TestWorktreeDirtyHelpers) ... ok
+test_run_lock_file_is_gitignored (test_repos.TestWorktreeDirtyHelpers)
+Per-run .lock files inside the workbench runs/ tree must not show ... ok
+test_happy_paths (test_run_ids.TestExtractRunDate) ... ok
+test_rejects_bad_inputs (test_run_ids.TestExtractRunDate) ... ok
+test_uses_provided_date (test_run_ids.TestMakeRunId) ... ok
+test_lowercase_kebab (test_run_ids.TestSlugify) ... ok
+test_rejects_empty_or_punctuation (test_run_ids.TestSlugify) ... ok
+test_unicode_stripped (test_run_ids.TestSlugify) ... ok
+test_target_is_workbench_root_is_self_modifying (test_runs.TestIsSelfModifying) ... ok
+test_unrelated_repo_is_not_self_modifying (test_runs.TestIsSelfModifying) ... ok
+test_list_runs_includes_worktrees (test_runs.TestListRunsUnion) ... Preparing worktree (new branch 'agent/wt')
+HEAD is now at 15555cc init
+ok
+test_find_run_raises_collision_with_both_paths (test_runs.TestRunsEnumeration) ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at 15555cc init
+Preparing worktree (new branch 'agent/wt2')
+HEAD is now at 15555cc init
+ok
+test_find_run_raises_not_found (test_runs.TestRunsEnumeration) ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at 01d48c4 init
+Preparing worktree (new branch 'agent/wt2')
+HEAD is now at 01d48c4 init
+ok
+test_find_run_resolves_master (test_runs.TestRunsEnumeration) ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at 01d48c4 init
+Preparing worktree (new branch 'agent/wt2')
+HEAD is now at 01d48c4 init
+ok
+test_find_run_resolves_worktree (test_runs.TestRunsEnumeration) ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at 01d48c4 init
+Preparing worktree (new branch 'agent/wt2')
+HEAD is now at 01d48c4 init
+ok
+test_iter_all_runs_yields_master_and_worktree (test_runs.TestRunsEnumeration) ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at af81660 init
+Preparing worktree (new branch 'agent/wt2')
+HEAD is now at af81660 init
+ok
+test_removed_worktree_invisible (test_runs.TestRunsEnumeration) ... Preparing worktree (new branch 'agent/wt1')
+HEAD is now at af81660 init
+Preparing worktree (new branch 'agent/wt2')
+HEAD is now at af81660 init
+ok
+test_cache_hit_within_ttl_invokes_git_once (test_runs.TestWorktreeCacheTTL) ... ok
+test_cache_miss_past_ttl_invokes_git_again (test_runs.TestWorktreeCacheTTL) ... ok
+test_config_supplies_ttl (test_runs.TestWorktreeCacheTTL) ... ok
+test_failure_path_caches_empty_for_ttl (test_runs.TestWorktreeCacheTTL)
+Subprocess failures still populate the cache so a single transient ... ok
+test_zero_or_negative_ttl_clamped_to_minimum (test_runs.TestWorktreeCacheTTL)
+A configured TTL of 0 (or negative) would defeat the cache's purpose ... ok
+test_creep_cases (test_scope_check.TestDetectCreep) ... ok
+test_extract_cases (test_scope_check.TestExtractExpectedFiles) ... ok
+test_event_fires_exactly_once_from_start_not_new_run (test_self_modifying.TestSelfModifyingBaseRefResolvedEvent) ... ok
+test_new_run_creates_worktree_and_clean_master (test_self_modifying.TestSelfModifyingNewRun) ... ok
+test_abandoned_banner_structure (test_stop_banner.TestPrintStopBanner) ... ok
+test_border_is_60_columns (test_stop_banner.TestPrintStopBanner) ... ok
+test_done_banner_structure (test_stop_banner.TestPrintStopBanner) ... ok
+test_human_review_banner_structure (test_stop_banner.TestPrintStopBanner) ... ok
+test_invalid_state_raises (test_stop_banner.TestPrintStopBanner) ... ok
+test_no_shell_form_in_any_banner (test_stop_banner.TestPrintStopBanner)
+Cross-state pin: no banner renders the shell-form `agent-workbench` literal. ... ok
+test_other_invalid_states_raise (test_stop_banner.TestPrintStopBanner) ... ok
+test_ready_banner_structure (test_stop_banner.TestPrintStopBanner) ... ok
+test_abandoned_snapshot (test_stop_banner.TestSnapshots) ... ok
+test_done_snapshot (test_stop_banner.TestSnapshots) ... ok
+test_human_review_snapshot (test_stop_banner.TestSnapshots) ... ok
+test_ready_snapshot (test_stop_banner.TestSnapshots) ... ok
+test_write_failure_is_swallowed (test_stop_banner.TestWriteTo) ... ok
+test_write_to_creates_parent_dirs (test_stop_banner.TestWriteTo) ... ok
+test_write_to_none_skips_write (test_stop_banner.TestWriteTo) ... ok
+test_write_to_writes_rendered_banner (test_stop_banner.TestWriteTo) ... ok
+test_lazy_resolve_symbolic_succeeds_when_sha_missing (test_stop_banner_human_review_body.TestDiffstat) ... ok
+test_no_worktree_or_base_ref_returns_unavailable (test_stop_banner_human_review_body.TestDiffstat) ... ok
+test_real_diff_renders_target_format (test_stop_banner_human_review_body.TestDiffstat) ... ok
+test_resolvable_empty_diff_returns_zero_files_changed (test_stop_banner_human_review_body.TestDiffstat) ... ok
+test_unresolvable_symbolic_ref_returns_unavailable (test_stop_banner_human_review_body.TestDiffstat) ... ok
+test_ascii_only_no_color_escapes (test_stop_banner_human_review_body.TestFullBanner) ... ok
+test_five_sections_in_order (test_stop_banner_human_review_body.TestFullBanner) ... ok
+test_no_qa_event_renders_none_recorded (test_stop_banner_human_review_body.TestFullBanner) ... ok
+test_summary_truncation_in_full_banner (test_stop_banner_human_review_body.TestFullBanner) ... ok
+test_no_cfg_body_renders_only_next_moves (test_stop_banner_human_review_body.TestNoConfigFallback) ... ok
+test_five_bullets_truncates_with_tail (test_stop_banner_human_review_body.TestSummaryBullets) ... ok
+test_long_bullet_truncated_at_column_cap (test_stop_banner_human_review_body.TestSummaryBullets) ... ok
+test_missing_human_review_renders_none_recorded (test_stop_banner_human_review_body.TestSummaryBullets) ... ok
+test_nested_rows_are_ignored (test_stop_banner_human_review_body.TestSummaryBullets) ... ok
+test_truncate_inline_collapses_newlines (test_stop_banner_human_review_body.TestSummaryBullets) ... ok
+test_truncate_inline_under_limit_unchanged (test_stop_banner_human_review_body.TestSummaryBullets) ... ok
+test_two_bullets_renders_both_no_tail (test_stop_banner_human_review_body.TestSummaryBullets) ... ok
+test_zero_bullets_renders_none_recorded (test_stop_banner_human_review_body.TestSummaryBullets) ... ok
+test_failed_with_manual_testing_two_sentences (test_stop_banner_human_review_body.TestTestingLine) ... ok
+test_no_qa_event_returns_none_recorded (test_stop_banner_human_review_body.TestTestingLine) ... ok
+test_passed_no_known_issues_no_manual_one_sentence (test_stop_banner_human_review_body.TestTestingLine) ... ok
+test_passed_no_qa_report_at_all_no_second_sentence (test_stop_banner_human_review_body.TestTestingLine) ... ok
+test_passed_with_known_issues_uses_count_form (test_stop_banner_human_review_body.TestTestingLine) ... ok
+test_passed_with_manual_placeholder_no_second_sentence (test_stop_banner_human_review_body.TestTestingLine) ... ok
+test_tests_passed_none_returns_unrecorded_form (test_stop_banner_human_review_body.TestTestingLine) ... ok
+test_evidence_path_rewritten_on_shaping_to_planning (test_transitions.TestStagedLayoutTransitions) ... ok
+test_followups_to_human_review_rejects_missing_sections (test_transitions.TestStagedLayoutTransitions)
+TODO §1f: the HUMAN_REVIEW.md section gate moved from ... ok
+test_abandon_from_each_non_terminal (test_transitions.TestTransitions) ... ok
+test_bounce_loop (test_transitions.TestTransitions) ... ok
+test_building_to_validating_rejects_missing_build_evidence (test_transitions.TestTransitions) ... ok
+test_empty_string_evidence_rejected (test_transitions.TestTransitions) ... ok
+test_followups_to_human_review_requires_followups_path (test_transitions.TestTransitions) ... ok
+test_full_happy_path (test_transitions.TestTransitions) ... ok
+test_missing_evidence_rejected (test_transitions.TestTransitions) ... ok
+test_secondary_events_emitted (test_transitions.TestTransitions) ... ok
+test_terminal_cannot_transition (test_transitions.TestTransitions) ... ok
+test_unknown_transition_rejected (test_transitions.TestTransitions) ... ok
+test_blast_radius_with_symbolic_head_and_sha (test_validate_context_build.TestBlastRadiusBuild)
+TODO §3 item 2a: blast_radius must honor base_ref_sha when ... ok
+test_empty_diff (test_validate_context_build.TestBlastRadiusBuild) ... ok
+test_missing_worktree (test_validate_context_build.TestBlastRadiusBuild) ... ok
+test_simple_diff_renders_depth_1 (test_validate_context_build.TestBlastRadiusBuild) ... ok
+test_build_blast_radius_prefers_sha (test_validate_context_build.TestPrefersBaseRefSha) ... ok
+test_build_prefers_sha_over_symbolic_HEAD (test_validate_context_build.TestPrefersBaseRefSha) ... ok
+test_falls_back_to_symbolic_when_sha_missing (test_validate_context_build.TestPrefersBaseRefSha) ... ok
+test_diff_section_includes_stat (test_validate_context_build.TestValidateContextBuild) ... ok
+test_diff_section_with_symbolic_head_and_sha (test_validate_context_build.TestValidateContextBuild)
+TODO §3 item 2a: when base_ref is symbolic 'HEAD', a passed ... ok
+test_diff_section_with_symbolic_head_no_sha_falls_back (test_validate_context_build.TestValidateContextBuild)
+Without base_ref_sha, the symbolic 'HEAD' resolves to the ... ok
+test_handles_missing_inputs (test_validate_context_build.TestValidateContextBuild) ... ok
+test_plan_filter_fallback_when_no_references (test_validate_context_build.TestValidateContextBuild) ... ok
+test_plan_filter_keeps_only_referenced_ids (test_validate_context_build.TestValidateContextBuild) ... ok
+test_renders_all_sections (test_validate_context_build.TestValidateContextBuild) ... ok
+test_uncommitted_changes_appear_in_files_changed (test_validate_context_build.TestValidateContextBuild)
+Uncommitted (staged but not committed) edits must show up under ... ok
+test_untracked_files_appear_in_files_changed (test_validate_context_build.TestValidateContextBuild)
+Untracked files must show up under the Untracked section. ... ok
+test_write_creates_parent_dir (test_validate_context_build.TestValidateContextBuild) ... ok
+test_appends_turns_when_high (test_validate_init_handoff_block.TestBoardMetricsLine) ... ok
+test_no_suffix_below_threshold (test_validate_init_handoff_block.TestBoardMetricsLine) ... ok
+test_no_suffix_when_none (test_validate_init_handoff_block.TestBoardMetricsLine) ... ok
+test_prints_block_when_over_threshold (test_validate_init_handoff_block.TestFreshSessionHandoffBlock) ... ok
+test_silent_when_no_metrics_yet (test_validate_init_handoff_block.TestFreshSessionHandoffBlock) ... ok
+test_silent_when_under_threshold (test_validate_init_handoff_block.TestFreshSessionHandoffBlock) ... ok
+test_defaults_to_100 (test_validate_init_handoff_block.TestSessionStalenessThreshold) ... ok
+test_falls_back_to_default_on_bad_value (test_validate_init_handoff_block.TestSessionStalenessThreshold) ... ok
+test_reads_configured_value (test_validate_init_handoff_block.TestSessionStalenessThreshold) ... ok
+test_comments_stripped (test_yaml_io.TestYamlIO) ... ok
+test_list_of_maps (test_yaml_io.TestYamlIO) ... ok
+test_list_of_scalars (test_yaml_io.TestYamlIO) ... ok
+test_nested_map (test_yaml_io.TestYamlIO) ... ok
+test_rejects_unsupported_yaml (test_yaml_io.TestYamlIO) ... ok
+test_round_trip_template_shape (test_yaml_io.TestYamlIO) ... ok
+test_scalars (test_yaml_io.TestYamlIO) ... ok
+
+======================================================================
+FAIL: test_bounce_pass2_snapshot (test_human_review.TestSnapshotRender)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agentic-development-task-system-v3-ai/20260527__schema-level-validation-for-metadata-yaml/agentic-development-task-system-v3__ai/agent-workbench-live/tests/test_human_review.py", line 577, in test_bounce_pass2_snapshot
+    self._check_snapshot(run_dir, "human_review_bounce_pass2.expected.md")
+  File "/Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agentic-development-task-system-v3-ai/20260527__schema-level-validation-for-metadata-yaml/agentic-development-task-system-v3__ai/agent-workbench-live/tests/test_human_review.py", line 547, in _check_snapshot
+    self.assertMultiLineEqual(expected, rendered)
+AssertionError: '# Hu[17 chars]-05-22-bounce-snap\n\n## Files\n\n- **Brief** [2352 chars]ed\n' != '# Hu[17 chars]-05-27-bounce-snap\n\n## Files\n\n- **Brief** [2504 chars]ed\n'
+Diff is 2976 characters long. Set self.maxDiff to None to see it.
+
+======================================================================
+FAIL: test_happy_snapshot (test_human_review.TestSnapshotRender)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agentic-development-task-system-v3-ai/20260527__schema-level-validation-for-metadata-yaml/agentic-development-task-system-v3__ai/agent-workbench-live/tests/test_human_review.py", line 553, in test_happy_snapshot
+    self._check_snapshot(run_dir, "human_review_happy.expected.md")
+  File "/Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agentic-development-task-system-v3-ai/20260527__schema-level-validation-for-metadata-yaml/agentic-development-task-system-v3__ai/agent-workbench-live/tests/test_human_review.py", line 547, in _check_snapshot
+    self.assertMultiLineEqual(expected, rendered)
+AssertionError: '# Hu[17 chars]-05-22-happy-snap\n\n## Files\n\n- **Brief** —[1856 chars]ed\n' != '# Hu[17 chars]-05-27-happy-snap\n\n## Files\n\n- **Brief** —[2008 chars]ed\n'
+Diff is 2465 characters long. Set self.maxDiff to None to see it.
+
+----------------------------------------------------------------------
+Ran 415 tests in 93.242s
+
+FAILED (failures=2)

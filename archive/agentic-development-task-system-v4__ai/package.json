@@ -1,0 +1,47 @@
+{
+  "name": "agent-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first control plane and dashboard for managing agentic development tasks.",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/*\" build",
+    "fix-sqlite-binding": "node scripts/fix-sqlite-binding.mjs",
+    "postinstall": "node scripts/fix-sqlite-binding.mjs",
+    "predaemon": "node scripts/fix-sqlite-binding.mjs",
+    "daemon": "pnpm --filter @workbench/daemon dev",
+    "preseed": "node scripts/fix-sqlite-binding.mjs",
+    "web": "pnpm --filter @workbench/web dev",
+    "wb": "tsx packages/client/src/cli.ts",
+    "seed": "pnpm --filter @workbench/daemon seed",
+    "preproof": "node scripts/fix-sqlite-binding.mjs",
+    "proof": "node scripts/drive.mjs --scenario proof --mode proof",
+    "predemo": "node scripts/fix-sqlite-binding.mjs",
+    "demo": "node scripts/drive.mjs --scenario tictactoe --mode record",
+    "prelive": "node scripts/fix-sqlite-binding.mjs",
+    "live": "node scripts/drive.mjs --scenario tictactoe --mode headless",
+    "drive": "node scripts/drive.mjs",
+    "verify:memory": "tsx scripts/verify-memory-summary.ts",
+    "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @workbench/web e2e",
+    "test:all": "pnpm -r test && pnpm --filter @workbench/web e2e",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "check": "biome check .",
+    "check:fix": "biome check --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.16",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "typescript": "^5.5.4",
+    "vitest": "^2.0.5",
+    "tsx": "^4.16.5"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

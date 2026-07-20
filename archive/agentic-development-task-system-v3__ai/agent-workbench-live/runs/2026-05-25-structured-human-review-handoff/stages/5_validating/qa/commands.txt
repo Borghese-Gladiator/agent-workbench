@@ -1,0 +1,4 @@
+python -m pytest agent-workbench-live/tests/
+python -m pytest agent-workbench-live/tests/test_stop_banner.py agent-workbench-live/tests/test_stop_banner_human_review_body.py -v
+python -m pytest agent-workbench-live/tests/test_e2e.py -v
+WRITE_SNAPSHOTS=1 python -m pytest agent-workbench-live/tests/test_stop_banner.py::TestSnapshots -v

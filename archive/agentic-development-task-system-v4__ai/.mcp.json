@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "workbench": {
+      "command": "pnpm",
+      "args": ["--filter", "@workbench/mcp", "dev"],
+      "env": {
+        "WORKBENCH_URL": "http://127.0.0.1:4417"
+      }
+    }
+  }
+}

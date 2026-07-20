@@ -1,0 +1,183 @@
+schema_version: 1
+kind: run_metadata_schema
+
+# Load-bearing schema for runs/<run_id>/metadata.yaml.
+# Consumed by lib/metadata.py:_validate_against_schema. Edit here, not in code.
+#
+# Field shape:
+#   type:      str | int | bool | dict | list | null  (single or list-of for unions)
+#   required:  true | false (default: false)
+#   enum:      list of allowed scalar values
+#   eq:        single value the field must equal
+#   keys:      dict of nested field name -> field shape (only meaningful when type contains dict)
+#   free_form: true skips deep validation under this key (top-level presence + dict type still checked)
+#
+# Two blocks are intentionally free_form per TODO §7:
+#   - scope: scope.kind/summary vary; CLI validates scope_kind on write.
+#   - artifacts: per-stage subset varies; presence is enforced by stage commands, not here.
+
+schema:
+  schema_version:
+    type: int
+    required: true
+    eq: 1
+  run_id:
+    type: str
+    required: true
+  status:
+    type: str
+    required: true
+    enum:
+      - draft
+      - shaping
+      - planning
+      - ready
+      - building
+      - validating
+      - followups
+      - human_review
+      - done
+      - abandoned
+  created_at:
+    type: str
+    required: true
+  updated_at:
+    type: str
+    required: true
+  target:
+    type: dict
+    required: true
+    keys:
+      repo:
+        type: dict
+        required: true
+        keys:
+          mode:
+            type: str
+            required: true
+            enum:
+              - existing
+              - new
+          path:
+            type: str
+            required: true
+          name:
+            type: str
+            required: true
+          base_ref:
+            type: str
+            required: true
+          base_ref_sha:
+            type:
+              - str
+              - "null"
+            required: false
+          fingerprint:
+            type:
+              - str
+              - "null"
+            required: false
+          created_by_run:
+            type:
+              - str
+              - "null"
+            required: false
+      worktree:
+        type: dict
+        required: true
+        keys:
+          name:
+            type: str
+            required: true
+          path:
+            type:
+              - str
+              - "null"
+            required: false
+          branch_name:
+            type: str
+            required: true
+          created:
+            type: bool
+            required: true
+          base_ref:
+            type: str
+            required: true
+          initial_commit_sha:
+            type:
+              - str
+              - "null"
+            required: false
+  scope:
+    type: dict
+    required: true
+    free_form: true
+  artifacts:
+    type: dict
+    required: true
+    free_form: true
+  validation:
+    type: dict
+    required: true
+    keys:
+      required:
+        type: bool
+        required: true
+      review_completed:
+        type: bool
+        required: true
+      qa_completed:
+        type: bool
+        required: true
+      qa_recorded:
+        type: bool
+        required: true
+      tests_passed:
+        type:
+          - bool
+          - "null"
+        required: false
+      known_issues_count:
+        type: int
+        required: true
+  completion:
+    type: dict
+    required: true
+    keys:
+      accepted_by:
+        type:
+          - str
+          - "null"
+        required: false
+      completion_ref:
+        type:
+          - str
+          - "null"
+        required: false
+      completed_at:
+        type:
+          - str
+          - "null"
+        required: false
+      abandoned_reason:
+        type:
+          - str
+          - "null"
+        required: false
+  build:
+    type: dict
+    required: false
+    keys:
+      iterations:
+        type:
+          - int
+          - "null"
+        required: false
+      exit_reason:
+        type:
+          - str
+          - "null"
+        required: false
+      max_iterations:
+        type: int
+        required: false

@@ -1,0 +1,83 @@
+> Extracted from `docs/TODO.md` §5 on 2026-05-27.
+
+## 5. Generalize the `*-context.md` cross-stage contract (cont'd — `plan-context.md`, `followups-context.md`, `shape-context.md`)
+
+The 2026-05-25 `generalize-stage-context-md` run shipped `build-context.md` (the highest-leverage of the four siblings) but explicitly deferred the other three to follow-up runs. This section tracks those follow-ups. The original framing from the 2026-05-25 brief still holds; only `build-context.md` and its wiring are removed from the task list.
+
+The leverage is twofold:
+
+1. **Cache footprint.** File reads in the master session stick in the prefix forever. Today the builder typically reads `brief.md` + `plan.md` + occasional `decisions.md` lookups; the reviewer (without the curated context) would read all of those plus the QA report plus the build summary. Each is a permanent prefix cost. One curated file per stage collapses that into a single read.
+2. **Subagent-readiness.** A self-contained `<stage>-context.md` is the natural input for an Agent-tool subagent — the master spawns the subagent with that one file as context, the subagent's reads don't pollute the master's prefix, the master gets back structured findings. This is the same pattern the existing `Explore` rule uses; the cross-stage contract makes it the default shape for every LLM-bearing stage. The pre-PR adversarial reviewer (§10 `publishing` stage) depends on this — `validate-context.md` and `build-context.md` are already shaped right, but `plan-context.md` would need to exist before the subagent pattern can extend to the planning stage.
+
+### What each remaining file contains
+
+**`shape-context.md`** (written by `shape --init`)
+- Original raw idea (verbatim from `raw-idea.md`)
+- Answers from `answers.md` if present
+- `brief.md` template skeleton inlined with one-line section descriptions
+- The two shaping rules: no code reading, no questions
+
+This one is thinnest — shaping has the least prior context to filter. The win is mostly inlining the template so the agent doesn't context-switch into `templates/`.
+
+**`plan-context.md`** (written by `plan --init`)
+- Full `brief.md` (small, load-bearing)
+- Repo map: top-level dirs, detected languages, build/test commands from `agent-workbench.yaml` policies or inferred from the worktree
+- `brief.md`'s "Files likely to change" lifted inline (the planner should validate or refute this)
+- `plan.md` template skeleton with section descriptions
+- Rules reminder: may read code, may not ask questions, record assumptions
+
+**`build-context.md`** — shipped 2026-05-25 in run `2026-05-25-generalize-stage-context-md` (merge commit `c075b0c`). Lifts brief's Acceptance criteria + Non-goals, plan's Proposed changes + Files likely to change + Test plan + Definition of done, all DR/ASM blocks, worktree metadata, and the build.md template skeleton.
+
+**`validate-context.md`** — already existed before 2026-05-25. This is the design template.
+
+**`followups-context.md`** (written by `followups --init`)
+- Brief's Non-goals (frequent source of follow-up candidates)
+- Plan's Risks section
+- Review's Decision + findings
+- QA's Known issues
+- Build's Deviations from plan
+- `follow-ups.md` schema (category enum, frontmatter rules)
+- Rules reminder: read-only, 1–5 entries or `no_followups` sentinel
+
+### Tasks
+
+- [x] Build `build-context.md` first — highest leverage, lowest risk. **Shipped 2026-05-25** in run `2026-05-25-generalize-stage-context-md` (merge `c075b0c`).
+- [ ] Build `plan-context.md` next. Will require some new code: detecting repo languages and surfacing build/test commands from `agent-workbench.yaml` policies. Some of this overlap with `repo-map`-style work the planner does today; the goal is to make that deterministic and front-loaded.
+- [ ] Build `followups-context.md`. Likely thin — most of what it needs is already in the staged artifacts; the deterministic builder is mostly a filter + headline rollup.
+- [ ] Build `shape-context.md` last (or skip if the inlined-template gain doesn't justify the code).
+- [ ] For each, update the corresponding `.claude/commands/*.md` so step 1 reads `<stage>-context.md` rather than the prior artifacts directly. Mirror the `validate.md` step 2 language: "Do NOT re-read X if `<stage>-context.md` already covers what you need." For building, this is the new `/build` slash command (§3).
+- [ ] Document the contract in `docs/lifecycle.md` — add a `*-context.md` row to each remaining stage's table, sibling to "Reads" and "Produces." (Building stage is already documented; the others follow.)
+- [ ] Each new `<stage>-context.md` builder gets unit tests that mirror `tests/test_build_context.py`'s shape (or `tests/test_validate_context_build.py`'s — both work) — synthetic prior artifacts → assert the generated context has the expected sections.
+
+### Acceptance
+
+- Every LLM-bearing stage (`shape`, `plan`, `build`, `validate`, `followups`) has a `<stage>-context.md` generated by `--init` before the agent reads anything. Building is done; three remain.
+- A spot-check of three runs after the change shows the master session's prefix during each stage growing primarily from the curated file plus the worktree code the agent actively edits — not from re-reads of prior artifacts.
+
+### Non-goals
+
+Changing the artifact contents themselves (brief/plan/build/review keep their current sections); merging stages or changing the lifecycle; replacing template-driven artifact authoring with anything generative; building a `repo-map.md` artifact separate from `plan-context.md`'s repo-map section (keep it inline for now); shipping `/build` (that's §3's territory now).
+
+### Origin
+
+Surfaced 2026-05-25 in a design conversation comparing agent-workbench to a proposed planner/implementer/reviewer/PR-writer system. The proposed system's "shared durable context, not many independent workers" framing matched what `validate-context.md` already does — but agent-workbench only built that pattern for the validate boundary. Generalizing is straightforward and the cache-discipline payoff is concrete. Build-context.md shipped 2026-05-25 (merge `c075b0c`); the remaining three siblings stay TODO. Renumbered to §5 on 2026-05-27 — originally §3 when `/build` was promoted to §1, then §4 once the master-side metadata reconciliation TODO took §1, then §5 once the worktree-at-draft TODO took §2.
+
+---
+
+## Investigation note (added by /new-run handoff)
+
+User requested investigation of the broader file set before writing code. Beyond the artifacts named in the §5 task list, the implementer should examine:
+
+- The existing `build-context.md` implementation as the design template: `lib/build_context.py`, `tests/test_build_context.py`, `lib/cli/cmd_start.py` (`_write_build_context_artifacts`).
+- The pre-existing `validate-context.md` as the originating pattern: `lib/validate_context.py`, `tests/test_validate_context_build.py`, `lib/cli/cmd_validate.py` (the `--init` write site + the try/except swallow pattern).
+- The three target stage commands that will gain `--init` write sites: `lib/cli/cmd_shape.py`, `lib/cli/cmd_plan.py`, `lib/cli/cmd_followups.py`.
+- The three slash command bodies that need step-1 language updates: `agent-workbench-live/.claude/commands/shape.md`, `plan.md`, `followups.md`.
+- The templates that get inlined into each context file: `templates/brief.md`, `templates/plan.md`, `templates/follow-ups.md` (and the raw-idea/answers files for shape).
+- `agent-workbench.yaml` policies block — `plan-context.md` lifts build/test commands from here.
+- `docs/lifecycle.md` — the stage tables that need a `*-context.md` row sibling to "Reads" and "Produces."
+- Whether to extend or refactor a shared helper (similar question to §3's lift of `_write_build_context_artifacts` to a public `lib.build_context.materialize_for_run`). The three new generators will all share the "render to file, swallow exceptions, never block transition" pattern.
+
+The shaping/planning stages should produce a concrete decision on:
+- Order of work (the §5 task list suggests `plan-context.md` first, then `followups-context.md`, then `shape-context.md`).
+- Whether to ship all three in one run or split across runs.
+- Whether `shape-context.md` is worth building at all given the §5 note that it may be skipped if the inlined-template gain doesn't justify the code.

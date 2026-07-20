@@ -1,0 +1,20 @@
+# Bounce-pass 2 QA commands. Cwd resets between Bash calls, so each command
+# uses a python os.chdir shim to land in the worktree before invoking
+# unittest. Run from any shell.
+
+# 1) Focused subset (the new generators + the new regression test). 56/56 pass.
+python -c "import os, sys; os.chdir('/Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agentic-development-task-system-v3-ai/20260527__generalize-stage-context-md-followups/agentic-development-task-system-v3__ai/agent-workbench-live'); sys.path.insert(0, '.'); os.execvp('python', ['python', '-m', 'unittest', 'tests.test_cmd_validate_followups_handoff', 'tests.test_shape_context', 'tests.test_plan_context', 'tests.test_followups_context', '-v'])"
+
+# 2) Full discovery. 444/451 pass; 7 pre-existing failures unchanged.
+python -c "import os, sys; os.chdir('/Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agentic-development-task-system-v3-ai/20260527__generalize-stage-context-md-followups/agentic-development-task-system-v3__ai/agent-workbench-live'); sys.path.insert(0, '.'); os.execvp('python', ['python', '-m', 'unittest', 'discover', 'tests', '-v'])"
+
+# 3) Live smoke test (run after writing review.md + qa/report.md).
+# Finalizes the validate stage by transitioning validating -> followups.
+# NB: see qa/report.md "Smoke scripts" + review.md "Surprises" for the
+# self-modifying methodology caveat (the CLI dispatches to master, not
+# the worktree, so the fix isn't exercised by this smoke until merge).
+/Users/timothy.shee/GitHub/new-tech-monorepo/agentic-development-task-system-v3__ai/agent-workbench-live/bin/agent-workbench validate 2026-05-27-generalize-stage-context-md-followups
+
+# 4) Post-finalize filesystem checks.
+ls /Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agentic-development-task-system-v3-ai/20260527__generalize-stage-context-md-followups/agentic-development-task-system-v3__ai/agent-workbench-live/runs/2026-05-27-generalize-stage-context-md-followups/stages/6_followups/
+/Users/timothy.shee/GitHub/new-tech-monorepo/agentic-development-task-system-v3__ai/agent-workbench-live/bin/agent-workbench show 2026-05-27-generalize-stage-context-md-followups

@@ -1,0 +1,6 @@
+============================================================
+STOP. State: done (terminal).
+The run is accepted and merged.
+
+Terminal state. No further action.
+============================================================

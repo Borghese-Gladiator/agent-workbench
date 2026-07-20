@@ -1,0 +1,34 @@
+node_modules/
+dist/
+*.log
+
+# Local env overrides (see .env.example).
+.env
+
+# Playwright e2e output (videos/traces/report) + the temp-path handoff file.
+e2e-artifacts/
+demo-artifacts/
+# Generated profiling reports (regenerable from a run's SQLite via `wb task profile`).
+profiling-reports/
+**/e2e/.env-paths.json
+playwright-report/
+test-results/
+
+# Playwright MCP browser-automation session dumps (console logs + page snapshots).
+.playwright-mcp/
+
+# Local-first runtime data — never committed.
+data/
+*.sqlite
+*.sqlite-journal
+*.db
+
+# Claude Code — keep shared config (skills/commands/settings.json),
+# ignore machine-local and ephemeral bits.
+.claude/worktrees/
+.claude/settings.local.json
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/

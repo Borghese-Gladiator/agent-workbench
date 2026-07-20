@@ -1,0 +1,748 @@
+diff --git a/src/learning/_pattern_owners_generated.py b/src/learning/_pattern_owners_generated.py
+index d03e732401fc2..18d028245cbfa 100644
+--- a/src/learning/_pattern_owners_generated.py
++++ b/src/learning/_pattern_owners_generated.py
+@@ -4138,6 +4138,7 @@
+         r"^ajax/performance-dashboard/(?P<dashboard_id>[^/]+)/widget/(?P<pk>[^/.]+)/download$": "reporting",
+         r"^ajax/performance-dashboard/(?P<dashboard_id>[^/]+)/widget/(?P<pk>[^/.]+)/process$": "reporting",
+         r"^ajax/performance-dashboard/(?P<pk>[^/.]+)$": "reporting",
++        r"^ajax/performance-dashboard/(?P<pk>[^/.]+)/visible-widget-count$": "reporting",
+         r"^ajax/performance-dashboard/config/(?P<pk>[^/.]+)$": "reporting",
+         r"^ajax/report-builder/(?P<format>\.[a-z0-9]+/?)\Z": "reporting",
+         r"^ajax/report-builder/\Z": "reporting",
+diff --git a/src/learning/app/custom_analytics/dashboard_service.py b/src/learning/app/custom_analytics/dashboard_service.py
+index 6e9bfa2f2a7fb..2d298f651f0f3 100644
+--- a/src/learning/app/custom_analytics/dashboard_service.py
++++ b/src/learning/app/custom_analytics/dashboard_service.py
+@@ -3,14 +3,20 @@
+ import hashlib
+ import logging
+ from datetime import date
+-from typing import Iterator, Optional
++from typing import Iterable, Iterator, Optional
+ 
+ import arrow
++import sentry_sdk
+ from arrow import Arrow
+ from django.db import transaction
+ from django_statsd.clients import statsd
+ 
+ from klaviyo.core.domains import DomainClient, observe_boundary
++from klaviyo.internal_experimentation.statsig_context import (
++    StatsigContext,
++    StatsigUserField,
++)
++from klaviyo.internal_experimentation.statsig_sdk_manager import statsig_client
+ 
+ from app.custom_analytics.data_services.dashboards import (
+     PerformanceDashboardDataService,
+@@ -306,6 +312,13 @@
+ WIDGET_TYPES_WITH_DETAILS = frozenset({WidgetType.SINGLE_METRIC})
+ 
+ 
++_MULTI_CHANNEL_FUNNEL_SUMMARY_GATE = "reporting_enable_multi_channel_funnel_widget"
++_FUNNEL_SUMMARY_HIDDEN_WHEN_FLAG_ON = frozenset(
++    {WidgetSubtype.EMAIL, WidgetSubtype.SMS, WidgetSubtype.PUSH}
++)
++_FUNNEL_SUMMARY_HIDDEN_WHEN_FLAG_OFF = frozenset({WidgetSubtype.BY_CHANNEL})
++
++
+ @observe_boundary(DomainClient.EVENT_REPORTING)
+ class PerformanceDashboardService:
+     _MAX_DASHBOARDS_PER_COMPANY = 20
+@@ -358,6 +371,30 @@ def _widget_storage_service(self) -> WidgetStorageService:
+     def _statistic_service(self) -> StatisticService:
+         return StatisticService()
+ 
++    @cached_property
++    def _is_multi_channel_funnel_summary_enabled_cache(self) -> dict[str, bool]:
++        return {}
++
++    def _is_multi_channel_funnel_summary_enabled(self, company_id: str) -> bool:
++        if company_id in self._is_multi_channel_funnel_summary_enabled_cache:
++            return self._is_multi_channel_funnel_summary_enabled_cache[company_id]
++
++        try:
++            statsig_user = StatsigContext(
++                custom_ids={StatsigUserField.COMPANY_ID: company_id}
++            ).generate_finalized_statsig_user()
++            is_enabled = statsig_client().check_gate(
++                statsig_user, _MULTI_CHANNEL_FUNNEL_SUMMARY_GATE
++            )
++        except Exception as e:
++            with sentry_sdk.push_scope() as scope:
++                scope.set_tag("company_id", company_id)
++                scope.set_tag("gate_name", _MULTI_CHANNEL_FUNNEL_SUMMARY_GATE)
++                sentry_sdk.capture_exception(e)
++            is_enabled = False
++        self._is_multi_channel_funnel_summary_enabled_cache[company_id] = is_enabled
++        return is_enabled
++
+     def refresh_dashboard_if_old(
+         self,
+         company_id: str,
+@@ -367,13 +404,37 @@ def refresh_dashboard_if_old(
+         """
+         Returns True if dashbboard is updated, else False
+         """
+-        if dashboard.last_run:
+-            update_if_older_than_time = arrow.now().shift(hours=-hours_threshold)
+-            if dashboard.last_run >= update_if_older_than_time:
+-                return False
+ 
+-        self.trigger_dashboard_update_task(company_id, dashboard.dashboard_id)
+-        return True
++        # if stale, refresh dashboard
++        threshold = arrow.now().shift(hours=-hours_threshold)
++        if not dashboard.last_run or dashboard.last_run < threshold:
++            try:
++                self.trigger_dashboard_update_task(company_id, dashboard.dashboard_id)
++            except UnableToObtainConcurrencyLockException:
++                return False
++            return True
++
++        # if widget is NOT_RUN, then run it here
++        triggered_any_widgets = False
++        not_run_widgets = [
++            w
++            for w in self._visible_widgets(company_id, dashboard.dashboard_id)
++            if w.status == WidgetStatus.NOT_RUN
++        ]
++        for widget in not_run_widgets:
++            try:
++                self.trigger_widget_update_task(widget, ignore_concurrency_lock=True)
++                triggered_any_widgets = True
++            except Exception:
++                logger.exception(
++                    "Failed to trigger NOT_RUN widget update",
++                    extra={
++                        "company_id": company_id,
++                        "dashboard_id": dashboard.dashboard_id,
++                        "widget_id": widget.widget_id,
++                    },
++                )
++        return triggered_any_widgets
+ 
+     def get_dashboard_or_none(
+         self, company_id: str, dashboard_id: str
+@@ -432,6 +493,14 @@ def get_dashboards(
+         """
+         return self._data_service.get_dashboards(company_id, dashboard_type)
+ 
++    def get_visible_widget_count(self, company_id: str, dashboard_id: str) -> int:
++        """Get number of visible widgets for a dashboard based on which widgets are hidden behind feature flags"""
++        if not self._data_service.get_dashboard_or_none(company_id, dashboard_id):
++            raise PerformanceDashboardDoesNotExist()
++        return self._get_max_visible_count(
++            self._data_service.get_widgets(company_id, dashboard_id)
++        )
++
+     def get_widgets(self, company_id: str, dashboard_id: str) -> Iterator[WidgetData]:
+         """Get all Performance Dashboard Widgets for a Company's Performance Dashboard.
+ 
+@@ -447,7 +516,7 @@ def get_widgets(self, company_id: str, dashboard_id: str) -> Iterator[WidgetData
+         """
+         if not self._data_service.get_dashboard_or_none(company_id, dashboard_id):
+             raise PerformanceDashboardDoesNotExist()
+-        return self._data_service.get_widgets(company_id, dashboard_id)
++        return self._visible_widgets(company_id, dashboard_id)
+ 
+     def create_default_dashboard(
+         self, company_id: str, conversion_metric_id: str
+@@ -741,7 +810,7 @@ def create_widget(
+         existing_widgets = list(
+             self._data_service.get_widgets(company_id, dashboard_id, False)
+         )
+-        if len(existing_widgets) >= self._MAX_WIDGETS_PER_DASHBOARD:
++        if self._would_exceed_widget_limit(existing_widgets, type_, subtype):
+             raise TooManyPerformanceDashboardWidgets(self._MAX_WIDGETS_PER_DASHBOARD)
+ 
+         widget_stat_name = (
+@@ -1061,7 +1130,8 @@ def trigger_dashboard_update_task(
+             self._concurrency_lock.release(company_id, dashboard_id)
+             raise PerformanceDashboardDoesNotExist()
+ 
+-        widgets = self._data_service.get_widgets(company_id, dashboard_id)
++        # Skip hidden widgets, so we don't enqueue celery work for hidden widgets
++        widgets = list(self._visible_widgets(company_id, dashboard_id))
+ 
+         try:
+             for widget in widgets:
+@@ -1128,6 +1198,82 @@ def trigger_widget_update_task(
+             )
+             raise
+ 
++    @staticmethod
++    def _filter_visible(
++        widgets: Iterable[WidgetData],
++        widget_subtype: frozenset[WidgetSubtype],
++    ) -> Iterator[WidgetData]:
++        """
++        Check widgets based on feature flag status of widget subtype
++        (currently only Funnel Summary feature flag)
++        """
++        return (
++            w
++            for w in widgets
++            if not (w.type == WidgetType.FUNNEL_SUMMARY and w.subtype in widget_subtype)
++        )
++
++    def _visible_widgets(
++        self, company_id: str, dashboard_id: str
++    ) -> Iterator[WidgetData]:
++        """Get filtered list of widgets based on feature flag status of widget subtype"""
++        widget_subtype = (
++            _FUNNEL_SUMMARY_HIDDEN_WHEN_FLAG_ON
++            if self._is_multi_channel_funnel_summary_enabled(company_id)
++            else _FUNNEL_SUMMARY_HIDDEN_WHEN_FLAG_OFF
++        )
++        return self._filter_visible(
++            self._data_service.get_widgets(company_id, dashboard_id), widget_subtype
++        )
++
++    def _get_max_visible_count(self, widgets: Iterable[WidgetData]) -> int:
++        """Max visible widget count across both funnel-summary flag states."""
++        widgets = list(widgets)
++        return max(
++            sum(
++                1
++                for _ in self._filter_visible(
++                    widgets, _FUNNEL_SUMMARY_HIDDEN_WHEN_FLAG_ON
++                )
++            ),
++            sum(
++                1
++                for _ in self._filter_visible(
++                    widgets, _FUNNEL_SUMMARY_HIDDEN_WHEN_FLAG_OFF
++                )
++            ),
++        )
++
++    def _would_exceed_widget_limit(
++        self,
++        existing_widgets: Iterable[WidgetData],
++        new_type: WidgetType,
++        new_subtype: WidgetSubtype,
++    ) -> bool:
++        """Check if adding a widget would exceed the max widget limit."""
++        widgets = list(existing_widgets)
++
++        hidden_subtype_options = (
++            _FUNNEL_SUMMARY_HIDDEN_WHEN_FLAG_ON,
++            _FUNNEL_SUMMARY_HIDDEN_WHEN_FLAG_OFF,
++        )
++
++        for hidden_subtypes in hidden_subtype_options:
++            visible_count = sum(
++                1 for _ in self._filter_visible(widgets, hidden_subtypes)
++            )
++
++            new_widget_is_hidden = (
++                new_type == WidgetType.FUNNEL_SUMMARY and new_subtype in hidden_subtypes
++            )
++
++            post_add_count = visible_count + int(not new_widget_is_hidden)
++
++            if post_add_count > self._MAX_WIDGETS_PER_DASHBOARD:
++                return True
++
++        return False
++
+     def _spawn_dashboard_update_task(self, dashboard: PerformanceDashboardData):
+         process_performance_dashboard.apply_async_or_raise_exception(
+             args=(
+diff --git a/src/learning/app/custom_analytics/data_services/types/dashboards.py b/src/learning/app/custom_analytics/data_services/types/dashboards.py
+index 86ffa058e8513..efe20e94416f8 100644
+--- a/src/learning/app/custom_analytics/data_services/types/dashboards.py
++++ b/src/learning/app/custom_analytics/data_services/types/dashboards.py
+@@ -94,6 +94,8 @@ class WidgetStatus(IntEnum):
+     LOADING = 2
+     COMPLETE = 3
+     ERROR = 4
++    # Needs initial processing after migration.
++    NOT_RUN = 5
+ 
+     def get_statsd_key(self) -> str:
+         return self.name.lower()
+diff --git a/src/learning/app/custom_analytics/views/performance_dashboards.py b/src/learning/app/custom_analytics/views/performance_dashboards.py
+index 94f4c0e71faef..7bd97d665f8d9 100644
+--- a/src/learning/app/custom_analytics/views/performance_dashboards.py
++++ b/src/learning/app/custom_analytics/views/performance_dashboards.py
+@@ -250,6 +250,24 @@ def list(self, request: Request) -> Response:
+ 
+         return Response(PerformanceDashboardSerializer(dashboards, many=True).data)
+ 
++    @action(detail=True, url_path="visible-widget-count")
++    def visible_widget_count(self, request: Request, pk: str) -> Response:
++        """Return the effective widget count used to enforce the per-dashboard limit.
++
++        This maps to GET /ajax/performance-dashboard/{pk}/visible-widget-count
++        """
++        company_id = request.profile.company.id
++        try:
++            return Response(
++                {
++                    "visible_widget_count": self._performance_dashboard_service.get_visible_widget_count(
++                        company_id, pk
++                    )
++                }
++            )
++        except PerformanceDashboardDoesNotExist:
++            raise NotFound(DASHBOARD_NOT_FOUND_MESSAGE) from None
++
+ 
+ class PerformanceDashboardConfigViewSet(ViewSet, CustomAnalyticsViewMixin):
+     """CRUD views for configuring Performance Dashboard objects.
+diff --git a/tests/custom_analytics/test_dashboard_service.py b/tests/custom_analytics/test_dashboard_service.py
+index 940514a13fd09..5dadf4b632aa3 100644
+--- a/tests/custom_analytics/test_dashboard_service.py
++++ b/tests/custom_analytics/test_dashboard_service.py
+@@ -157,30 +157,109 @@ def company(self):
+     def details_stat(self, company):
+         return CompanyStatisticFactory.build(company=company, name="Some Stat")
+ 
+-    def test_refresh_dashboard_if_old_no_last_run(self, service, dashboard_data):
+-        dashboard_data.last_run = None
+-        service.trigger_dashboard_update_task = MagicMock()
+-
+-        should_refresh = service.refresh_dashboard_if_old(COMPANY_ID, dashboard_data)
+-
+-        assert should_refresh
+-
+     @freeze_time("2022-04-20 08:01:00")
+-    def test_refresh_dashboard_if_old_stale(self, service, dashboard_data):
+-        dashboard_data.last_run = arrow.get("2022-04-20 00:00:00")
+-        service.trigger_dashboard_update_task = MagicMock()
++    @pytest.mark.parametrize(
++        "last_run,lock_held,widget_status,expected_refresh,dashboard_called,widget_called",
++        [
++            (None, False, None, True, True, False),
++            (arrow.get("2022-04-20 00:00:00"), False, None, True, True, False),
++            (arrow.get("2022-04-20 00:00:00"), True, None, False, True, False),
++            (
++                arrow.get("2022-04-20 08:00:00"),
++                False,
++                WidgetStatus.COMPLETE,
++                False,
++                False,
++                False,
++            ),
++            (
++                arrow.get("2022-04-20 08:00:00"),
++                False,
++                WidgetStatus.NOT_RUN,
++                True,
++                False,
++                True,
++            ),
++        ],
++        ids=[
++            "no_last_run_triggers_dashboard",
++            "stale_triggers_dashboard",
++            "stale_lock_held_returns_false",
++            "fresh_complete_widget_no_op",
++            "fresh_not_run_widget_triggers_widget",
++        ],
++    )
++    def test_refresh_dashboard_if_old(
++        self,
++        service,
++        dashboard_data,
++        last_run,
++        lock_held,
++        widget_status,
++        expected_refresh,
++        dashboard_called,
++        widget_called,
++    ):
++        """Dispatch matrix: stale → dashboard refresh; fresh + NOT_RUN → per-widget refresh."""
++        dashboard_data.last_run = last_run
++        service.trigger_dashboard_update_task = MagicMock(
++            side_effect=UnableToObtainConcurrencyLockException() if lock_held else None
++        )
++        service.trigger_widget_update_task = MagicMock()
++        widget = (
++            WidgetFactory.build(
++                type=WidgetType.PERFORMANCE,
++                subtype=WidgetSubtype.CAMPAIGN,
++                status=widget_status,
++            )
++            if widget_status is not None
++            else None
++        )
++        service._data_service.get_widgets.return_value = [widget] if widget else []
+ 
+-        should_refresh = service.refresh_dashboard_if_old(COMPANY_ID, dashboard_data)
++        with patch.object(
++            PerformanceDashboardService,
++            "_is_multi_channel_funnel_summary_enabled",
++            return_value=False,
++        ):
++            assert (
++                service.refresh_dashboard_if_old(COMPANY_ID, dashboard_data)
++                == expected_refresh
++            )
+ 
+-        assert should_refresh
++        assert service.trigger_dashboard_update_task.called == dashboard_called
++        assert service.trigger_widget_update_task.called == widget_called
+ 
+     @freeze_time("2022-04-20 08:00:00")
+-    def test_refresh_dashboard_if_old_not_stale(self, service, dashboard_data):
++    def test_refresh_dashboard_if_old_widget_trigger_failure_continues(
++        self, service, dashboard_data
++    ):
++        """A failing widget trigger is logged and skipped; remaining widgets still run."""
+         dashboard_data.last_run = arrow.get("2022-04-20 00:00:00")
++        not_run_widgets = [
++            WidgetFactory.build(
++                type=WidgetType.PERFORMANCE,
++                subtype=WidgetSubtype.CAMPAIGN,
++                status=WidgetStatus.NOT_RUN,
++                order=i,
++            )
++            for i in range(2)
++        ]
++        service._data_service.get_widgets.return_value = not_run_widgets
++        service.trigger_dashboard_update_task = MagicMock()
++        service.trigger_widget_update_task = MagicMock(
++            side_effect=[Exception("boom"), None]
++        )
+ 
+-        should_refresh = service.refresh_dashboard_if_old(COMPANY_ID, dashboard_data)
++        with patch.object(
++            PerformanceDashboardService,
++            "_is_multi_channel_funnel_summary_enabled",
++            return_value=False,
++        ):
++            assert service.refresh_dashboard_if_old(COMPANY_ID, dashboard_data) is True
+ 
+-        assert not should_refresh
++        # Both widgets visited despite the first one raising.
++        assert service.trigger_widget_update_task.call_count == 2
+ 
+     def test_get_dashboard_or_none(self, service):
+         service.get_dashboard_or_none(COMPANY_ID, DASHBOARD_ID)
+@@ -1087,6 +1166,257 @@ def test_get_widget_signed_s3_url(self, dashboard_data, widget_data, service):
+ 
+         assert mock_url_value == result_url
+ 
++    @pytest.mark.parametrize(
++        "flag_on,visible_subtypes,hidden_subtypes",
++        [
++            (
++                True,
++                [WidgetSubtype.BY_CHANNEL],
++                [WidgetSubtype.EMAIL, WidgetSubtype.SMS, WidgetSubtype.PUSH],
++            ),
++            (
++                False,
++                [WidgetSubtype.EMAIL, WidgetSubtype.SMS, WidgetSubtype.PUSH],
++                [WidgetSubtype.BY_CHANNEL],
++            ),
++        ],
++        ids=["flag_on_hides_per_channel", "flag_off_hides_by_channel"],
++    )
++    def test_get_widgets_filters_funnel_summary_by_flag(
++        self,
++        service,
++        dashboard_data,
++        flag_on,
++        visible_subtypes,
++        hidden_subtypes,
++    ):
++        """get_widgets hides funnel widgets according to the SCF Statsig gate."""
++        all_subtypes = [
++            WidgetSubtype.EMAIL,
++            WidgetSubtype.SMS,
++            WidgetSubtype.PUSH,
++            WidgetSubtype.BY_CHANNEL,
++        ]
++        widgets = [
++            WidgetFactory.build(
++                type=WidgetType.FUNNEL_SUMMARY, subtype=subtype, order=i
++            )
++            for i, subtype in enumerate(all_subtypes)
++        ]
++        service._data_service.get_dashboard_or_none.return_value = dashboard_data
++        service._data_service.get_widgets.return_value = widgets
++
++        with patch.object(
++            PerformanceDashboardService,
++            "_is_multi_channel_funnel_summary_enabled",
++            return_value=flag_on,
++        ):
++            result = list(service.get_widgets(COMPANY_ID, DASHBOARD_ID))
++
++        result_subtypes = {w.subtype for w in result}
++        assert result_subtypes == set(visible_subtypes)
++        assert not (result_subtypes & set(hidden_subtypes))
++
++    def test_get_widgets_does_not_filter_non_funnel_widgets(
++        self, service, dashboard_data
++    ):
++        """Non-funnel widgets (e.g. DELIVERABILITY) are unaffected by the SCF gate."""
++        non_funnel = [
++            WidgetFactory.build(
++                type=WidgetType.DELIVERABILITY, subtype=WidgetSubtype.EMAIL, order=0
++            ),
++            WidgetFactory.build(
++                type=WidgetType.PERFORMANCE, subtype=WidgetSubtype.CAMPAIGN, order=1
++            ),
++        ]
++        service._data_service.get_dashboard_or_none.return_value = dashboard_data
++        service._data_service.get_widgets.return_value = non_funnel
++
++        with patch.object(
++            PerformanceDashboardService,
++            "_is_multi_channel_funnel_summary_enabled",
++            return_value=True,
++        ):
++            result = list(service.get_widgets(COMPANY_ID, DASHBOARD_ID))
++
++        assert len(result) == 2
++
++    @patch("app.custom_analytics.dashboard_service.sentry_sdk.capture_exception")
++    @patch("app.custom_analytics.dashboard_service.statsig_client")
++    @patch("app.custom_analytics.dashboard_service.StatsigContext")
++    def test_funnel_summary_gate_failure_fails_closed(
++        self, mock_context, mock_client, mock_sentry_capture, service
++    ):
++        """If the Statsig gate check raises, the gate evaluates to False and the exception is captured to Sentry."""
++        mock_user = MagicMock()
++        mock_context.return_value.generate_finalized_statsig_user.return_value = (
++            mock_user
++        )
++        mock_client.return_value.check_gate.side_effect = RuntimeError("statsig down")
++
++        assert service._is_multi_channel_funnel_summary_enabled(COMPANY_ID) is False
++        mock_sentry_capture.assert_called_once()
++
++    @patch("app.custom_analytics.dashboard_service.statsig_client")
++    @patch("app.custom_analytics.dashboard_service.StatsigContext")
++    def test_is_multi_channel_funnel_summary_enabled_caches_per_company(
++        self, mock_context, mock_client, service
++    ):
++        """Repeated calls for the same company hit the cache; different companies evaluate independently."""
++        other_company_id = "OtherCo"
++        mock_client.return_value.check_gate.side_effect = [True, False]
++
++        assert service._is_multi_channel_funnel_summary_enabled(COMPANY_ID) is True
++        assert service._is_multi_channel_funnel_summary_enabled(COMPANY_ID) is True
++        assert (
++            service._is_multi_channel_funnel_summary_enabled(other_company_id) is False
++        )
++
++        assert mock_client.return_value.check_gate.call_count == 2
++
++    @pytest.mark.parametrize(
++        "non_funnel_count,should_raise",
++        [(9, False), (10, True)],
++        ids=["under_limit_allows", "at_limit_rejects"],
++    )
++    def test_create_widget_limit_uses_max_visible_count(
++        self,
++        service,
++        dashboard_data,
++        non_funnel_count,
++        should_raise,
++    ):
++        """Widget-limit check uses max visible count (gate-state independent)."""
++        widgets = [
++            WidgetFactory.build(
++                type=WidgetType.PERFORMANCE,
++                subtype=WidgetSubtype.CAMPAIGN,
++                order=i,
++            )
++            for i in range(non_funnel_count)
++        ]
++        service._data_service.get_dashboard_or_none.return_value = dashboard_data
++        service._data_service.get_widgets.return_value = widgets
++
++        with patch.object(
++            PerformanceDashboardService,
++            "_is_multi_channel_funnel_summary_enabled",
++            return_value=False,
++        ):
++            if should_raise:
++                with pytest.raises(TooManyPerformanceDashboardWidgets):
++                    service.create_widget(
++                        COMPANY_ID,
++                        DASHBOARD_ID,
++                        WidgetSubtype.CAMPAIGN,
++                        WidgetType.PERFORMANCE,
++                    )
++                service._data_service.create_widget.assert_not_called()
++            else:
++                service.create_widget(
++                    COMPANY_ID,
++                    DASHBOARD_ID,
++                    WidgetSubtype.CAMPAIGN,
++                    WidgetType.PERFORMANCE,
++                )
++                service._data_service.create_widget.assert_called_once()
++
++    def test_get_visible_widget_count_dashboard_doesnt_exist(self, service):
++        """Raises PerformanceDashboardDoesNotExist when the dashboard is not found."""
++        service._data_service.get_dashboard_or_none.return_value = None
++
++        with pytest.raises(PerformanceDashboardDoesNotExist):
++            service.get_visible_widget_count(COMPANY_ID, DASHBOARD_ID)
++
++    @pytest.mark.parametrize(
++        "non_funnel_count,funnel_subtypes,expected",
++        [
++            (5, [], 5),
++            (4, [WidgetSubtype.EMAIL], 5),
++            (
++                4,
++                [
++                    WidgetSubtype.EMAIL,
++                    WidgetSubtype.SMS,
++                    WidgetSubtype.PUSH,
++                    WidgetSubtype.BY_CHANNEL,
++                ],
++                7,
++            ),
++        ],
++        ids=["no_funnels", "single_funnel", "all_four_subtypes"],
++    )
++    def test_get_visible_widget_count(
++        self, service, dashboard_data, non_funnel_count, funnel_subtypes, expected
++    ):
++        """Returns max(visible count under flag-on, visible count under flag-off)."""
++        service._data_service.get_dashboard_or_none.return_value = dashboard_data
++        service._data_service.get_widgets.return_value = [
++            WidgetFactory.build(
++                type=WidgetType.PERFORMANCE, subtype=WidgetSubtype.CAMPAIGN, order=i
++            )
++            for i in range(non_funnel_count)
++        ] + [
++            WidgetFactory.build(
++                type=WidgetType.FUNNEL_SUMMARY,
++                subtype=subtype,
++                order=non_funnel_count + i,
++            )
++            for i, subtype in enumerate(funnel_subtypes)
++        ]
++
++        assert service.get_visible_widget_count(COMPANY_ID, DASHBOARD_ID) == expected
++
++    @patch("app.tasks.process_performance_dashboard.apply_async_or_raise_exception")
++    def test_trigger_dashboard_update_task_skips_hidden_funnel_widgets(
++        self, mock_dashboard_task, service, dashboard_data, dashboard_model
++    ):
++        """Hidden funnel-summary widgets are not iterated/enqueued when triggering updates."""
++        visible_model = Widget(
++            id="visiblewidgetid01",
++            company_id=COMPANY_ID,
++            performance_dashboard=dashboard_model,
++            name="Campaign Performance",
++            type=WidgetType.PERFORMANCE,
++            subtype=WidgetSubtype.CAMPAIGN,
++            order=0,
++            status=WidgetStatus.COMPLETE,
++            created=utcnow().datetime,
++            updated=utcnow().datetime,
++        )
++        # Flag is OFF, so BY_CHANNEL is hidden.
++        hidden_model = Widget(
++            id="hiddenwidgetidd01",
++            company_id=COMPANY_ID,
++            performance_dashboard=dashboard_model,
++            name="Funnel Summary By Channel",
++            type=WidgetType.FUNNEL_SUMMARY,
++            subtype=WidgetSubtype.BY_CHANNEL,
++            order=1,
++            status=WidgetStatus.COMPLETE,
++            created=utcnow().datetime,
++            updated=utcnow().datetime,
++        )
++        visible = WidgetData.from_model(visible_model)
++        hidden = WidgetData.from_model(hidden_model)
++        service._data_service.get_dashboard_or_none.return_value = dashboard_data
++        service._data_service.get_widgets.return_value = [visible, hidden]
++
++        with patch.object(
++            PerformanceDashboardService,
++            "_is_multi_channel_funnel_summary_enabled",
++            return_value=False,
++        ):
++            service.trigger_dashboard_update_task(COMPANY_ID, DASHBOARD_ID)
++
++        # Only the visible widget should have its status set to LOADING.
++        service._data_service.update_widget.assert_called_once_with(
++            COMPANY_ID,
++            DASHBOARD_ID,
++            visible.widget_id,
++            status=WidgetStatus.LOADING,
++        )
++
+     def test_should_record_fullstory_scheduled_report_sessions_in_sample(self):
+         assert PerformanceDashboardService.should_record_fullstory_performance_dashboards_sessions(
+             CompanyFactory.build(id="tssPke")
+diff --git a/tests/custom_analytics/views/test_performance_dashboards.py b/tests/custom_analytics/views/test_performance_dashboards.py
+index 2b7606b200745..1f19b154ec4e3 100644
+--- a/tests/custom_analytics/views/test_performance_dashboards.py
++++ b/tests/custom_analytics/views/test_performance_dashboards.py
+@@ -635,6 +635,60 @@ def test_list_qgr_dashboard_exists(
+         assert response.status_code == status.HTTP_200_OK
+         mock_performance_dashboard_service.create_qgr_dashboard.assert_not_called()
+ 
++    def test_visible_widget_count(
++        self,
++        user_fixture,
++        patch_performance_dashboard_view,
++        performance_dashboard_object,
++        mock_performance_dashboard_service,
++    ):
++        """Returns the effective widget count for the dashboard."""
++        mock_performance_dashboard_service.get_visible_widget_count.return_value = 7
++        dashboard_id = performance_dashboard_object.dashboard_id
++
++        response = self._make_request(
++            method="get",
++            action="visible_widget_count",
++            url=reverse(
++                "ajax-performance-dashboard-visible-widget-count",
++                args=(dashboard_id,),
++            ),
++            user=user_fixture,
++            view_args=(dashboard_id,),
++        )
++
++        assert response.status_code == status.HTTP_200_OK
++        assert response.data == {"visible_widget_count": 7}
++        mock_performance_dashboard_service.get_visible_widget_count.assert_called_once_with(
++            user_fixture.profile.company.id,
++            dashboard_id,
++        )
++
++    def test_visible_widget_count_dashboard_doesnt_exist(
++        self,
++        user_fixture,
++        patch_performance_dashboard_view,
++        mock_performance_dashboard_service,
++    ):
++        """Returns 404 when the dashboard does not exist."""
++        mock_performance_dashboard_service.get_visible_widget_count.side_effect = (
++            PerformanceDashboardDoesNotExist()
++        )
++        dashboard_id = "totallyFakeDashboardID"
++
++        response = self._make_request(
++            method="get",
++            action="visible_widget_count",
++            url=reverse(
++                "ajax-performance-dashboard-visible-widget-count",
++                args=(dashboard_id,),
++            ),
++            user=user_fixture,
++            view_args=(dashboard_id,),
++        )
++
++        assert response.status_code == status.HTTP_404_NOT_FOUND
++
+ 
+ class TestPerformanceDashboardConfigViewSet:
+     def _make_request(self, *args, **kwargs):

@@ -1,0 +1,7 @@
+PYTHONPATH=$AW python -m unittest tests.test_repos -v
+PYTHONPATH=$AW python -m unittest tests.test_board_snapshot -v
+PYTHONPATH=$AW python -m unittest tests.test_e2e -v
+PYTHONPATH=$AW python -m unittest discover -s $AW/tests -p "test_*.py"
+python tools/backfill_completion_refs.py --dry-run
+python tools/backfill_completion_refs.py
+python tools/backfill_completion_refs.py

@@ -1,0 +1,60 @@
+{
+  "description": "Build a 4-player online Texas Hold'em poker game INSIDE the existing /Users/timothy.shee/GitHub/wip-browser-games repo (a Vite + React workspace monorepo with packages/*, portal, games/*). create:true registers the 'Browser Games' project at that path; wipe:false uses the repo as-is so the build lands on a worktree branch and is squash-merged into local main, leaving the existing tic-tac-toe work intact. Multiplayer is a Node WebSocket server (authoritative dealer/game engine) + a browser client; 4 players connect over the network/localhost. Records a video walking the human gates + showing a hand being played.",
+  "defaultMode": "record",
+  "resultMode": "play",
+  "play": {
+    "servers": ["node packages/poker-server/src/server.js", "npm run dev"],
+    "readyUrl": "http://localhost:5173/games/poker/",
+    "url": "http://localhost:5173/games/poker/"
+  },
+  "project": {
+    "create": true,
+    "wipe": false,
+    "name": "Browser Games",
+    "target": "/Users/timothy.shee/GitHub/wip-browser-games",
+    "defaultBranch": "main",
+    "agentRuntime": "claude",
+    "deliveryPolicy": "merge_to_master",
+    "devCommand": "npm run dev",
+    "testCommand": "npm test --silent || true",
+    "typecheckCommand": "npx --yes tsc --noEmit || true"
+  },
+  "task": {
+    "title": "Build a 4-player online Texas Hold'em poker game",
+    "request": [
+      "Add a new game to this Browser Games monorepo: an online multiplayer Texas",
+      "Hold'em poker game that FOUR people can play together over the network, each",
+      "from their own browser. Follow the repo's existing conventions (Vite + React",
+      "workspace; new code under games/ and/or packages/ as appropriate) rather than",
+      "dropping in a standalone static app.",
+      "",
+      "Architecture (multiplayer is the core requirement):",
+      "- An authoritative Node WebSocket server that owns the game state: shuffles and",
+      "  deals, runs the betting rounds (pre-flop, flop, turn, river, showdown),",
+      "  enforces turn order and legal actions, manages the pot and dealer button, and",
+      "  determines the winner by standard hand ranking. Clients NEVER see other",
+      "  players' hole cards.",
+      "- A browser client that connects over WebSocket, lets a player join a table by",
+      "  name, shows their two hole cards + the shared community cards + the pot + whose",
+      "  turn it is, and offers the legal actions (fold / check / call / bet-raise) for",
+      "  the player on action. Four separate browser sessions = four players at one",
+      "  table.",
+      "",
+      "Correct Texas Hold'em rules: blinds, betting rounds, side pots are out of scope",
+      "for v1 (a single main pot is fine), but turn order, legal-action enforcement,",
+      "the five-card-best-hand evaluation at showdown, and awarding the pot to the",
+      "winner MUST be correct. Put the hand-evaluation and game-engine logic in a",
+      "pure, unit-testable module and cover it with unit tests (vitest).",
+      "",
+      "Use accessible, user-facing markup (buttons/labels with real text) so a",
+      "Playwright test can drive players with getByRole.",
+      "",
+      "In the QA/validation stage: (1) run the engine unit tests, and (2) write and run",
+      "a Playwright end-to-end test that boots the server and FOUR browser clients,",
+      "seats them at one table, plays a full hand through to showdown with each client",
+      "taking a legal action when it is their turn, and asserts that exactly one winner",
+      "is announced and awarded the pot. Record it with video + trace ON and leave the",
+      "recording as proof."
+    ]
+  }
+}

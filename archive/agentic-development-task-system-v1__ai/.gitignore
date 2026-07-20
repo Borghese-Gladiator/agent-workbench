@@ -1,0 +1,10 @@
+.DS_Store
+node_modules
+dist
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+data/ingest/processed
+data/ingest/rejected
+data/task_data/

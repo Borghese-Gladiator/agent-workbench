@@ -1,0 +1,11 @@
+PYTHONPATH=agent-workbench-live python3 -m pytest agent-workbench-live/tests/test_validate_context_build.py -v
+PYTHONPATH=agent-workbench-live python3 -m pytest agent-workbench-live/tests/test_doc_claims.py -v
+PYTHONPATH=agent-workbench-live python3 -m pytest agent-workbench-live/tests/test_board_snapshot.py -v
+PYTHONPATH=agent-workbench-live python3 -m pytest agent-workbench-live/tests/test_backfill_base_ref_sha.py -v
+PYTHONPATH=agent-workbench-live python3 -m pytest agent-workbench-live/tests/test_self_modifying.py -v
+PYTHONPATH=agent-workbench-live python3 -m pytest agent-workbench-live/tests/test_e2e.py::TestE2EHappyPath -v
+PYTHONPATH=agent-workbench-live python3 -m pytest agent-workbench-live/tests/
+PYTHONPATH=agent-workbench-live python3 -c "from lib import validate_context, doc_claims, audit; from lib.board import source; from lib.cli import cmd_start, cmd_new_run, cmd_validate; print('import OK')"
+agent-workbench-live/tools/backfill_base_ref_sha.py --root agent-workbench-live --dry-run
+agent-workbench-live/tools/backfill_base_ref_sha.py --root agent-workbench-live
+agent-workbench-live/bin/agent-workbench metrics 2026-05-22-shogi-core --rebuild

@@ -1,0 +1,6 @@
+============================================================
+STOP. State: abandoned (terminal).
+The run is abandoned.
+
+Terminal state. No further action.
+============================================================

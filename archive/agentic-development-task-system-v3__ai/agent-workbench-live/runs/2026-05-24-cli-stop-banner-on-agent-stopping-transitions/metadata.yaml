@@ -1,0 +1,54 @@
+schema_version: 1
+run_id: "2026-05-24-cli-stop-banner-on-agent-stopping-transitions"
+status: done
+created_at: "2026-05-24T21:17:14-04:00"
+updated_at: "2026-05-24T22:09:59-04:00"
+target:
+  repo:
+    mode: existing
+    path: "/Users/timothy.shee/GitHub/new-tech-monorepo/agentic-development-task-system-v3__ai"
+    name: agentic-development-task-system-v3-ai
+    base_ref: HEAD
+    fingerprint: null
+    created_by_run: null
+  worktree:
+    name: cli-stop-banner-on-agent-stopping-transitions
+    path: "/Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agentic-development-task-system-v3-ai/20260524__cli-stop-banner-on-agent-stopping-transitions"
+    branch_name: agent/cli-stop-banner-on-agent-stopping-transitions
+    created: true
+    base_ref: HEAD
+    initial_commit_sha: null
+scope:
+  kind: implementation
+  summary: ""
+artifacts:
+  raw_idea: raw-idea.md
+  answers: null
+  brief: brief.md
+  plan: plan.md
+  preflight: "plan.md#preflight"
+  assumptions: "plan.md#decisions--assumptions"
+  decisions: "plan.md#decisions--assumptions"
+  implementation_summary: stages/4_building/build.md
+  diff_summary: "stages/4_building/build.md#files-changed"
+  review_report: review.md
+  qa_report: qa/report.md
+  audit: audit.md
+  handoff: HUMAN_REVIEW.md
+  followups: stages/6_followups/follow-ups.md
+validation:
+  required: true
+  review_completed: true
+  qa_completed: true
+  qa_recorded: true
+  tests_passed: true
+  known_issues_count: 0
+completion:
+  accepted_by: timothy.sheee
+  completion_ref: merge:9eda554b2c5b6ea432f23b376133059925679ee9
+  completed_at: "2026-05-24T22:09:59-04:00"
+  abandoned_reason: null
+build:
+  iterations: 1
+  exit_reason: tests_green
+  max_iterations: 5

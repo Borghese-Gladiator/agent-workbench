@@ -1,0 +1,22 @@
+============================================================
+STOP. State: human_review (human-owned).
+The run is staged for human review and decision.
+
+Review:
+  HUMAN_REVIEW.md: /Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agentic-development-task-system-v3-ai/20260525__base-ref-sha-plumbing-across-remaining-con/agentic-development-task-system-v3__ai/agent-workbench-live/runs/2026-05-25-base-ref-sha-plumbing-across-remaining-con/HUMAN_REVIEW.md
+
+Summary of changes (≤3 bullets):
+  - 15 file(s) touched:
+  - 1 doc(s) touched:
+
+Summary of testing (≤2 sentences, or "None recorded."):
+  Unit tests passed (2 known issue(s)).
+
+Diffstat:
+  0 files changed, +0 / −0 lines
+
+Next moves (human-triggered, type in a session):
+  /complete 2026-05-25-base-ref-sha-plumbing-across-remaining-con  — accept; auto-merges worktree branch into parent
+  /bounce 2026-05-25-base-ref-sha-plumbing-across-remaining-con    — send back to building with structured feedback
+  /abandon 2026-05-25-base-ref-sha-plumbing-across-remaining-con   — discard the run
+============================================================

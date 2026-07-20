@@ -1,0 +1,7 @@
+============================================================
+STOP. State: ready (human-owned).
+The plan is staged and waiting for human approval.
+
+Next moves (human-triggered, type in a session):
+  /start 2026-05-27-schema-level-validation-for-metadata-yaml  — approve the plan and create the worktree
+============================================================

@@ -1,0 +1,11 @@
+$ python -m pytest tests/test_stop_banner.py tests/test_repos.py -v
+
+Pytest: 31 passed
+
+Files exercised:
+- tests/test_stop_banner.py — 13 cases including new test_no_shell_form_in_any_banner cross-state pin and updated test_ready_banner_structure
+- tests/test_repos.py — 18 cases including new test_run_lock_file_is_gitignored
+
+No failures, no skips, no warnings beyond the suite's existing noise.
+
+Separately, the full workbench suite (`python -m pytest tests`) reported 323 passed, 2 failed. The 2 failures are pre-existing date-baked snapshot drift in tests/test_human_review.py::TestSnapshotRender — see review.md F-002.

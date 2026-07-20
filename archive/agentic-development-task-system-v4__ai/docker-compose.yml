@@ -1,0 +1,79 @@
+# Agent Workbench — one-command local provisioning.
+#
+#   docker compose up                 # daemon (:4417) + web (:5317)
+#   docker compose run --rm seed      # seed one example project + task
+#   docker compose down               # stop (data/ persists via the bind mount)
+#
+# Both services share one image (see Dockerfile) and differ only by `command`.
+#
+# ── Host-CLI caveat ─────────────────────────────────────────────────────────
+# The daemon shells out to host `git`, `gh`, and `claude` and creates real git
+# worktrees under data/worktrees/. Inside the container:
+#   • The dashboard + the MOCK agent runtime work fully (deterministic, no CLI).
+#   • The `claude` runtime, `gh`-backed delivery, and real-worktree flows are
+#     NOT wired up here — they need the host's CLIs + login. To experiment,
+#     mount your Claude login and `gh` config and set WORKBENCH_CLAUDE_BIN, e.g.
+#     add under the `daemon` service:
+#         volumes:
+#           - ~/.claude:/root/.claude
+#           - ~/.config/gh:/root/.config/gh
+#     and install those CLIs in the image. Out of scope for default provisioning.
+
+services:
+  daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agent-workbench
+    command: pnpm daemon
+    ports:
+      - "${WORKBENCH_PORT:-4417}:4317"
+    environment:
+      WORKBENCH_PORT: "4317"
+      WORKBENCH_DATA_DIR: /app/data
+      WORKBENCH_CLAUDE_BIN: "${WORKBENCH_CLAUDE_BIN:-claude}"
+      WORKBENCH_CLAUDE_MODEL: "${WORKBENCH_CLAUDE_MODEL:-}"
+    volumes:
+      # Persist SQLite + artifacts + worktrees across `down`/`up`.
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4317/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  web:
+    image: agent-workbench
+    # Reuse the daemon's built image instead of building twice.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: pnpm web
+    ports:
+      - "${VITE_PORT:-5317}:5317"
+    environment:
+      # Vite proxies /api to the daemon; in-network it resolves by service name.
+      WORKBENCH_PORT: "4317"
+      VITE_PORT: "5317"
+      # The proxy target host. Compose default network resolves `daemon`.
+      WORKBENCH_DAEMON_HOST: daemon
+      # Bind all interfaces so the dev server is reachable from the host.
+      VITE_HOST: 0.0.0.0
+    depends_on:
+      daemon:
+        condition: service_healthy
+
+  # One-shot seeder. Not part of `up` (no default profile); run explicitly:
+  #   docker compose run --rm seed
+  seed:
+    image: agent-workbench
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: pnpm seed
+    profiles: ["seed"]
+    environment:
+      WORKBENCH_DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data

@@ -1,0 +1,36 @@
+--- ready ---
+============================================================
+STOP. State: ready (human-owned).
+The plan is staged and waiting for human approval.
+
+Next moves (human-triggered):
+  agent-workbench start SAMPLE-RUN-ID  - approve the plan and create the worktree
+============================================================
+
+--- human_review ---
+============================================================
+STOP. State: human_review (human-owned).
+The run is staged for human review and decision.
+
+Next moves (human-triggered):
+  agent-workbench complete SAMPLE-RUN-ID  - accept and merge
+  agent-workbench bounce SAMPLE-RUN-ID  - send back to building
+  agent-workbench abandon SAMPLE-RUN-ID  - abandon the run
+============================================================
+
+--- done ---
+============================================================
+STOP. State: done (terminal).
+The run is accepted and merged.
+
+Terminal state. No further action.
+============================================================
+
+--- abandoned ---
+============================================================
+STOP. State: abandoned (terminal).
+The run is abandoned.
+
+Terminal state. No further action.
+============================================================
+

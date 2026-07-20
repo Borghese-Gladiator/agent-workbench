@@ -1,0 +1,53 @@
+.................................................................................................................FF.............................................................................................................................Preparing worktree (new branch 'agent/wt')
+HEAD is now at 49c4d55 init
+.Preparing worktree (new branch 'agent/wt1')
+HEAD is now at 49c4d55 init
+Preparing worktree (new branch 'agent/wt2')
+HEAD is now at 49c4d55 init
+.Preparing worktree (new branch 'agent/wt1')
+HEAD is now at 49c4d55 init
+Preparing worktree (new branch 'agent/wt2')
+HEAD is now at 49c4d55 init
+.Preparing worktree (new branch 'agent/wt1')
+HEAD is now at 49c4d55 init
+Preparing worktree (new branch 'agent/wt2')
+HEAD is now at 49c4d55 init
+.Preparing worktree (new branch 'agent/wt1')
+HEAD is now at 49c4d55 init
+Preparing worktree (new branch 'agent/wt2')
+HEAD is now at 49c4d55 init
+.Preparing worktree (new branch 'agent/wt1')
+HEAD is now at 09db42c init
+Preparing worktree (new branch 'agent/wt2')
+HEAD is now at 09db42c init
+.Preparing worktree (new branch 'agent/wt1')
+HEAD is now at 09db42c init
+Preparing worktree (new branch 'agent/wt2')
+HEAD is now at 09db42c init
+....................................................
+======================================================================
+FAIL: test_bounce_pass2_snapshot (test_human_review.TestSnapshotRender)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/new-tech-monorepo/20260525__each-worktree-owns-its-own-run-dir/agentic-development-task-system-v3__ai/agent-workbench-live/tests/test_human_review.py", line 570, in test_bounce_pass2_snapshot
+    self._check_snapshot(run_dir, "human_review_bounce_pass2.expected.md")
+  File "/Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/new-tech-monorepo/20260525__each-worktree-owns-its-own-run-dir/agentic-development-task-system-v3__ai/agent-workbench-live/tests/test_human_review.py", line 541, in _check_snapshot
+    self.assertMultiLineEqual(expected, rendered)
+AssertionError: '# Hu[17 chars]-05-22-bounce-snap\n\n## Files\n\n- **Brief** [2291 chars]ed\n' != '# Hu[17 chars]-05-25-bounce-snap\n\n## Files\n\n- **Brief** [2443 chars]ed\n'
+Diff is 2915 characters long. Set self.maxDiff to None to see it.
+
+======================================================================
+FAIL: test_happy_snapshot (test_human_review.TestSnapshotRender)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/new-tech-monorepo/20260525__each-worktree-owns-its-own-run-dir/agentic-development-task-system-v3__ai/agent-workbench-live/tests/test_human_review.py", line 547, in test_happy_snapshot
+    self._check_snapshot(run_dir, "human_review_happy.expected.md")
+  File "/Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/new-tech-monorepo/20260525__each-worktree-owns-its-own-run-dir/agentic-development-task-system-v3__ai/agent-workbench-live/tests/test_human_review.py", line 541, in _check_snapshot
+    self.assertMultiLineEqual(expected, rendered)
+AssertionError: '# Hu[17 chars]-05-22-happy-snap\n\n## Files\n\n- **Brief** —[1795 chars]ed\n' != '# Hu[17 chars]-05-25-happy-snap\n\n## Files\n\n- **Brief** —[1947 chars]ed\n'
+Diff is 2404 characters long. Set self.maxDiff to None to see it.
+
+----------------------------------------------------------------------
+Ran 298 tests in 38.900s
+
+FAILED (failures=2)

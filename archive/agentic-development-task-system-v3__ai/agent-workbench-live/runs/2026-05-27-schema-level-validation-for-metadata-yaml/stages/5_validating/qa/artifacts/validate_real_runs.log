@@ -1,0 +1,27 @@
+schema:    /Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agentic-development-task-system-v3-ai/20260527__schema-level-validation-for-metadata-yaml/agentic-development-task-system-v3__ai/agent-workbench-live/schemas/run-metadata.yaml
+runs dir:  /Users/timothy.shee/GitHub/new-tech-monorepo/agentic-development-task-system-v3__ai/agent-workbench-live/runs
+
+found 20 runs
+
+  OK    2026-05-18-poker: 0 real, 0 unknown
+  OK    2026-05-21-better-worktree-name-template: 0 real, 0 unknown
+  OK    2026-05-22-audit-unit-tests-for-duplication: 0 real, 0 unknown
+  OK    2026-05-22-context-graph: 0 real, 0 unknown
+  OK    2026-05-22-human-review-polish: 0 real, 0 unknown
+  OK    2026-05-22-s2-attrs: 0 real, 0 unknown
+  OK    2026-05-22-shogi-core: 0 real, 0 unknown
+  OK    2026-05-22-token-efficiency-tracking: 0 real, 0 unknown
+  OK    2026-05-24-auto-merge-on-complete: 0 real, 0 unknown
+  OK    2026-05-24-cli-stop-banner-on-agent-stopping-transitions: 0 real, 0 unknown
+  OK    2026-05-24-fix-generated-lines-base-ref-head: 0 real, 0 unknown
+  OK    2026-05-24-token-efficiency-pass-2: 0 real, 0 unknown
+  OK    2026-05-25-base-ref-sha-plumbing-across-remaining-con: 0 real, 0 unknown
+  OK    2026-05-25-each-worktree-owns-its-own-run-dir: 0 real, 0 unknown
+  OK    2026-05-25-generalize-stage-context-md: 0 real, 0 unknown
+  OK    2026-05-25-lifecycle-papercuts-lock-ready-banner: 0 real, 0 unknown
+  OK    2026-05-25-shengji-browser-game: 0 real, 0 unknown
+  OK    2026-05-25-structured-human-review-handoff: 0 real, 0 unknown
+  OK    2026-05-26-board-freshness-across-worktrees: 0 real, 0 unknown
+  OK    2026-05-27-campaign-performance-summary-drs: 0 real, 0 unknown
+
+RESULT: every real run validates clean under warn-mode rules (zero non-unknown_key problems).

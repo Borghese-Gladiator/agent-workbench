@@ -1,0 +1,5 @@
+find agent-workbench-live/context -name '*.md'
+find agent-workbench-live/context -name '*.md' -exec wc -l {} +
+python -m unittest discover -s agent-workbench-live/tests -t agent-workbench-live
+python -m unittest discover -s agent-workbench-live/tests -t agent-workbench-live -p test_context_library.py -v
+[ ! -d agent-workbench-live/context/workflows ]

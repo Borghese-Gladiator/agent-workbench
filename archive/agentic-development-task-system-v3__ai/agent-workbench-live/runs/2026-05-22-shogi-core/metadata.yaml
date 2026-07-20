@@ -1,0 +1,55 @@
+schema_version: 1
+run_id: "2026-05-22-shogi-core"
+status: done
+created_at: "2026-05-22T03:00:25-04:00"
+updated_at: "2026-05-22T03:11:07-04:00"
+target:
+  repo:
+    mode: new
+    path: "/private/tmp/aw-shogi/repo"
+    name: repo
+    base_ref: HEAD
+    fingerprint: "126ab634db40f9c43dd812735c1c8931286ac072"
+    created_by_run: "2026-05-22-shogi-core"
+    base_ref_sha: "126ab634db40f9c43dd812735c1c8931286ac072"
+  worktree:
+    name: shogi-core
+    path: "/Users/timothy.shee/GitHub/LOCAL_worktrees/202605_agent_workbench_v2/agentic-development-task-system-v2__ai/agent-workbench-live/worktrees/repo/20260522__shogi-core"
+    branch_name: agent/shogi-core
+    created: true
+    base_ref: HEAD
+    initial_commit_sha: null
+scope:
+  kind: bootstrap
+  summary: ""
+artifacts:
+  raw_idea: raw-idea.md
+  answers: null
+  brief: brief.md
+  plan: plan.md
+  preflight: "plan.md#preflight"
+  assumptions: "plan.md#decisions--assumptions"
+  decisions: "plan.md#decisions--assumptions"
+  implementation_summary: stages/4_building/build.md
+  diff_summary: "stages/4_building/build.md#files-changed"
+  review_report: review.md
+  qa_report: qa/report.md
+  audit: audit.md
+  handoff: HUMAN_REVIEW.md
+  followups: stages/6_followups/follow-ups.md
+validation:
+  required: true
+  review_completed: true
+  qa_completed: true
+  qa_recorded: true
+  tests_passed: true
+  known_issues_count: 0
+completion:
+  accepted_by: timothy.shee
+  completion_ref: local-branch:agent/shogi-core
+  completed_at: "2026-05-22T03:11:07-04:00"
+  abandoned_reason: null
+build:
+  iterations: 1
+  exit_reason: tests_green
+  max_iterations: 5

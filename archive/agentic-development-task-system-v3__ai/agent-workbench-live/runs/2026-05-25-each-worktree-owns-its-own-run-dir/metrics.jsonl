@@ -1,0 +1,4 @@
+{"at": "2026-05-25T09:09:06+00:00", "kind": "header", "prices_loaded": true, "run_id": "2026-05-25-each-worktree-owns-its-own-run-dir", "schema_version": 2, "scope_kind": "implementation", "status": "followups"}
+{"at": "2026-05-25T05:07:42-04:00", "attempt": 1, "kind": "build_outcome", "schema_version": 2, "validate_result": "approve"}
+{"at": "2026-05-25T09:09:07+00:00", "kind": "line_count", "lines": 1141, "phase": "generated", "schema_version": 2}
+{"at": "2026-05-25T09:09:07+00:00", "kind": "line_count", "lines": 0, "phase": "accepted", "schema_version": 2}

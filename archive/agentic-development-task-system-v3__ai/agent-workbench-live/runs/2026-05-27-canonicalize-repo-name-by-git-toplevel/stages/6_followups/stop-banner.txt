@@ -1,0 +1,21 @@
+============================================================
+STOP. State: human_review (human-owned).
+The run is staged for human review and decision.
+
+Review:
+file:///Users/timothy.shee/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agentic-development-task-system-v3-ai/20260527__canonicalize-repo-name-by-git-toplevel/agentic-development-task-system-v3__ai/agent-workbench-live/runs/2026-05-27-canonicalize-repo-name-by-git-toplevel/HUMAN_REVIEW.md
+
+Summary of changes (≤3 bullets):
+  - 2 doc(s) touched:
+
+Summary of testing (≤2 sentences, or "None recorded."):
+  Unit tests passed; no known issues.
+
+Diffstat:
+  5 files changed, +121 / −1 lines
+
+Next moves (human-triggered, type in a session):
+  /complete 2026-05-27-canonicalize-repo-name-by-git-toplevel  — accept; auto-merges worktree branch into parent
+  /bounce 2026-05-27-canonicalize-repo-name-by-git-toplevel    — send back to building with structured feedback
+  /abandon 2026-05-27-canonicalize-repo-name-by-git-toplevel   — discard the run
+============================================================

@@ -1,0 +1,35 @@
+{
+  "description": "Implement ANY Linear ticket (pass --ticket) in a seeded enterprise repo (app | fender) ending on a draft PR. Nothing about the ticket is hardcoded; the agent fetches it from Linear during intake.",
+  "defaultMode": "record",
+  "resultMode": "pr",
+  "requires": { "ticket": true, "repo": ["app", "fender"], "defaultRepo": "app" },
+  "project": {
+    "create": false,
+    "matchRepo": "~/Klaviyo/Repos/{repo}"
+  },
+  "task": {
+    "title": "{ticketId}: implement Linear ticket",
+    "request": [
+      "Implement Linear ticket {ticketId} ({ticketUrl}).",
+      "",
+      "Fetch the ticket from Linear (use the Linear MCP) to read its full",
+      "description, acceptance criteria, and any linked Sentry issue, then",
+      "implement it in this repo. Keep the change scoped to what the ticket asks",
+      "for, and add focused unit tests covering the new behavior."
+    ],
+    "requestAppend": {
+      "fender": [
+        "",
+        "NOTE — this is the fender repo, running in an isolated git worktree (no",
+        "direnv/Nix). To run tests/typecheck/lint here you MUST: (1) run",
+        "`yarn install` in the worktree first (Yarn PnP); (2) prefix commands with",
+        "`CI=true SKIP_DIRENV_NIX_ENFORCEMENT=true` to pass the enforce-direnv-nix",
+        "plugin (CI is forwarded by turbo to package scripts; SKIP only covers the",
+        "outer call); (3) invoke turbo via `yarn exec turbo` (it's not on PATH under",
+        "PnP); (4) scope tests with `--filter=@klaviyo/<package>` — the bare",
+        "`turbo test` script is a stub that exits 1. Example:",
+        "`CI=true SKIP_DIRENV_NIX_ENFORCEMENT=true yarn exec turbo run test --filter=@klaviyo/performance-dashboard`."
+      ]
+    }
+  }
+}

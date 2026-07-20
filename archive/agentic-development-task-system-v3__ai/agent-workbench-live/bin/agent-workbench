@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""agent-workbench CLI entrypoint.
+
+Dispatches to lib/cli/cmd_<name>.py modules.
+
+Workbench root resolution (in order):
+  1. $AGENT_WORKBENCH_ROOT
+  2. The directory containing this script's parent (../).
+"""
+import argparse
+import importlib
+import os
+import pathlib
+import sys
+
+
+def workbench_root() -> pathlib.Path:
+    env = os.environ.get("AGENT_WORKBENCH_ROOT")
+    if env:
+        return pathlib.Path(env).resolve()
+    here = pathlib.Path(__file__).resolve().parent
+    return here.parent
+
+
+SUBCOMMANDS = [
+    "new_run",
+    "draft",
+    "shape",
+    "plan",
+    "start",
+    "validate",
+    "followups",
+    "handoff",
+    "complete",
+    "bounce",
+    "abandon",
+    "list_runs",
+    "show",
+    "events",
+    "doctor",
+    "board",
+    "metrics",
+]
+
+SUBCOMMAND_CLI_NAMES = {
+    "new_run": "new-run",
+    "list_runs": "list",
+}
+
+
+def main(argv: list[str]) -> int:
+    root = workbench_root()
+    sys.path.insert(0, str(root))
+
+    parser = argparse.ArgumentParser(prog="agent-workbench")
+    parser.add_argument(
+        "--root",
+        type=pathlib.Path,
+        default=root,
+        help="Workbench root (defaults to AGENT_WORKBENCH_ROOT or ../bin's parent).",
+    )
+    subparsers = parser.add_subparsers(dest="cmd", required=True)
+
+    modules = {}
+    for mod_name in SUBCOMMANDS:
+        mod = importlib.import_module(f"lib.cli.cmd_{mod_name}")
+        cli_name = SUBCOMMAND_CLI_NAMES.get(mod_name, mod_name)
+        sp = subparsers.add_parser(cli_name, help=mod.HELP)
+        mod.register(sp)
+        modules[cli_name] = mod
+
+    args = parser.parse_args(argv)
+    return modules[args.cmd].run(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

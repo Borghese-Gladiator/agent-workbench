@@ -1,0 +1,22 @@
+# V1
+python3 -m pytest python-poker-first/tests
+PYTHONPATH=python-poker-first python3 -m poker --players 4 --bots 4 --stack 50 --seed 42 --max-hands 3
+PYTHONPATH=python-poker-first python3 -m poker --players 7 --bots 7 --seed 1
+PYTHONPATH=python-poker-first python3 -m poker --players 1 --bots 1 --seed 1
+
+# V2 — Python (90 pass: V1 58 + V2 32)
+python3.12 -m pytest python-poker-first/tests
+
+# V2 — Frontend
+npm install --prefix python-poker-first/web
+npm run typecheck --prefix python-poker-first/web
+npm run build --prefix python-poker-first/web
+
+# V2 — Smoke server (port 8765)
+python3.12 -m uvicorn server.app:app --port 8765 --host 127.0.0.1 --app-dir python-poker-first
+curl -s http://127.0.0.1:8765/healthz
+curl -s -X POST -H "content-type: application/json" -d '{"nickname":"Tim"}' http://127.0.0.1:8765/api/rooms
+curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8765/r/SOMECODE
+
+# V2 — Browser e2e via Playwright MCP (one tab, lobby render)
+# (driven from the validate agent — see qa/artifacts/v2/lobby-host.png)

@@ -1,0 +1,36 @@
+test_duplicate_metadata_hard_fails_strict_mode (tests.test_metadata.TestDuplicateMetadataIntegrity) ... ok
+test_duplicate_metadata_hard_fails_warn_mode (tests.test_metadata.TestDuplicateMetadataIntegrity) ... ok
+test_create_and_load (tests.test_metadata.TestMetadata) ... ok
+test_create_includes_build_block (tests.test_metadata.TestMetadata)
+TODO §1e: new runs have a build: telemetry block. ... ok
+test_list_runs (tests.test_metadata.TestMetadata) ... ok
+test_load_without_build_block_backcompat (tests.test_metadata.TestMetadata)
+A flat-layout run.yaml missing the build: key must still load ... ok
+test_metadata_error_cases (tests.test_metadata.TestMetadata)
+create() refuses a second call for the same run_id; load() ... ok
+test_round_trip_preserves_artifacts (tests.test_metadata.TestMetadata) ... ok
+test_set_status_invalid (tests.test_metadata.TestMetadata) ... ok
+test_set_status_valid (tests.test_metadata.TestMetadata) ... ok
+test_each_real_run_validates_clean (tests.test_metadata.TestRealRunsLoadClean) ... ok
+test_strict_mode_raises_on_real_violation (tests.test_metadata.TestValidationMode) ... ok
+test_strict_mode_raises_on_unknown_key (tests.test_metadata.TestValidationMode) ... ok
+test_unrecognized_mode_falls_back_to_warn (tests.test_metadata.TestValidationMode) ... ok
+test_warn_mode_emits_stderr_for_real_violations (tests.test_metadata.TestValidationMode) ... ok
+test_warn_mode_silent_on_unknown_key (tests.test_metadata.TestValidationMode) ... ok
+test_clean_metadata_has_no_problems (tests.test_metadata.TestValidator) ... ok
+test_enum_violation_on_repo_mode (tests.test_metadata.TestValidator) ... ok
+test_enum_violation_on_status (tests.test_metadata.TestValidator) ... ok
+test_eq_violation_on_schema_version (tests.test_metadata.TestValidator) ... ok
+test_int_does_not_accept_bool (tests.test_metadata.TestValidator) ... ok
+test_missing_nested_required_field (tests.test_metadata.TestValidator) ... ok
+test_missing_top_level_required_field (tests.test_metadata.TestValidator) ... ok
+test_mistyped_nested_scalar (tests.test_metadata.TestValidator) ... ok
+test_mistyped_scalar (tests.test_metadata.TestValidator) ... ok
+test_scope_and_artifacts_are_free_form (tests.test_metadata.TestValidator) ... ok
+test_unknown_extra_nested_key_flagged_as_unknown (tests.test_metadata.TestValidator) ... ok
+test_unknown_extra_top_level_key_flagged_as_unknown (tests.test_metadata.TestValidator) ... ok
+
+----------------------------------------------------------------------
+Ran 28 tests in 0.565s
+
+OK

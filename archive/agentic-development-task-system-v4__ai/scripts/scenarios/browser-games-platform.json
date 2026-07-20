@@ -1,0 +1,25 @@
+{
+  "description": "Platform-layer work INSIDE the existing /Users/timothy.shee/GitHub/wip-browser-games repo (Vite + React npm-workspaces monorepo: packages/{shared,game-core,game-client,engines}, portal, games/*). create:false MATCHES the already-seeded 'Browser Games' project at that path (use with --attach against the running daemon so the task + artifacts persist in the real DB). The actual task is supplied per-run via --prompt/--title; this scenario only fixes the project + how the recorder boots the app. resultMode:play boots the multiplayer gateway + Vite so the recorder can show the running portal.",
+  "defaultMode": "record",
+  "resultMode": "play",
+  "play": {
+    "servers": ["npm run server", "npm run dev"],
+    "readyUrl": "http://localhost:5173/",
+    "url": "http://localhost:5173/"
+  },
+  "project": {
+    "create": false,
+    "name": "Browser Games",
+    "matchRepo": "/Users/timothy.shee/GitHub/wip-browser-games",
+    "defaultBranch": "main",
+    "agentRuntime": "claude",
+    "deliveryPolicy": "merge_to_master"
+  },
+  "task": {
+    "title": "Browser Games platform task",
+    "request": [
+      "Implement a platform-layer feature in this Browser Games monorepo.",
+      "(This default request is normally overridden per-run via --prompt.)"
+    ]
+  }
+}

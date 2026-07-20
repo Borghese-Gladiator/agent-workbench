@@ -1,0 +1,25 @@
+===== stage=task_brief mode=stage-packet =====
+taskId: task_CuisJsUJI_
+contextArtifactIds: art_h7BeBztQBS
+reviewerFeedback: (none)
+skillText: (none)
+----- PROMPT (1307 chars) -----
+# Stage: task_brief
+
+## Task
+Title: Add divide with divide-by-zero handling
+
+Request:
+Add a divide(a, b) function to the calc library in src/calc.js that throws a clear error on divide-by-zero. Follow the existing style of the other functions.
+
+## Your job
+Write a Task Brief: restate the request, list scope and out-of-scope items. Then add a required "## Acceptance Criteria" Markdown table with the columns `ID | Requirement | Risk (H/M/L)` — one row per testable requirement, each with a stable ID (AC1, AC2, …). These IDs are the durable contract: later stages bind their plan and proof to them, so make each criterion concrete and verifiable. Also add an "## Open assumptions / interpretation decisions" section that diffs this normalized brief against the raw request — call out every place you inferred, narrowed, or reinterpreted, so nothing the user asked for silently disappears. This brief is aspirational, not a validation record. Read-only — do not modify any files.
+
+
+Context artifacts available to you (ids): art_h7BeBztQBS
+
+## Output
+Write your task_brief as clear Markdown. Then, as the LAST thing in your
+response, emit a single fenced ```json block with a structured summary
+of the task_brief (keys appropriate to the stage). The json block is parsed
+and stored as a structured artifact.

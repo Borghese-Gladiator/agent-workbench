@@ -1,0 +1,17 @@
+Pytest: 342 passed, 2 failed
+═══════════════════════════════════════
+
+Failures:
+1. [FAIL] TestSnapshotRender.test_bounce_pass2_snapshot
+     ../../LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agent-workbench-live/20260...
+     ../../LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agent-workbench-live/20260...
+     self.assertMultiLineEqual(expected, rendered)
+
+2. [FAIL] TestSnapshotRender.test_happy_snapshot
+     ../../LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agent-workbench-live/20260...
+     ../../LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agent-workbench-live/20260...
+     self.assertMultiLineEqual(expected, rendered)
+
+3. [FAIL] ../../LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agent-workbench-live/20260525__generalize-stage-context-md/agentic-development-task-system-v3__ai/agent-workbench-live/tests/test_human_review.py::TestSnapshotRender::test_bounce_pass2_snapshot
+4. [FAIL] ../../LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees/agent-workbench-live/20260525__generalize-stage-context-md/agentic-development-task-system-v3__ai/agent-workbench-live/tests/test_human_review.py::TestSnapshotRender::test_happy_snapshot
+[full output: ~/Library/Application Support/rtk/tee/1779835861_pytest.log]

@@ -1,0 +1,41 @@
+===== stage=options_plan_test mode=stage-packet =====
+taskId: task_LKBUdNrLQ0
+contextArtifactIds: art_gJnPctRW5D, art_MhI3dj0jx2, art_nhWGlUJZWy, art_gjfpxMLH06
+reviewerFeedback: (none)
+skillText: (none)
+----- PROMPT (2062 chars) -----
+# Stage: options_plan_test
+
+## Task
+Title: Build a playable tic-tac-toe game
+
+Request:
+Build a tic-tac-toe game as a single static web app (index.html + a JS file,
+no framework, no build step) that two players can play in the browser:
+- A 3x3 grid the players click to place X then O, alternating.
+- Detect and announce the winner (or a draw), and offer a reset.
+- Use accessible, user-facing markup so a Playwright test can drive it with
+  getByRole.
+
+In the QA/validation stage, write and run a Playwright end-to-end test that
+plays a full game to a win in a real browser, with video + trace ON, and
+leave the recording as proof.
+
+## Your job
+Produce an Execution Plan: options considered, the chosen approach, an ordered change list, and a test plan. The test plan MUST include a "## Validation by criterion" Markdown table with the columns `Criterion ID | Validation method | Test type | Automated?` — one row per Acceptance Criteria ID from the Task Brief, binding each criterion to how it will be proven (test type = unit/integration/e2e/manual; Automated? = yes/no). Every brief criterion must appear; if one genuinely cannot be validated, say so and why. Read-only — do not modify any files.
+
+## Asking the operator
+If this stage has a material fork the operator should decide — competing
+approaches, a scope tradeoff, or a risk worth flagging — call the
+`mcp__ask__workbench_ask` tool with a short `header`, the `question`, and 2–4
+labelled `options` (each with a `description`); set `multiSelect: true` only if
+more than one may apply. Wait for the answer, then continue. Ask only when it
+genuinely changes the outcome — don't ask about things you can reasonably decide.
+
+Context artifacts available to you (ids): art_gJnPctRW5D, art_MhI3dj0jx2, art_nhWGlUJZWy, art_gjfpxMLH06
+
+## Output
+Write your execution_plan as clear Markdown. Then, as the LAST thing in your
+response, emit a single fenced ```json block with a structured summary
+of the execution_plan (keys appropriate to the stage). The json block is parsed
+and stored as a structured artifact.

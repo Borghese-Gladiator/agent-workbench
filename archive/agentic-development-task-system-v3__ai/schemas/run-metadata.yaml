@@ -1,0 +1,230 @@
+schema_version: 1
+kind: run_metadata_schema
+
+required_top_level_fields:
+  - schema_version
+  - run_id
+  - status
+  - created_at
+  - updated_at
+  - target
+  - scope
+  - artifacts
+  - validation
+  - completion
+
+status:
+  enum:
+    - draft
+    - shaping
+    - planning
+    - ready
+    - building
+    - validating
+    - human_review
+    - done
+    - abandoned
+
+scope:
+  kind:
+    enum:
+      - implementation
+      - bootstrap
+      - roadmap
+      - research
+      - repair
+  description: Classifies the run without changing the lifecycle.
+
+target:
+  repo:
+    required:
+      - mode
+      - path
+      - name
+      - base_ref
+    fields:
+      mode:
+        enum:
+          - existing
+          - new
+      path:
+        type: absolute_path
+        description: User-provided repo path. Agent Workbench does not use a repo registry as source of truth.
+      name:
+        type: string
+        description: Defaults to basename of repo path unless overridden.
+      base_ref:
+        type: string
+        default: HEAD
+      fingerprint:
+        type:
+          - string
+          - null
+        description: Optional repo identity such as initial HEAD SHA or git remote URL hash.
+      created_by_run:
+        type:
+          - string
+          - null
+        description: Set when mode is new and this run created the repo.
+
+  worktree:
+    required:
+      - name
+      - branch_name
+      - created
+    fields:
+      name:
+        type: string
+        description: Human-supplied or slug-generated worktree name.
+      path:
+        type:
+          - absolute_path
+          - null
+        description: Populated at ready -> building.
+      branch_name:
+        type: string
+        example: agent/add-login-form
+      created:
+        type: boolean
+        default: false
+      base_ref:
+        type: string
+        default: HEAD
+      initial_commit_sha:
+        type:
+          - string
+          - null
+
+artifacts:
+  description: Relative paths inside runs/<run_id>/ unless otherwise noted.
+  required:
+    - raw_idea
+    - assumptions
+    - decisions
+    - audit
+  fields:
+    raw_idea: raw-idea.md
+    answers: null
+    brief: null
+    plan: null
+    preflight: null
+    assumptions: assumptions.md
+    decisions: decisions.md
+    implementation_summary: null
+    diff_summary: null
+    review_report: null
+    qa_report: null
+    audit: audit.md
+    handoff: null
+
+validation:
+  required:
+    - required
+    - review_completed
+    - qa_completed
+    - qa_recorded
+  fields:
+    required:
+      type: boolean
+      default: true
+    review_completed:
+      type: boolean
+      default: false
+    qa_completed:
+      type: boolean
+      default: false
+    qa_recorded:
+      type: boolean
+      default: false
+    tests_passed:
+      type:
+        - boolean
+        - null
+      default: null
+    known_issues_count:
+      type: integer
+      default: 0
+
+completion:
+  required:
+    - accepted_by
+    - completion_ref
+  fields:
+    accepted_by:
+      type:
+        - string
+        - null
+      default: null
+    completion_ref:
+      type:
+        - string
+        - null
+      description: For V1, usually local-branch:<branch_name> or accepted-local-worktree:<path>.
+    completed_at:
+      type:
+        - string
+        - null
+    abandoned_reason:
+      type:
+        - string
+        - null
+
+locks:
+  run_lock_path: .lock
+  one_mutating_command_per_run: true
+
+template:
+  schema_version: 1
+  run_id: "2026-05-18-add-login-form"
+  status: draft
+  created_at: "2026-05-18T10:00:00-04:00"
+  updated_at: "2026-05-18T10:00:00-04:00"
+
+  target:
+    repo:
+      mode: existing
+      path: /Users/me/code/random-existing-repo
+      name: random-existing-repo
+      base_ref: HEAD
+      fingerprint: null
+      created_by_run: null
+    worktree:
+      name: add-login-form
+      path: null
+      branch_name: agent/add-login-form
+      created: false
+      base_ref: HEAD
+      initial_commit_sha: null
+
+  scope:
+    kind: implementation
+    summary: Add a login form to the existing app.
+
+  artifacts:
+    raw_idea: raw-idea.md
+    answers: null
+    brief: null
+    plan: null
+    preflight: null
+    assumptions: assumptions.md
+    decisions: decisions.md
+    implementation_summary: null
+    diff_summary: null
+    review_report: null
+    qa_report: null
+    audit: audit.md
+    handoff: null
+
+  validation:
+    required: true
+    review_completed: false
+    qa_completed: false
+    qa_recorded: false
+    tests_passed: null
+    known_issues_count: 0
+
+  completion:
+    accepted_by: null
+    completion_ref: null
+    completed_at: null
+    abandoned_reason: null

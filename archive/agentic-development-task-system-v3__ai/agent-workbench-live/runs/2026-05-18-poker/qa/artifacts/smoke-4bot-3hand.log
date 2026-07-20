@@ -1,0 +1,36 @@
+Starting game: 4 players, stack=50, blinds=1/2
+
+--- Hand 1 (button: Bot1) ---
+
+=== HAND RESULT ===
+Board: K♣ 9♠ K♦ 5♥ 6♠
+  Bot1: J♣ T♦
+  Bot2: Q♦ A♥
+  Bot3: A♦ 5♦
+  Bot4: 5♣ 2♠
+  Bot3 wins 200 chips
+
+Seats:
+  0 (D) Bot1         stack=0     bet=0     [all-in]
+  1     Bot2         stack=0     bet=0     [all-in]
+  2     Bot3         stack=200   bet=0     [all-in]
+  3     Bot4         stack=0     bet=0     [all-in]
+
+--- Hand 2 (button: Bot3) ---
+
+=== HAND RESULT ===
+Board: —
+  Bot3 wins 3 chips
+
+Seats:
+  0     Bot1         stack=0     bet=0     [eliminated]
+  1     Bot2         stack=0     bet=0     [eliminated]
+  2 (D) Bot3         stack=200   bet=3    
+  3     Bot4         stack=0     bet=0     [eliminated]
+
+
+=== FINAL STANDINGS ===
+  1. Bot3: 200 chips
+  2. Bot1: 0 chips (eliminated)
+  3. Bot2: 0 chips (eliminated)
+  4. Bot4: 0 chips (eliminated)

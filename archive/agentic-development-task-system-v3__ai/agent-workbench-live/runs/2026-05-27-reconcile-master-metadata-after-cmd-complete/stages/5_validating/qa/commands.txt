@@ -1,0 +1,7 @@
+python -m pytest tests/test_runs.py tests/test_reconcile_master_metadata.py -q
+python -m pytest tests/ -q --tb=no
+python tools/reconcile_master_metadata_after_cmd_complete.py
+python tools/reconcile_master_metadata_after_cmd_complete.py --write
+python tools/reconcile_master_metadata_after_cmd_complete.py
+agent-workbench list
+agent-workbench board --static --status human_review

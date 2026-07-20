@@ -1,0 +1,9 @@
+============================================================
+STOP. State: human_review (human-owned).
+The run is staged for human review and decision.
+
+Next moves (human-triggered, type in a session):
+  /complete SAMPLE-RUN-ID  — accept; auto-merges worktree branch into parent
+  /bounce SAMPLE-RUN-ID    — send back to building with structured feedback
+  /abandon SAMPLE-RUN-ID   — discard the run
+============================================================

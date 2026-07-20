@@ -1,0 +1,13 @@
+$ grep -rn "agent-workbench start" agent-workbench-live/ --include="*.py" | grep -v "/runs/" | grep -v "/tests/"
+(empty)
+
+No `agent-workbench start` literal remains in production Python code outside the historical runs/ artifacts (frozen) and the test suite.
+
+For reference, the full grep across all extensions (including the surviving occurrences which are correct as documentation):
+
+$ grep -rn "agent-workbench start" agent-workbench-live/ --include="*.md"
+agent-workbench-live/README.md:124:agent-workbench start "$RUN_ID" --approved-by "$USER"
+agent-workbench-live/.claude/commands/start.md:7:Thin wrapper around `agent-workbench start`. Transitions `ready -> building`.
+agent-workbench-live/.claude/commands/start.md:22:agent-workbench start <run_id> --approved-by "$USER"
+
+These three are documentation describing the CLI's invocation syntax — the CLI binary IS `agent-workbench` with a `start` subcommand. The banner change is purely about the agent-facing output text that the human reads when a run lands in `ready`; the underlying CLI command name is unchanged.

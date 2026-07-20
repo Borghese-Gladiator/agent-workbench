@@ -1,0 +1,54 @@
+# metadata.yaml — canonical run state.
+#
+# This file is the single source of truth for everything about a run.
+# Do NOT derive run state from directory names or git state.
+#
+# Fields are populated by scripts/new-feature.sh and updated by other lifecycle
+# scripts. Manual edits are allowed for in-between transitions (draft → planned,
+# in_progress → in_review). Always update updated_at when editing by hand.
+
+run_id: ""              # YYYY-MM-DD-<feature-slug>-NNN
+feature_slug: ""        # short kebab-case slug, e.g. "better-onboarding"
+
+repo_key: ""            # key from config/repos.yaml, e.g. "frontend"
+repo_path: ""           # absolute path to the git repo root (where .git lives)
+project_subpath: ""     # optional; relative path inside repo_path when the
+                        # project lives in a subdirectory of a larger git repo.
+                        # Empty when project == repo (the common case).
+github_repo: ""         # "<org>/<repo>" — always the GitHub repo at repo_path
+
+default_branch: ""      # e.g. "main"
+branch_name: ""         # ai/<run_id>
+
+worktree_path: ""       # absolute path; set by create-worktree.sh
+
+# Valid: draft | planned | investigating | investigated
+#      | in_progress | in_review | qa | merged | abandoned
+# `investigating` and `investigated` are only valid when run_type=investigation.
+status: "draft"
+
+# GitHub CLI integration. All of these are optional and only consulted by
+# scripts/open-pr.sh and scripts/check-pr.sh. Leaving them at defaults means
+# this run is treated as a "no-gh" run — `validate-workbench.sh` will warn
+# (but not fail) if `gh` is missing.
+pr_url: ""              # set by open-pr.sh after `gh pr create`
+pr_number: ""           # set by open-pr.sh
+remote_name: "origin"   # which git remote to push the feature branch to
+# "true" makes validate-workbench.sh fail if `gh` is not installed. Use this
+# on runs that absolutely need the gh integration to function.
+github_cli_required: "false"
+
+# Investigation → fan-out workflow.
+# parent_run_id is set on children by spawn-children.sh; format YYYY-MM-DD-<slug>-NNN.
+# linear_ticket carries through from from-linear.sh; full URL or bare KEY-### are both valid.
+# run_type: investigation | feature | review | hotfix. "feature" is the default.
+parent_run_id: ""
+linear_ticket: ""
+run_type: "feature"
+
+# Beads integration. Populated by scripts/sync-to-beads.sh; format "bd-XX".
+# Empty means this run has not been mirrored to Beads yet (Beads is optional).
+beads_task_id: ""
+
+created_at: ""          # ISO-8601 UTC, e.g. 2026-05-06T15:04:05Z
+updated_at: ""          # ISO-8601 UTC

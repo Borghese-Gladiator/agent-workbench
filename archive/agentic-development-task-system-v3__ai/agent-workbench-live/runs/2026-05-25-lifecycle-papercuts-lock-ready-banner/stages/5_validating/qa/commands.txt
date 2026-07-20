@@ -1,0 +1,6 @@
+python -m pytest tests/test_stop_banner.py tests/test_repos.py
+WRITE_SNAPSHOTS=1 python -m pytest tests/test_stop_banner.py::TestSnapshots::test_ready_snapshot
+python -m pytest tests
+git check-ignore -v agentic-development-task-system-v3__ai/agent-workbench-live/runs/2026-05-25-lifecycle-papercuts-lock-ready-banner/.lock
+PYTHONPATH=. python -c "from lib.cli._stop_banner import print_stop_banner; print_stop_banner('ready', 'EXAMPLE-RUN-ID')"
+grep -rn "agent-workbench start" agent-workbench-live/ --include="*.py"

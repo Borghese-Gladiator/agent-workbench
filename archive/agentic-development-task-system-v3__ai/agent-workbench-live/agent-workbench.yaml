@@ -1,0 +1,116 @@
+schema_version: 1
+
+cli:
+  name: agent-workbench
+
+paths:
+  runs_dir: runs
+  worktrees_dir: ~/GitHub/LOCAL_worktrees/new-tech-monorepo/agent-workbench-live/worktrees
+  schemas_dir: schemas
+
+defaults:
+  branch_prefix: agent
+  base_ref: HEAD
+  run_id_template: "{date}-{slug}"
+  worktree_name_template: "{date}__{slug}"
+  branch_name_template: "{branch_prefix}/{worktree_name}"
+  new_repo_default_layout: monorepo
+  max_build_iterations: 5
+
+policies:
+  local_only: true
+  one_repo_per_run: true
+  one_worktree_per_run: true
+  allow_multi_repo_runs: false
+  create_pull_requests: false
+  merge_branches: false
+  store_global_repo_registry: false
+  mutate_original_checkout: false
+  monorepo_default_for_new_repos: true
+  # warn (default): metadata.load() prints schema violations to stderr but
+  # still returns the data. strict: violations raise MetadataError and the
+  # CLI exits non-zero. Unknown extra keys are silent under warn (additive
+  # backcompat) and a violation under strict.
+  metadata_validation: warn
+
+questions:
+  allowed_states:
+    - draft
+  disallowed_after_draft: true
+
+repo:
+  repo_path_required_per_run: true
+  repo_name_default: basename_of_repo_path
+  repo_name_override_allowed: true
+  existing_repo_mode: existing
+  new_repo_mode: new
+  new_repo_created_at_user_path: true
+  worktree_path_template: "{workbench_root}/{worktrees_dir}/{repo_name}/{worktree_name}"
+
+naming:
+  sanitize_repo_name: true
+  sanitize_worktree_name: true
+  reject_empty_slug: true
+  reject_duplicate_worktree_path: true
+  branch_collision_strategy: reject
+  duplicate_repo_basename_strategy: require_repo_name_override
+
+gates:
+  require_ready_gate: true
+  require_preimplementation_audit_inputs: true
+  require_validation_before_human_review: true
+  require_handoff_before_human_review: true
+  require_acceptance_before_done: true
+
+audit:
+  required: true
+  machine_log: events.jsonl
+  human_summary: audit.md
+  assumptions_required_before_building: true
+  decisions_required_before_building: true
+  command_logging_required: true
+  transition_evidence_required: true
+
+validation:
+  review_required: true
+  qa_required: true
+  qa_commands_file: qa/commands.txt
+  qa_report_file: qa/report.md
+  qa_artifacts_dir: qa/artifacts
+  qa_recordings_dir: qa/recordings
+  qa_traces_dir: qa/traces
+
+board:
+  # Flag any run that has been in human_review for at least this many hours
+  # as stale on `agent-workbench board`. See TODO §1.
+  stale_human_review_hours: 24
+  # TTL on the `_WORKTREE_CACHE` in lib/runs.py. Short-lived CLI calls
+  # (< 1s lifetime) never hit expiry and pay git cost once. The long-running
+  # `agent-workbench board` ticks see new worktrees within this many seconds.
+  # See lib/runs.py module docstring for the contract.
+  worktree_cache_ttl_seconds: 2.0
+  # How often the board re-scans the worktree set to schedule watchdog
+  # observers on worktrees created mid-session. Lower = faster pickup of new
+  # worktrees, higher = less cost per tick. See lib/board/app.py:on_mount.
+  watch_rescan_seconds: 5.0
+
+# Pass-2 (B5): when a run's largest session exceeds this turn count,
+# `validate --init` prints a fresh-session handoff block urging the operator
+# to exit Claude Code and restart in a fresh session before /validate. See
+# `agent-workbench-live/AGENTS.md` § "Session discipline".
+session_staleness_threshold_turns: 100
+
+artifacts:
+  raw_idea: raw-idea.md
+  answers: answers.md
+  brief: brief.md
+  plan: plan.md
+  preflight: preflight.md
+  assumptions: assumptions.md
+  decisions: decisions.md
+  implementation_summary: implementation-summary.md
+  diff_summary: diff-summary.md
+  review_report: review.md
+  qa_report: qa/report.md
+  audit: audit.md
+  handoff: handoff.md

@@ -1,0 +1,31 @@
+{
+  "description": "Build a from-scratch, no-build static tic-tac-toe app and prove it with a Playwright video. The canonical record/headless example.",
+  "defaultMode": "record",
+  "resultMode": "play",
+  "project": {
+    "create": true,
+    "name": "Tic-Tac-Toe (demo)",
+    "target": "~/GitHub/wb-tictactoe-demo",
+    "defaultBranch": "main",
+    "agentRuntime": "claude",
+    "deliveryPolicy": "create_pr",
+    "devCommand": "npx --yes serve -l 5173 .",
+    "testCommand": "npm test --silent || true",
+    "typecheckCommand": "npx --yes tsc --noEmit || true"
+  },
+  "task": {
+    "title": "Build a playable tic-tac-toe game",
+    "request": [
+      "Build a tic-tac-toe game as a single static web app (index.html + a JS file,",
+      "no framework, no build step) that two players can play in the browser:",
+      "- A 3x3 grid the players click to place X then O, alternating.",
+      "- Detect and announce the winner (or a draw), and offer a reset.",
+      "- Use accessible, user-facing markup so a Playwright test can drive it with",
+      "  getByRole.",
+      "",
+      "In the QA/validation stage, write and run a Playwright end-to-end test that",
+      "plays a full game to a win in a real browser, with video + trace ON, and",
+      "leave the recording as proof."
+    ]
+  }
+}

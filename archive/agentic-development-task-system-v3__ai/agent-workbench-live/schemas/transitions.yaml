@@ -1,0 +1,197 @@
+schema_version: 1
+kind: transition_schema
+
+states:
+  non_terminal:
+    - draft
+    - shaping
+    - planning
+    - ready
+    - building
+    - validating
+    - followups
+    - human_review
+
+  terminal:
+    - done
+    - abandoned
+
+initial_state: draft
+
+rules:
+  terminal_states_cannot_transition: true
+  transitions_require_evidence: true
+  evidence_values_must_be_non_empty: true
+  status_changes_must_emit_transition_event: true
+  manual_metadata_status_edits_are_invalid: true
+  abandoned_preserves_artifacts: true
+  done_preserves_artifacts: true
+
+transitions:
+  - from: draft
+    to: shaping
+    description: Begin converting raw human input into a code-blind brief.
+    evidence:
+      required:
+        - raw_idea_path
+      optional:
+        - answers_path
+    emits:
+      - TransitionApplied
+
+  - from: shaping
+    to: planning
+    description: Brief exists; planning may now inspect the target repo if applicable.
+    evidence:
+      required:
+        - brief_path
+      optional:
+        - scope_kind
+    emits:
+      - TransitionApplied
+
+  - from: planning
+    to: ready
+    description: Plan, assumptions, decisions, preflight, and target worktree information are ready for human approval.
+    evidence:
+      required:
+        - plan_path
+        - assumptions_path
+        - decisions_path
+        - preflight_path
+        - repo_path
+        - repo_name
+        - worktree_name
+        - branch_name
+      optional:
+        - base_ref
+        - scope_kind
+    emits:
+      - TransitionApplied
+
+  - from: ready
+    to: building
+    description: Human approved implementation; branch and worktree have been created or verified.
+    evidence:
+      required:
+        - approved_by
+        - repo_path
+        - repo_name
+        - base_ref
+        - branch_name
+        - worktree_name
+        - worktree_path
+        - preflight_path
+      optional:
+        - repo_mode
+        - initial_commit_sha
+        - worktree_created_by
+    emits:
+      - TransitionApplied
+      - WorktreeCreated
+
+  - from: building
+    to: validating
+    description: Implementation is complete enough for review and QA.
+    evidence:
+      required:
+        - implementation_summary_path
+        - diff_summary_path
+        - build_iterations
+        - build_exit_reason
+      optional:
+        - commit_sha
+        - changed_files_count
+    emits:
+      - TransitionApplied
+
+  - from: validating
+    to: followups
+    description: Self-review and QA are complete; brainstorm forward-looking follow-ups before the reviewer lands. (Staged-layout runs only — TODO §1f.)
+    evidence:
+      required:
+        - review_report_path
+        - qa_report_path
+        - audit_path
+      optional:
+        - tests_passed
+        - known_issues_count
+        - qa_recording_path
+        - qa_trace_path
+    emits:
+      - TransitionApplied
+
+  - from: validating
+    to: human_review
+    description: Direct validating-to-human_review path for flat-layout legacy runs only. Staged runs route through followups instead.
+    evidence:
+      required:
+        - review_report_path
+        - qa_report_path
+        - audit_path
+        - handoff_path
+        - branch_name
+        - worktree_path
+      optional:
+        - tests_passed
+        - known_issues_count
+        - qa_recording_path
+        - qa_trace_path
+    emits:
+      - TransitionApplied
+
+  - from: followups
+    to: human_review
+    description: Follow-up candidates are recorded; local branch and worktree are ready for human inspection.
+    evidence:
+      required:
+        - followups_path
+        - handoff_path
+        - branch_name
+        - worktree_path
+      optional:
+        - audit_path
+        - entry_count
+    emits:
+      - TransitionApplied
+
+  - from: human_review
+    to: building
+    description: Human bounced the work back for more changes.
+    evidence:
+      required:
+        - bounce_reason
+      optional:
+        - requested_by
+        - handoff_path
+    emits:
+      - TransitionApplied
+      - BounceRequested
+
+  - from: human_review
+    to: done
+    description: Human accepted the local branch, worktree, or completed result.
+    evidence:
+      required:
+        - accepted_by
+        - completion_ref
+        - audit_path
+      optional:
+        - accepted_at
+        - notes
+    emits:
+      - TransitionApplied
+      - RunCompleted
+
+wildcard_transitions:
+  - from: any_non_terminal
+    to: abandoned
+    description: Stop the run intentionally while preserving artifacts.
+    evidence:
+      required:
+        - abandoned_reason
+      optional:
+        - abandoned_by
+    emits:
+      - TransitionApplied
+      - RunAbandoned

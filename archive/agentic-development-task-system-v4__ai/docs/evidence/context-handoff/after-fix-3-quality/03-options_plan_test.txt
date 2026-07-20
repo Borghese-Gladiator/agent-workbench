@@ -1,0 +1,79 @@
+===== stage=options_plan_test mode=stage-packet =====
+taskId: task_kw4k7ANF9K
+contextArtifactIds: art_CnFQYmBfuH, art_0YvQD22YpN, art_R73O8zgTVV, art_0bolwcy3Um, art_xoNF3XohQN
+reviewerFeedback: (none)
+skillText: (none)
+----- PROMPT (3728 chars) -----
+# Stage: options_plan_test
+
+## Task
+Title: Add divide with divide-by-zero handling
+
+Request:
+Add a divide(a, b) function to the calc library in src/calc.js that throws a clear error on divide-by-zero. Follow the existing style of the other functions.
+
+## Your job
+Produce an Execution Plan: the chosen approach and an ordered change list (no menu of rejected alternatives unless a real fork needs the operator to decide — see "Asking the operator"). Include a "## Validation by criterion" table (`Criterion ID | Validation method | Test type | Automated?`) — one row per Acceptance Criteria ID from the brief, binding each to how it will be proven (test type = unit/integration/e2e/manual; Automated? = yes/no). Every brief criterion must appear; if one cannot be validated, say so and why. Read-only — do not modify any files.
+
+## Asking the operator
+If this stage has a material fork the operator should decide — competing
+approaches, a scope tradeoff, or a risk worth flagging — call the
+`mcp__ask__workbench_ask` tool with a short `header`, the `question`, and 2–4
+labelled `options` (each with a `description`); set `multiSelect: true` only if
+more than one may apply. Wait for the answer, then continue. Ask only when it
+genuinely changes the outcome — don't ask about things you can reasonably decide.
+
+## Prior context
+The following artifacts were produced by EARLIER stages of THIS task. They
+are the authoritative record of what was already decided/understood — read
+them and build on them; do NOT re-derive what they already cover.
+
+### Task Brief — task_brief (claude)
+
+Without filesystem tools in this session, I'll work from the task description directly — the request is unambiguous enough that no exploration is needed.
+
+---
+
+## Task Brief: Add `divide(a, b)` to calc library
+
+Add a `divide(a, b)` function to `src/calc.js` matching the existing function style, with divide-by-zero protection.
+
+## Acceptance Criteria
+
+| ID  | Requirement | Risk |
+|-----|-------------|------|
+| AC1 | `divide(a, b)` returns the correct quotient `a / b` for valid numeric inputs | L |
+| AC2 | Calling `divide(a, 0)` throws an error with a clear, descriptive message | M |
+
+## Scope note
+
+Style conformance (naming, export pattern, argument handling) is implicitly required but is not a separate user-visible goal — it is a constraint on how AC1 is delivered.
+
+### Discovery — discovery (claude)
+
+The file is straightforward. Three named exports, each a one-liner arrow-style function declaration (`export function name(a, b) { return ... }`). No default export, no input validation on the existing functions, no test file visible in this directory.
+
+**What to add:** A fourth exported function in the same style, directly after `multiply`:
+
+```js
+export function divide(a, b) {
+  if (b === 0) throw new Error("Division by zero");
+  return a / b;
+}
+```
+
+**Conventions to follow:**
+- Named `export function` declaration (not `const fn = ...`)
+- Two parameters `(a, b)`, no type guards beyond the zero check
+- Single `return` expression for the happy path
+- No JSDoc, no comments (none on existing functions)
+
+**Watch out for:** Using `b === 0` (strict equality) is appropriate here — passing `"0"` or other falsy values will still divide, which matches the permissive style of the existing functions that also do no type validation.
+
+_All context artifact ids for this task: art_CnFQYmBfuH, art_0YvQD22YpN, art_R73O8zgTVV, art_0bolwcy3Um, art_xoNF3XohQN._
+
+## Output
+Write your execution_plan as clear Markdown. Then, as the LAST thing in your
+response, emit a single fenced ```json block with a structured summary
+of the execution_plan (keys appropriate to the stage). The json block is parsed
+and stored as a structured artifact.
