@@ -58,6 +58,38 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@24.13.3)(terser@5.49.0)
 
+  packages/agent-gateway:
+    dependencies:
+      '@awb/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@24.13.3)(terser@5.49.0)
+
+  packages/capability-broker:
+    dependencies:
+      '@awb/domain':
+        specifier: workspace:*
+        version: link:../domain
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@24.13.3)(terser@5.49.0)
+
   packages/config:
     dependencies:
       yaml:
@@ -129,6 +161,22 @@ importers:
       zod:
         specifier: ^3.24.1
         version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@24.13.3)(terser@5.49.0)
+
+  packages/execution:
+    dependencies:
+      '@awb/domain':
+        specifier: workspace:*
+        version: link:../domain
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -239,6 +287,28 @@ importers:
       '@temporalio/worker':
         specifier: ^1.11.7
         version: 1.20.3(tslib@2.8.1)
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@24.13.3)(terser@5.49.0)
+
+  packages/workspace:
+    dependencies:
+      '@awb/config':
+        specifier: workspace:*
+        version: link:../config
+      '@awb/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@awb/repository':
+        specifier: workspace:*
+        version: link:../repository
+    devDependencies:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
