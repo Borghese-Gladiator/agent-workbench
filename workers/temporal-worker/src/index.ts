@@ -10,7 +10,13 @@ export const TASK_QUEUE = 'awb-task-queue';
 export async function startWorker(): Promise<Worker> {
   const worker = await Worker.create({
     taskQueue: TASK_QUEUE,
-    workflowsPath: join(__dirname, '..', 'node_modules', '@awb', 'workflow', 'dist', 'task-workflow.js'),
+    // Resolve straight to the real package path, not through the node_modules/@awb symlink —
+    // Temporal's webpack-based bundler writes its generated entrypoint's error output relative
+    // to cwd rather than consistently following the symlink's resolved path, producing a
+    // spurious ENOENT even though the file itself is written correctly. This exact absolute path
+    // (repo-root-relative, matching pnpm's monorepo layout) is the same one already proven to
+    // work in workers/temporal-worker's own Temporal integration test.
+    workflowsPath: join(__dirname, '..', '..', '..', 'packages', 'workflow', 'dist', 'task-workflow.js'),
     activities,
   });
   await worker.run();

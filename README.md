@@ -44,20 +44,47 @@ task list for the full detail on each.
 
 ## Running it
 
+Four processes, each in its own terminal:
+
 ```bash
 pnpm install
-pnpm build                                    # builds every package's dist/ output
-node apps/cli/dist/index.js init               # bootstraps ~/.agentic-workbench
-node apps/cli/dist/index.js daemon start       # starts the Fastify daemon on :4417
-temporal server start-dev                      # separately: the local Temporal dev server
-node workers/temporal-worker/dist/index.js     # the Temporal worker
-pnpm --filter @awb/web dev                     # the dashboard on :5317
+
+# 1. Local Temporal dev server (must be up before the worker connects)
+temporal server start-dev
+
+# 2. Temporal worker — runs the real 9-phase runPhase Activity
+pnpm --filter @awb/temporal-worker dev
+
+# 3. The daemon — Fastify API on :4417
+pnpm --filter @awb/daemon dev
+
+# 4. The web dashboard on :5317 (optional — you can drive everything via the CLI instead)
+pnpm --filter @awb/web dev
 ```
 
-(`apps/cli/package.json` declares a `bin: awb` entry for when this is
-installed as a real package — inside this checkout, invoke it via
-`node apps/cli/dist/index.js <command>` as above, or `pnpm link` the CLI
-package yourself if you want a bare `awb` command on your PATH.)
+Each `dev` script runs the app's TypeScript directly via `tsx watch` (auto-
+restarts on save) — no separate build step needed. The worker's `dev` script
+builds `packages/workflow` first automatically, since Temporal's bundler
+needs a real compiled `task-workflow.js` to package, not live TS.
+
+Once the daemon is up, drive it with the CLI (built once via `pnpm build`):
+
+```bash
+node apps/cli/dist/index.js init
+node apps/cli/dist/index.js repo add /path/to/some/real/git/repo
+node apps/cli/dist/index.js repo refresh <repositoryId>
+node apps/cli/dist/index.js repo approve <repositoryId>
+node apps/cli/dist/index.js task create <repositoryId> --prompt "..."
+node apps/cli/dist/index.js task show <repositoryId> <taskId>
+node apps/cli/dist/index.js task approve-contract <repositoryId> <taskId> --version 1
+```
+
+`apps/cli/package.json` declares a `bin: awb` entry for when this is
+installed as a real package; `pnpm link` the CLI package yourself if you
+want a bare `awb` command on your PATH instead of the `node apps/cli/dist/...`
+form above. `awb daemon start`/`awb daemon stop` manage a detached daemon
+process directly (spawns `apps/daemon/dist/index.js`, so run `pnpm build`
+first if you use this path instead of `pnpm --filter @awb/daemon dev`).
 
 ## Requirements
 

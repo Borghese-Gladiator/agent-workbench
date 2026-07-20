@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --dir ."
+    "test": "vitest run --dir .",
+    "cli": "tsx src/index.ts"
   },
   "dependencies": {
     "@awb/config": "workspace:*",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "typescript": "^5.7.2",
+    "tsx": "^4.19.2",
     "vitest": "^2.1.8",
     "@types/node": "^24.0.0"
   }

@@ -7,6 +7,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --dir . --pool=forks",
+    "predev": "pnpm --filter @awb/workflow run build",
+    "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js"
   },
   "dependencies": {
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "typescript": "^5.7.2",
+    "tsx": "^4.19.2",
     "vitest": "^2.1.8",
     "@types/node": "^24.0.0",
     "@temporalio/testing": "^1.11.7"
