@@ -22,7 +22,7 @@ instead of reaching sideways.
 @awb/agent-gateway       → domain
 @awb/capability-broker   → domain
 @awb/planning            → domain, agent-gateway, capability-broker, workflow
-@awb/verification        → domain, evidence  (Milestone 7)
+@awb/verification        → domain, evidence, execution
 @awb/qa                  → domain, evidence  (Milestone 8)
 @awb/review              → domain, evidence  (Milestone 8)
 @awb/github              → domain, evidence  (Milestone 9)

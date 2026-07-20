@@ -307,6 +307,28 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@24.13.3)(terser@5.49.0)
 
+  packages/verification:
+    dependencies:
+      '@awb/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@awb/evidence':
+        specifier: workspace:*
+        version: link:../evidence
+      '@awb/execution':
+        specifier: workspace:*
+        version: link:../execution
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@24.13.3)(terser@5.49.0)
+
   packages/workflow:
     dependencies:
       '@awb/domain':

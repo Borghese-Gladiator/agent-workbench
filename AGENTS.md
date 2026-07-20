@@ -81,7 +81,7 @@ Full field-level detail: `docs/domain-model.md`.
 | Agent adapter interface + mock/Claude adapters | `packages/agent-gateway` |
 | Per-role tool allowlists | `packages/capability-broker` |
 | Task contract, planner↔critic loop, builder slice loop | `packages/planning` |
-| Verification command runner | `packages/verification` |
+| Verification command runner + evidence freshness/waivers | `packages/verification` |
 | Browser/CLI/API/library QA executors | `packages/qa` |
 | Adversarial reviewer | `packages/review` |
 | GitHub push/PR/feedback/video-upload | `packages/github` |
