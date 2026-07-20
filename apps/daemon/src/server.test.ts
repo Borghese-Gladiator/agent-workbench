@@ -101,4 +101,12 @@ describe('daemon server', () => {
     expect(inspected.repository.trusted).toBe(true);
     expect(inspected.latestSnapshot.headSha).toHaveLength(40);
   });
+
+  it('returns an empty list on GET /api/tasks when no tasks were created this process', async () => {
+    // POST /api/tasks requires a live Temporal server, which this suite does not run against, so
+    // this only exercises the route's shape with the in-memory list in its initial state.
+    const response = await server.app.inject({ method: 'GET', url: '/api/tasks' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([]);
+  });
 });

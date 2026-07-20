@@ -14,20 +14,43 @@ import {
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
 import { TASK_QUEUE } from '../temporal-worker-constants.js';
 
+export interface CreatedTaskRecord {
+  taskId: string;
+  repositoryId: string;
+  workflowId: string;
+  prompt: string;
+  createdAt: string;
+}
+
+/**
+ * In-memory record of tasks created via POST /api/tasks, scoped to this daemon process's
+ * lifetime only (cleared on restart). This is an honest MVP substitute for a real "list all
+ * tasks" query — Temporal remains the source of truth for actual workflow state; this array only
+ * lets the Tasks UI page show what was created this session. Not persisted to SQLite.
+ */
+const createdTasks: CreatedTaskRecord[] = [];
+
 export function registerTaskRoutes(app: FastifyInstance): void {
   app.post<{ Body: { repositoryId: string; prompt: string } }>('/api/tasks', async (request, reply) => {
     const client = await getTemporalClient();
     const taskId = randomUUID();
-    const { repositoryId } = request.body;
+    const { repositoryId, prompt } = request.body;
+    const workflowId = workflowIdFor(repositoryId, taskId);
 
     await client.workflow.start(TaskWorkflow, {
       taskQueue: TASK_QUEUE,
-      workflowId: workflowIdFor(repositoryId, taskId),
+      workflowId,
       args: [{ taskId, repositoryId }],
     });
 
+    createdTasks.unshift({ taskId, repositoryId, workflowId, prompt, createdAt: new Date().toISOString() });
+
     reply.code(201);
-    return { taskId, repositoryId, workflowId: workflowIdFor(repositoryId, taskId) };
+    return { taskId, repositoryId, workflowId };
+  });
+
+  app.get('/api/tasks', async () => {
+    return createdTasks;
   });
 
   app.get<{ Params: { repositoryId: string; taskId: string } }>(
