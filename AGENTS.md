@@ -84,7 +84,7 @@ Full field-level detail: `docs/domain-model.md`.
 | Verification command runner + evidence freshness/waivers | `packages/verification` |
 | Browser/CLI/API/library QA executors | `packages/qa` |
 | Adversarial reviewer (review-runner, Challenge gates, finding lifecycle) | `packages/review` |
-| GitHub push/PR/feedback/video-upload | `packages/github` |
+| GitHub push/PR/evidence-matrix/feedback classification | `packages/github` |
 | Runtime/token/event telemetry schema | `packages/observability` |
 | Human-gate trigger policy | `packages/policy` |
 | Temporal worker process (Activities live here) | `workers/temporal-worker` |

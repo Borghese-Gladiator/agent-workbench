@@ -25,7 +25,7 @@ instead of reaching sideways.
 @awb/verification        → domain, evidence, execution
 @awb/qa                  → domain, evidence, execution, playwright
 @awb/review              → domain, agent-gateway, capability-broker, evidence
-@awb/github              → domain, evidence  (Milestone 9)
+@awb/github              → domain, evidence, @octokit/rest
 @awb/observability        → domain            (Milestone 10)
 @awb/policy               → domain            (Milestone 3/6)
 
