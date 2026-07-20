@@ -85,8 +85,9 @@ Full field-level detail: `docs/domain-model.md`.
 | Browser/CLI/API/library QA executors | `packages/qa` |
 | Adversarial reviewer (review-runner, Challenge gates, finding lifecycle) | `packages/review` |
 | GitHub push/PR/evidence-matrix/feedback classification | `packages/github` |
-| Runtime/token/event telemetry schema | `packages/observability` |
 | Human-gate trigger policy | `packages/policy` |
+| Token/usage aggregation | `packages/agent-gateway` (`UsageAggregator`) |
+| Runtime-by-phase tracking | `packages/workflow` (`TaskWorkflowState.runtimeMsByPhase`) |
 | Temporal worker process (Activities live here) | `workers/temporal-worker` |
 | Daemon (Fastify API, the only SQLite writer) | `apps/daemon` |
 | Web dashboard | `apps/web` |

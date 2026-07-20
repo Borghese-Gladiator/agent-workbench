@@ -26,13 +26,29 @@ instead of reaching sideways.
 @awb/qa                  → domain, evidence, execution, playwright
 @awb/review              → domain, agent-gateway, capability-broker, evidence
 @awb/github              → domain, evidence, @octokit/rest
-@awb/observability        → domain            (Milestone 10)
-@awb/policy               → domain            (Milestone 3/6)
+@awb/policy              → domain
 
-apps/cli       → config, database, domain, repository (+ more as milestones land)
-apps/daemon    → nearly all packages (it's the composition root)
-apps/web       → nothing from packages/ directly — talks to apps/daemon over HTTP/WS only
+apps/cli               → config, database, domain, repository, workflow
+apps/daemon            → config, database, domain, repository, workflow, @temporalio/client, fastify
+apps/web               → nothing from packages/ directly — talks to apps/daemon over HTTP/WS only
+workers/temporal-worker → domain, workflow, agent-gateway, capability-broker, planning,
+                          verification, qa, review, github, evidence (Activities call into
+                          every I/O-performing package; the Workflow it hosts does not)
 ```
+
+## Package removed: `@awb/observability`
+
+The original scaffolding included an empty `packages/observability` (runtime/
+token/event telemetry schema, per product spec's Milestone 10 scope). It was
+never populated: token/usage aggregation ended up living directly in
+`@awb/agent-gateway` (`UsageAggregator`, since usage is inherently a property
+of an agent session, not a separate concern), and runtime-breakdown-by-phase
+lives in `TaskWorkflowState` (`@awb/workflow`) since the Workflow already
+tracks phase transitions and is the natural owner of "how long did phase X
+take." No code ever depended on the empty package, so it was deleted rather
+than left as a confusing empty stub — a future need for a shared telemetry
+package should re-derive it from what `agent-gateway`/`workflow` already
+track, not resurrect this file's original shape blindly.
 
 ## Why this shape
 
