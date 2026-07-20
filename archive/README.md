@@ -102,3 +102,9 @@ than because it failed the way v1-v3 did — see its own
 trail and [`README.md`](agentic-development-task-system-v4__ai/README.md) /
 [`CLAUDE.md`](agentic-development-task-system-v4__ai/CLAUDE.md) for the full
 architecture as it stood at freeze time.
+
+Why it was archived
+- QA for tasks was not thorough enough to fully validate it was working
+- QA artifacts were different every time, so it was difficult to use and validate. I want an actual webm video or screenshot. Since it was entirely reliant on the model, it was RNG if it produced something that I could use to actually verify functionality
+- Lifecycle stages were not enforced well enough. Tasks would move through towards completion
+- Retries reran with the entirety of the cached tokens and increased costs by a decent amount

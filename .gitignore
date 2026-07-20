@@ -1,0 +1,20 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.DS_Store
+coverage/
+.env
+.env.local
+*.log
+pnpm-debug.log*
+
+# local workbench data dirs used by tests
+.awb-data/
+.temporal-data/
+
+# playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
