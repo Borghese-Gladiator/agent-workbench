@@ -16,6 +16,7 @@ instead of reaching sideways.
 @awb/workflow           → domain   (+ @temporalio/* — no other @awb deps: Workflow code
                                      must stay deterministic and cannot reach into
                                      database/repository/etc directly; Activities do that)
+@awb/temporal-worker     → domain, workflow  (+ @temporalio/worker, @temporalio/activity)
 @awb/workspace           → domain            (Milestone 4)
 @awb/execution           → domain            (Milestone 4)
 @awb/agent-gateway       → domain            (Milestone 5)
@@ -30,7 +31,6 @@ instead of reaching sideways.
 apps/cli       → config, database, domain, repository (+ more as milestones land)
 apps/daemon    → nearly all packages (it's the composition root)
 apps/web       → nothing from packages/ directly — talks to apps/daemon over HTTP/WS only
-workers/temporal-worker → workflow + every Activity-implementing package
 ```
 
 ## Why this shape
