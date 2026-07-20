@@ -102,6 +102,11 @@ current values for each, not a heuristic.
 ## Testing
 
 `@temporalio/testing`'s `TestWorkflowEnvironment` runs `TaskWorkflow` against
-the fake/mock agent adapter with time-skipping, so a full lifecycle test
-(including phase repair loops and human-approval waits) runs in real time on
-the order of seconds. See `docs/testing.md`.
+the fake/mock agent adapter. Use `createLocal()` (real-time), not
+`createTimeSkipping()` — these tests drive the workflow with wall-clock
+polling from outside (queries/signals/updates issued by the test driver),
+and time-skipping's "advance the clock whenever the workflow is idle"
+behavior races against that polling and produces spurious client-side
+execution timeouts. A full lifecycle test (including phase repair loops and
+human-approval waits) still runs in real time on the order of seconds. See
+`docs/testing.md` and `packages/workflow/README.md`.

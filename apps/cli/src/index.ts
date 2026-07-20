@@ -14,12 +14,15 @@ registerStub(program, 'daemon stop', 'Stop the local daemon', 'Milestone 10');
 
 registerRepoCommands(program);
 
-registerStub(program, 'task create', 'Create a task', 'Milestone 3/6');
-registerStub(program, 'task list', 'List tasks', 'Milestone 3');
-registerStub(program, 'task show', 'Show a task', 'Milestone 3');
-registerStub(program, 'task approve-contract', 'Approve a task contract', 'Milestone 6');
-registerStub(program, 'task cancel', 'Cancel a task', 'Milestone 3');
-registerStub(program, 'task resume', 'Resume a task', 'Milestone 3');
+// Every `task ...` command needs a running daemon (Milestone 10) to act as the Temporal client —
+// the Workflow/completion-policy engine (Milestone 3) and planning/implementation loop
+// (Milestone 6) exist, but nothing yet starts a worker + exposes it over the CLI/API.
+registerStub(program, 'task create', 'Create a task', 'Milestone 10');
+registerStub(program, 'task list', 'List tasks', 'Milestone 10');
+registerStub(program, 'task show', 'Show a task', 'Milestone 10');
+registerStub(program, 'task approve-contract', 'Approve a task contract', 'Milestone 10');
+registerStub(program, 'task cancel', 'Cancel a task', 'Milestone 10');
+registerStub(program, 'task resume', 'Resume a task', 'Milestone 10');
 
 registerStub(program, 'open', 'Open the local UI', 'Milestone 10');
 

@@ -38,13 +38,19 @@ product spec §34:
 
 ## Temporal tests (`@temporalio/testing`)
 
-`TestWorkflowEnvironment` (time-skipping) drives `TaskWorkflow` against the
-fake agent adapter for every scenario in product spec §34: successful
-lifecycle, contract rejection, plan-critic loop, verification repair loop,
-QA repair loop, review repair loop, human approval wait, budget exhaustion,
-candidate SHA invalidation, release rebase invalidation, PR merged, PR closed
-without merge, cancellation, continue-as-new threshold. These live under
-`packages/workflow/src/*.workflow.test.ts` and `workers/temporal-worker` as
+`TestWorkflowEnvironment.createLocal()` (real-time, not time-skipping — see
+`docs/temporal-workflows.md`'s Testing section for why) drives `TaskWorkflow`
+against the fake agent adapter for every scenario in product spec §34:
+successful lifecycle, contract rejection, plan-critic loop, verification
+repair loop, QA repair loop, review repair loop, human approval wait, budget
+exhaustion, candidate SHA invalidation, release rebase invalidation, PR
+merged, PR closed without merge, cancellation, continue-as-new threshold.
+As of Milestone 3, `packages/workflow/src/task-workflow.test.ts` covers the
+lifecycle scenarios that don't require verification/QA/review packages
+(which land in Milestones 6-8); the remaining scenarios extend this file as
+those packages arrive rather than living in a separate
+`*.workflow.test.ts` naming convention. These live under
+`packages/workflow/src/*.test.ts` and `workers/temporal-worker` as
 appropriate.
 
 ## Repository fixtures
