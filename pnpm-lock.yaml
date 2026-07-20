@@ -191,6 +191,31 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@24.13.3)(terser@5.49.0)
 
+  packages/planning:
+    dependencies:
+      '@awb/agent-gateway':
+        specifier: workspace:*
+        version: link:../agent-gateway
+      '@awb/capability-broker':
+        specifier: workspace:*
+        version: link:../capability-broker
+      '@awb/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@awb/workflow':
+        specifier: workspace:*
+        version: link:../workflow
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@24.13.3)(terser@5.49.0)
+
   packages/policy:
     dependencies:
       '@awb/domain':

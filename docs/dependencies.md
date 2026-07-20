@@ -19,8 +19,9 @@ instead of reaching sideways.
 @awb/temporal-worker     → domain, workflow  (+ @temporalio/worker, @temporalio/activity)
 @awb/workspace           → domain, config, repository (reuses repository's runGit helper)
 @awb/execution           → domain
-@awb/agent-gateway       → domain            (Milestone 5)
+@awb/agent-gateway       → domain
 @awb/capability-broker   → domain
+@awb/planning            → domain, agent-gateway, capability-broker, workflow
 @awb/verification        → domain, evidence  (Milestone 7)
 @awb/qa                  → domain, evidence  (Milestone 8)
 @awb/review              → domain, evidence  (Milestone 8)
