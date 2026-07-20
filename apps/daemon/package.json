@@ -1,0 +1,28 @@
+{
+  "name": "@awb/daemon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --dir .",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@awb/config": "workspace:*",
+    "@awb/database": "workspace:*",
+    "@awb/domain": "workspace:*",
+    "@awb/evidence": "workspace:*",
+    "@awb/repository": "workspace:*",
+    "@awb/workflow": "workspace:*",
+    "@temporalio/client": "^1.11.7",
+    "@fastify/websocket": "^11.0.2",
+    "fastify": "^5.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "@types/node": "^24.0.0"
+  }
+}

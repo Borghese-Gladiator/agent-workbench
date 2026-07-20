@@ -2,29 +2,26 @@
 import { Command } from 'commander';
 import { registerInit } from './commands/init.js';
 import { registerRepoCommands } from './commands/repo.js';
+import { registerDaemonCommands } from './commands/daemon.js';
+import { registerTaskCommands } from './commands/task.js';
 import { registerStub } from './commands/not-implemented.js';
 
 const program = new Command();
 program.name('awb').description('Agentic Workbench CLI').version('0.1.0');
 
 registerInit(program);
-
-registerStub(program, 'daemon start', 'Start the local daemon', 'Milestone 10');
-registerStub(program, 'daemon stop', 'Stop the local daemon', 'Milestone 10');
-
+registerDaemonCommands(program);
 registerRepoCommands(program);
+registerTaskCommands(program);
 
-// Every `task ...` command needs a running daemon (Milestone 10) to act as the Temporal client —
-// the Workflow/completion-policy engine (Milestone 3) and planning/implementation loop
-// (Milestone 6) exist, but nothing yet starts a worker + exposes it over the CLI/API.
-registerStub(program, 'task create', 'Create a task', 'Milestone 10');
-registerStub(program, 'task list', 'List tasks', 'Milestone 10');
-registerStub(program, 'task show', 'Show a task', 'Milestone 10');
-registerStub(program, 'task approve-contract', 'Approve a task contract', 'Milestone 10');
-registerStub(program, 'task cancel', 'Cancel a task', 'Milestone 10');
-registerStub(program, 'task resume', 'Resume a task', 'Milestone 10');
+// The daemon has no list-all-tasks endpoint yet (it's a thin Temporal client and Temporal has no
+// built-in "list every workflow" query without a visibility store query API this MVP doesn't
+// wire yet), and "resume" has no daemon-side meaning beyond the Workflow's own `resume` Signal,
+// which isn't exposed as a route yet either — both stay explicit stubs rather than fake commands.
+registerStub(program, 'task list', 'List tasks', 'Milestone 10 follow-up');
+registerStub(program, 'task resume', 'Resume a paused task', 'Milestone 10 follow-up');
 
-registerStub(program, 'open', 'Open the local UI', 'Milestone 10');
+registerStub(program, 'open', 'Open the local UI', 'Milestone 10 (web UI)');
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   console.error(err);
