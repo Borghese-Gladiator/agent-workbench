@@ -12,13 +12,15 @@ product spec §34:
 - `evaluatePhaseCompletion` policy table (`packages/workflow`) — every phase,
   both the "complete" and "not complete" branch, for every listed completion
   criterion.
-- Evidence invalidation cascade (`packages/evidence`) — contract/plan/SHA/
-  scenario version bumps each correctly invalidate the documented downstream
-  evidence kinds and nothing else.
-- Failure fingerprinting (`packages/agent-gateway` or wherever the builder
-  loop lives) — same (command, exit code, failing test IDs, normalized error
-  class, top stack frame) fingerprints compare equal; any one differing
-  compares unequal.
+- Evidence invalidation cascade (`packages/workflow/src/invalidation.ts`) —
+  contract/plan/SHA/scenario version bumps each correctly invalidate the
+  documented downstream phases and nothing else; `packages/verification`'s
+  `evidence-freshness.ts` covers the complementary per-Evidence-record
+  strict-equality freshness check.
+- Failure fingerprinting (`packages/workflow/src/failure-fingerprint.ts`,
+  consumed by `packages/planning`'s builder slice loop) — same (command,
+  exit code, failing test IDs, normalized error class, top stack frame)
+  fingerprints compare equal; any one differing compares unequal.
 - Artifact hashing + content-addressed dedup (`packages/evidence`) — see
   `artifact-store.test.ts`.
 - Cache-key construction (`packages/repository-map`) — same inputs (repo SHA,
@@ -26,13 +28,13 @@ product spec §34:
   differing input changes the key.
 - Permission/capability-broker policies (`packages/capability-broker`) — each
   role's allow/deny table is exercised positively and negatively.
-  Human-gate trigger conditions (`packages/policy`) — each conditional gate
+- Human-gate trigger conditions (`packages/policy`) — each conditional gate
   in product spec §14 fires under the described condition and does not fire
   otherwise.
 - PR feedback classification (`packages/github`) — each of the six
   categories in product spec §29 classifies correctly on representative
   sample comments.
-  Repository fact invalidation (`packages/repository-memory`) — a fact whose
+- Repository fact invalidation (`packages/repository-memory`) — a fact whose
   `sourcePaths` overlap a changed-path set is invalidated; a fact whose paths
   don't overlap survives a refresh.
 

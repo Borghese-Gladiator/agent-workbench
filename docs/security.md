@@ -40,9 +40,13 @@ the prerequisite for stronger isolation, not yet implemented here.
   group; cleanup kills the full tree rather than leaving orphans running
   after a task is cancelled or completes.
 - **Command execution logging.** Every executed command (path, args, cwd,
-  exit code, timestamps) is recorded as a `command_executions` row — there is
-  always an audit trail of what actually ran, independent of what an agent
-  claims it ran.
+  exit code, timestamps) is designed to be recorded as a `command_executions`
+  row — the schema exists (Milestone 1) and `@awb/execution`'s `runCommand`
+  already returns every field that row needs (Milestone 4), but the actual
+  Activity-level write path isn't wired until the daemon (Milestone 10)
+  exists to own that write. Until then, this audit trail is a property of
+  the design, not yet a running guarantee — don't cite this as an existing
+  control before Milestone 10 lands.
 - **Network default-deny beyond a narrow allowlist.** Configured Git remotes,
   the GitHub API/web UI, package registries required by the repository's own
   lockfiles, localhost, and repository-approved development services.
