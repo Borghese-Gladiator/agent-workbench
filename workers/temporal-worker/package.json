@@ -10,7 +10,15 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@awb/agent-gateway": "workspace:*",
+    "@awb/capability-broker": "workspace:*",
     "@awb/domain": "workspace:*",
+    "@awb/evidence": "workspace:*",
+    "@awb/github": "workspace:*",
+    "@awb/planning": "workspace:*",
+    "@awb/qa": "workspace:*",
+    "@awb/review": "workspace:*",
+    "@awb/verification": "workspace:*",
     "@awb/workflow": "workspace:*",
     "@temporalio/activity": "^1.11.7",
     "@temporalio/worker": "^1.11.7"
@@ -18,6 +26,7 @@
   "devDependencies": {
     "typescript": "^5.7.2",
     "vitest": "^2.1.8",
-    "@types/node": "^24.0.0"
+    "@types/node": "^24.0.0",
+    "@temporalio/testing": "^1.11.7"
   }
 }
