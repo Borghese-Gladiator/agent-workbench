@@ -63,6 +63,18 @@ All of Stages 0–3 + Fixes 1–9 are unit/fixture-tested, but only the SDK path
 Fix 9 (real contract) were confirmed against a live model. Everything below is
 "works in tests, unproven end-to-end with a real agent."
 
+> **Live-run status (2026-07-21):** driving `wip-browser-games` (add a Games
+> section to the README) on the claude runtime, the pipeline now runs
+> specify→plan→implement→verify with real work at each phase. Every blocker found
+> was fixed + committed (TASK-1, 13, planner-cwd, no-op-slice, claim-coverage,
+> verify-env, prepare-install). TASK-2/3/8/9/11 are live-confirmed. TASK-4/5
+> (exercise/challenge) are code-complete but not yet reached in a single clean
+> run; TASK-6/7/12 open a REAL draft PR (release pushes to the target remote with
+> no dry-run guard) so they were deliberately NOT run unattended — drive them
+> with supervision. The builder spends ~1–2h on this trivial task because the
+> planner over-decomposes it into discovery/author/verify slices, each a full
+> session (worth tuning; not a blocker).
+
 ### [x] TASK-2: Live-validate the real builder (Stage 2) + real worktree (Stage 1)
 Confirm that, on the claude runtime, a real task creates a real worktree,
 the Claude builder actually edits files + commits, and a real candidate SHA is
@@ -102,6 +114,9 @@ _Note: needs a repo/game with a discoverable dev-server `start` command
 Confirm the challenge phase reviews the real `git diff baseSha..candidateSha`,
 not the placeholder string. **Done when:** the reviewer session's input contains
 the real diff/changed paths for a live task.
+_Not yet reached in a single clean run. NOTE (TASK-14): the ClaudeAgentAdapter
+never surfaces `contextPayload`, so even the real diff isn't in the reviewer's
+prompt today — TASK-5 needs TASK-14 to be meaningful._
 
 ### [ ] TASK-6: Live-validate real draft PR delivery (Fix 6 / Stage 4a)
 Confirm `runRelease` opens a **real draft PR** on the target repo via Octokit
@@ -120,6 +135,39 @@ comment linking a real `releases/download/...` URL that actually downloads the
 ---
 
 ## P2 — Bugs found during the live run
+
+### [x] TASK-15: Worktree deps never installed → verify's build failed
+**Live-run finding (run 5):** with the verify-env fix, verify actually ran the
+discovered commands, but `npm run build` (vite build) failed
+`Cannot find package 'vite'` — a fresh `git worktree` has no `node_modules` and
+prepare never installed them (`dependenciesPrepared` was rubber-stamped).
+**Fixed:** prepare runs the discovered `install` command, or a package-manager
+default from the worktree lockfile (pnpm/yarn/npm), with the worker env;
+`dependenciesPrepared` now reflects the real exit code. **Verified directly:**
+after `npm install` in a task worktree, both discovered commands pass
+(`npm run test` 253 tests; `vite build` OK).
+
+### [x] TASK-16: Planner ran in the workbench repo, not the target
+Plan runs before prepare creates the worktree, so the planner's cwd fell back to
+`process.cwd()` (the workbench) — it planned against `@awb/temporal-worker` and
+reported "no games in this repo." Fixed: resolve the registered repo's
+canonicalPath (DB) as the plan cwd on the claude runtime. Live-confirmed: the
+planner now explores the real target and finds the 5 games in the registry.
+
+### [x] TASK-17: Plan gate false-blocks (qa-scenario + claim coverage)
+Two plan-gate false-blocks, both surfaced as the misleading
+`repeated-failure-no-progress`: (a) `buildClaimCoverage` hardcoded
+`qaScenarioIds: []` so `everyBehavioralClaimHasQaScenario` could never pass
+(TASK-1); (b) the planner mapped only the behavioral claim to its slice, failing
+`everyClaimMappedToSlice`. Fixed: coverage derives QA scenarios from slices +
+`parsePlannerOutput` synthesizes/attaches missing scenarios and unmapped claims.
+
+### [x] TASK-18: Diff-less slices failed implement
+A multi-slice plan's discovery/verify-only slice makes no diff;
+`runRealBuilderAttempt` treated no-diff as `noMeaningfulDiff` → no-progress →
+implement blocked even though the feature slice committed a correct diff. Fixed:
+a COMPLETED no-edit session is a legitimate no-op slice (success); only an
+INCOMPLETE no-diff session is the stuck signal.
 
 ### [x] TASK-13: Builder session had no file tools (only ambient MCP) — implement stalled
 **Live-run finding (2026-07-21, after the plan fix):** the task converged
