@@ -51,6 +51,60 @@ describe('discoverUnits', () => {
     expect(webUnit?.dependsOn).toEqual([libUnit?.id]);
   });
 
+  it('includes the root unit and workspace-glob packages outside the container dirs (TASK-8)', async () => {
+    await writeFileEnsuringDir(
+      dir,
+      'package.json',
+      JSON.stringify({
+        name: 'browser-games',
+        private: true,
+        workspaces: ['packages/engines/*', 'games/*'],
+        scripts: { test: 'vitest run', build: 'vite build' },
+        dependencies: { react: '^18.0.0' },
+      }),
+    );
+    // A nested workspace package (packages/engines/*) and one outside the conventional containers
+    // (games/*) — neither is reachable by the hardcoded container scan alone.
+    await writeFileEnsuringDir(
+      dir,
+      'packages/engines/poker/package.json',
+      JSON.stringify({ name: '@bg/engine-poker' }),
+    );
+    await writeFileEnsuringDir(dir, 'games/poker/package.json', JSON.stringify({ name: '@bg/game-poker' }));
+    await commitAll(dir, 'init');
+
+    const units = await discoverUnits(dir);
+    const roots = units.map((u) => u.root);
+    expect(roots).toContain('.');
+    expect(roots).toContain('packages/engines/poker');
+    expect(roots).toContain('games/poker');
+  });
+
+  it('discovers the root package.json verification commands in a workspace repo (TASK-8)', async () => {
+    await writeFileEnsuringDir(
+      dir,
+      'package.json',
+      JSON.stringify({
+        name: 'browser-games',
+        private: true,
+        workspaces: ['packages/engines/*'],
+        scripts: { test: 'vitest run', build: 'vite build' },
+      }),
+    );
+    // The engine sub-package carries no scripts of its own — tests run from the root, exactly the
+    // wip-browser-games shape that made refresh discover 0 verification commands before the fix.
+    await writeFileEnsuringDir(
+      dir,
+      'packages/engines/poker/package.json',
+      JSON.stringify({ name: '@bg/engine-poker' }),
+    );
+    await commitAll(dir, 'init');
+
+    const snapshot = await buildRepositorySnapshot({ rootDir: dir, repositoryId: 'repo-ws' });
+    expect(snapshot.commands.some((c) => c.purpose === 'unit-test')).toBe(true);
+    expect(snapshot.commands.some((c) => c.purpose === 'build')).toBe(true);
+  });
+
   it('detects a simple Python package', async () => {
     await writeFileEnsuringDir(dir, 'pyproject.toml', '[tool.poetry]\nname = "demo"\n');
     await commitAll(dir, 'init');

@@ -1,7 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { RepositoryUnit, RepositoryUnitKind, RepositoryUnitLanguage } from '@awb/domain';
-import { readPackageJson, findPythonManifests, listDirs, pathExists } from './manifests.js';
+import {
+  readPackageJson,
+  findPythonManifests,
+  listDirs,
+  pathExists,
+  readWorkspaceGlobs,
+  expandWorkspaceGlobs,
+} from './manifests.js';
 
 const MONOREPO_CONTAINER_DIRS = ['apps', 'packages', 'services', 'workers'];
 
@@ -69,28 +76,40 @@ export async function discoverUnits(rootDir: string): Promise<RepositoryUnit[]> 
   const units: RepositoryUnit[] = [];
   const rootClassification = await classifyUnit(rootDir);
 
-  const candidateDirs: string[] = [];
+  const candidateSet = new Set<string>();
   for (const container of MONOREPO_CONTAINER_DIRS) {
     const containerPath = join(rootDir, container);
     if (!(await pathExists(containerPath))) continue;
-    const children = await listDirs(containerPath);
-    for (const child of children) {
-      candidateDirs.push(join(containerPath, child));
+    for (const child of await listDirs(containerPath)) {
+      candidateSet.add(join(containerPath, child));
     }
+  }
+  // Workspace-declared packages (npm/yarn `workspaces`, pnpm-workspace.yaml) may live outside the
+  // conventional container dirs (e.g. `games/*`, `portal`) or be nested (`packages/engines/*`), so
+  // discovery must honor the declared globs too (TASK-8). Only dirs with a manifest are kept.
+  const workspaceGlobs = await readWorkspaceGlobs(rootDir);
+  for (const dir of await expandWorkspaceGlobs(rootDir, workspaceGlobs)) {
+    if (await pathExists(join(dir, 'package.json'))) candidateSet.add(dir);
+  }
+  const candidateDirs = [...candidateSet].filter((dir) => dir !== rootDir);
+
+  // The root is a discoverable unit in its own right — critically, in a workspace repo whose test/
+  // build scripts live in the ROOT package.json (e.g. a single root `vitest run` covering every
+  // workspace package), dropping it here was exactly why refresh discovered 0 verification commands
+  // (TASK-8). Always include the root when it classifies, alongside any sub-packages.
+  if (rootClassification) {
+    units.push({
+      id: randomUUID(),
+      root: '.',
+      language: rootClassification.language,
+      kind: rootClassification.kind,
+      framework: rootClassification.framework,
+      packageManager: rootClassification.packageManager,
+      dependsOn: [],
+    });
   }
 
   if (candidateDirs.length === 0) {
-    if (rootClassification) {
-      units.push({
-        id: randomUUID(),
-        root: '.',
-        language: rootClassification.language,
-        kind: rootClassification.kind,
-        framework: rootClassification.framework,
-        packageManager: rootClassification.packageManager,
-        dependsOn: [],
-      });
-    }
     return units;
   }
 
