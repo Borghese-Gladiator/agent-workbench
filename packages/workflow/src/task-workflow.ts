@@ -69,6 +69,7 @@ function initialState(input: TaskWorkflowInput): TaskWorkflowState {
   return {
     taskId: input.taskId,
     repositoryId: input.repositoryId,
+    prompt: input.prompt,
     phase: 'specify',
     condition: 'running',
     deliveryState: 'not-started',

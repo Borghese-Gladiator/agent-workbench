@@ -91,6 +91,12 @@ importers:
         specifier: ^5.2.0
         version: 5.10.0
     devDependencies:
+      '@temporalio/testing':
+        specifier: ^1.11.7
+        version: 1.20.3(tslib@2.8.1)
+      '@temporalio/worker':
+        specifier: ^1.11.7
+        version: 1.20.3(tslib@2.8.1)
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
@@ -545,12 +551,21 @@ importers:
       '@awb/capability-broker':
         specifier: workspace:*
         version: link:../../packages/capability-broker
+      '@awb/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@awb/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       '@awb/domain':
         specifier: workspace:*
         version: link:../../packages/domain
       '@awb/evidence':
         specifier: workspace:*
         version: link:../../packages/evidence
+      '@awb/execution':
+        specifier: workspace:*
+        version: link:../../packages/execution
       '@awb/github':
         specifier: workspace:*
         version: link:../../packages/github
@@ -560,6 +575,9 @@ importers:
       '@awb/qa':
         specifier: workspace:*
         version: link:../../packages/qa
+      '@awb/repository':
+        specifier: workspace:*
+        version: link:../../packages/repository
       '@awb/review':
         specifier: workspace:*
         version: link:../../packages/review
@@ -569,6 +587,12 @@ importers:
       '@awb/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
+      '@awb/workspace':
+        specifier: workspace:*
+        version: link:../../packages/workspace
+      '@octokit/rest':
+        specifier: ^21.0.2
+        version: 21.1.1
       '@temporalio/activity':
         specifier: ^1.11.7
         version: 1.20.3

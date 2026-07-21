@@ -10,6 +10,8 @@ import type {
 export interface TaskWorkflowState {
   taskId: string;
   repositoryId: string;
+  /** The natural-language task prompt, threaded from task creation so specify can draft a real contract. */
+  prompt?: string;
   phase: TaskPhase;
   condition: RunCondition;
   deliveryState: DeliveryState;
@@ -24,6 +26,7 @@ export interface TaskWorkflowState {
 export interface TaskWorkflowInput {
   taskId: string;
   repositoryId: string;
+  prompt?: string;
 }
 
 /** The activity signature the Workflow calls once per phase attempt. Implemented for real in workers/temporal-worker. */

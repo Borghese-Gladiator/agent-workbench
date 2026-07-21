@@ -10,6 +10,15 @@ export async function getTemporalClient(): Promise<Client> {
   return cachedClient;
 }
 
+/**
+ * Test seam: point the daemon's routes at an already-connected client (e.g. a
+ * `TestWorkflowEnvironment`'s client), so route code can be exercised end to end against a real
+ * workflow without a separately running Temporal server. Pass `undefined` to reset.
+ */
+export function setTemporalClientForTesting(client: Client | undefined): void {
+  cachedClient = client;
+}
+
 export function workflowIdFor(repositoryId: string, taskId: string): string {
   return `awb/task/${repositoryId}/${taskId}`;
 }

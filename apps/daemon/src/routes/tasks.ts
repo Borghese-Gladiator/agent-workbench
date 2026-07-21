@@ -7,6 +7,9 @@ import {
   approvePlanUpdate,
   rejectPlanUpdate,
   cancelSignal,
+  pullRequestMergedSignal,
+  pullRequestClosedSignal,
+  pullRequestFeedbackReceivedSignal,
   getCurrentStateQuery,
   getOpenFindingsQuery,
   getPendingHumanGateQuery,
@@ -40,7 +43,7 @@ export function registerTaskRoutes(app: FastifyInstance): void {
     await client.workflow.start(TaskWorkflow, {
       taskQueue: TASK_QUEUE,
       workflowId,
-      args: [{ taskId, repositoryId }],
+      args: [{ taskId, repositoryId, prompt }],
     });
 
     createdTasks.unshift({ taskId, repositoryId, workflowId, prompt, createdAt: new Date().toISOString() });
@@ -137,6 +140,51 @@ export function registerTaskRoutes(app: FastifyInstance): void {
       const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
       try {
         await handle.signal(cancelSignal);
+        return { ok: true };
+      } catch (err) {
+        reply.code(404);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
+
+  app.post<{ Params: { repositoryId: string; taskId: string }; Body: { mergeCommitSha: string } }>(
+    '/api/tasks/:repositoryId/:taskId/pr-merged',
+    async (request, reply) => {
+      const client = await getTemporalClient();
+      const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
+      try {
+        await handle.signal(pullRequestMergedSignal, { mergeCommitSha: request.body.mergeCommitSha });
+        return { ok: true };
+      } catch (err) {
+        reply.code(404);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
+
+  app.post<{ Params: { repositoryId: string; taskId: string } }>(
+    '/api/tasks/:repositoryId/:taskId/pr-closed',
+    async (request, reply) => {
+      const client = await getTemporalClient();
+      const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
+      try {
+        await handle.signal(pullRequestClosedSignal);
+        return { ok: true };
+      } catch (err) {
+        reply.code(404);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
+
+  app.post<{ Params: { repositoryId: string; taskId: string }; Body: { feedbackId: string } }>(
+    '/api/tasks/:repositoryId/:taskId/pr-feedback',
+    async (request, reply) => {
+      const client = await getTemporalClient();
+      const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
+      try {
+        await handle.signal(pullRequestFeedbackReceivedSignal, { feedbackId: request.body.feedbackId });
         return { ok: true };
       } catch (err) {
         reply.code(404);

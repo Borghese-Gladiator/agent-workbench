@@ -10,7 +10,7 @@ import {
   type DrizzleDb,
   type Repository as RepositoryRow,
 } from '@awb/database';
-import type { Repository, RepositorySnapshot } from '@awb/domain';
+import type { Repository, RepositorySnapshot, ValidatedCommand } from '@awb/domain';
 import { getDefaultBranch, getRemotes, isGitRepository } from './git.js';
 import { buildRepositorySnapshot } from './snapshot.js';
 
@@ -177,4 +177,31 @@ export async function getLatestSnapshot(
     .where(eq(repositorySnapshots.repositoryId, repositoryId));
   if (rows.length === 0) return undefined;
   return rows.reduce((latest, row) => (row.createdAt > latest.createdAt ? row : latest));
+}
+
+/**
+ * Rehydrates the ValidatedCommands persisted for a repository. `getLatestSnapshot` returns only the
+ * snapshot header row; this loads the discovered commands (test/build/lint/etc.) back out of
+ * `repository_commands` so callers (e.g. the verify/exercise Activities) can run the repo's real
+ * commands instead of a hardcoded placeholder. Keyed by repositoryId — the commands table has no
+ * snapshotId column, and a freshly-registered repo is refreshed once, so this returns that repo's
+ * discovered command set. Returns [] when nothing was discovered.
+ */
+export async function getRepositoryCommands(db: DrizzleDb, repositoryId: string): Promise<ValidatedCommand[]> {
+  const rows = await db
+    .select()
+    .from(repositoryCommands)
+    .where(eq(repositoryCommands.repositoryId, repositoryId));
+  return rows.map((row) => ({
+    id: row.id,
+    repositoryId: row.repositoryId,
+    unitId: row.unitId ?? undefined,
+    purpose: row.purpose,
+    command: row.command,
+    cwd: row.cwd,
+    source: row.source,
+    status: row.status,
+    validatedAtSha: row.validatedAtSha ?? undefined,
+    lastExitCode: row.lastExitCode ?? undefined,
+  }));
 }

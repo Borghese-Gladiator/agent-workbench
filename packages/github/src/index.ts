@@ -5,5 +5,6 @@ export * from './push.js';
 export * from './evidence-matrix.js';
 export * from './feedback-classification.js';
 export * from './media-uploader.js';
+export * from './release-asset-uploader.js';
 export * from './pre-upload-checks.js';
 export * from './delivery.js';

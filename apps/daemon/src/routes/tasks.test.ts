@@ -1,0 +1,83 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Client } from '@temporalio/client';
+import Fastify, { type FastifyInstance } from 'fastify';
+import { registerTaskRoutes } from './tasks.js';
+import { setTemporalClientForTesting, workflowIdFor } from '../temporal-client.js';
+
+interface RecordedSignal {
+  workflowId: string;
+  signal: string;
+  args: unknown[];
+}
+
+function makeStubClient(recorded: RecordedSignal[], opts: { failWith?: Error } = {}): Client {
+  return {
+    workflow: {
+      getHandle(workflowId: string) {
+        return {
+          async signal(signalDef: { name: string }, ...args: unknown[]) {
+            if (opts.failWith) throw opts.failWith;
+            recorded.push({ workflowId, signal: signalDef.name, args });
+          },
+        };
+      },
+    },
+  } as unknown as Client;
+}
+
+describe('task PR-lifecycle signal routes', () => {
+  let app: FastifyInstance;
+  let recorded: RecordedSignal[];
+
+  beforeEach(async () => {
+    recorded = [];
+    setTemporalClientForTesting(makeStubClient(recorded));
+    app = Fastify({ logger: false });
+    registerTaskRoutes(app);
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    setTemporalClientForTesting(undefined);
+  });
+
+  it('POST /pr-merged signals pullRequestMerged with the merge SHA', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/tasks/repo-1/task-1/pr-merged`,
+      payload: { mergeCommitSha: 'abc123' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(recorded).toEqual([
+      { workflowId: workflowIdFor('repo-1', 'task-1'), signal: 'pullRequestMerged', args: [{ mergeCommitSha: 'abc123' }] },
+    ]);
+  });
+
+  it('POST /pr-closed signals pullRequestClosed', async () => {
+    const res = await app.inject({ method: 'POST', url: `/api/tasks/repo-1/task-1/pr-closed` });
+    expect(res.statusCode).toBe(200);
+    expect(recorded[0]?.signal).toBe('pullRequestClosed');
+  });
+
+  it('POST /pr-feedback signals pullRequestFeedbackReceived with the feedback id', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/tasks/repo-1/task-1/pr-feedback`,
+      payload: { feedbackId: 'fb-9' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(recorded[0]).toMatchObject({ signal: 'pullRequestFeedbackReceived', args: [{ feedbackId: 'fb-9' }] });
+  });
+
+  it('returns 404 when the target workflow signal fails', async () => {
+    setTemporalClientForTesting(makeStubClient(recorded, { failWith: new Error('workflow not found') }));
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/tasks/repo-1/task-1/pr-merged`,
+      payload: { mergeCommitSha: 'abc123' },
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toContain('workflow not found');
+  });
+});

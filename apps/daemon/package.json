@@ -25,6 +25,8 @@
     "typescript": "^5.7.2",
     "tsx": "^4.19.2",
     "vitest": "^2.1.8",
-    "@types/node": "^24.0.0"
+    "@types/node": "^24.0.0",
+    "@temporalio/testing": "^1.11.7",
+    "@temporalio/worker": "^1.11.7"
   }
 }

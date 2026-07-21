@@ -14,16 +14,22 @@
   "dependencies": {
     "@awb/agent-gateway": "workspace:*",
     "@awb/capability-broker": "workspace:*",
+    "@awb/config": "workspace:*",
+    "@awb/database": "workspace:*",
     "@awb/domain": "workspace:*",
     "@awb/evidence": "workspace:*",
+    "@awb/execution": "workspace:*",
     "@awb/github": "workspace:*",
     "@awb/planning": "workspace:*",
     "@awb/qa": "workspace:*",
+    "@awb/repository": "workspace:*",
     "@awb/review": "workspace:*",
     "@awb/verification": "workspace:*",
+    "@awb/workspace": "workspace:*",
     "@awb/workflow": "workspace:*",
     "@temporalio/activity": "^1.11.7",
-    "@temporalio/worker": "^1.11.7"
+    "@temporalio/worker": "^1.11.7",
+    "@octokit/rest": "^21.0.2"
   },
   "devDependencies": {
     "typescript": "^5.7.2",
