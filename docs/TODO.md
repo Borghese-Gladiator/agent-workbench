@@ -63,20 +63,32 @@ All of Stages 0–3 + Fixes 1–9 are unit/fixture-tested, but only the SDK path
 Fix 9 (real contract) were confirmed against a live model. Everything below is
 "works in tests, unproven end-to-end with a real agent."
 
-### [ ] TASK-2: Live-validate the real builder (Stage 2) + real worktree (Stage 1)
+### [x] TASK-2: Live-validate the real builder (Stage 2) + real worktree (Stage 1)
 Confirm that, on the claude runtime, a real task creates a real worktree,
 the Claude builder actually edits files + commits, and a real candidate SHA is
 threaded downstream. **Done when:** after a live run, the worktree under
 `~/.agentic-workbench/worktrees/...` contains a real commit authored by the
 builder, and `task show` reflects a real (non-`f…f`) candidate SHA.
-_Blocked by TASK-1 (can't reach implement until plan converges)._
+**DONE (live-confirmed 2026-07-21):** real worktree materialized at
+`~/.agentic-workbench/worktrees/<repo>/<task>`, the builder used real
+Read/Write/Edit/Bash to explore + edit, committed
+`awb: Add a 'Games' section…` (README +11), and the real candidate SHA
+`60606a9…` (not `f…f`) was threaded to verify's evidence
+(`implement-60606a96…`). Required fixes TASK-13 + the no-op-slice fix.
 
-### [ ] TASK-3: Live-validate real verification (Fixes 1–2)
+### [x] TASK-3: Live-validate real verification (Fixes 1–2)
 Confirm verify runs the repo's real discovered test/build commands against the
 candidate SHA (not `echo ok`). **Depends on TASK-8** (0 commands were discovered
 on the workspace repo, so verify would fall back to the placeholder).
 **Done when:** verify evidence shows a real command from the repo ran and its
 result is tied to the real candidate SHA.
+**DONE (live-confirmed 2026-07-21):** verify resolved the discovered
+`npm run test` + `npm run build` (TASK-8) and ran them against candidate
+`60606a9…`. Uncovered + fixed a real bug: verify passed `env: {}`, so the
+shell-less spawn had no PATH and `npm` hit ENOENT (→ inconclusive → false
+block); now inherits the worker env. Both commands pass in the worktree
+(253 tests incl. the builder's new `portal/src/readmeGames.test.jsx`; vite
+build OK).
 
 ### [ ] TASK-4: Live-validate real browser QA (Fix 5) produces video/trace
 Confirm that with `AWB_QA_MODE=browser` the exercise phase starts the game's dev
@@ -165,6 +177,9 @@ workflow doesn't aggregate usage the activity/adapter reports.
 **Do:** thread `AgentExecutionResult.usage` from the activity back into
 `TaskWorkflowState` (via the candidate result or a dedicated signal/query).
 **Done when:** `task show` reflects real token + per-phase runtime for a live run.
+**DONE (live-confirmed 2026-07-21):** on a live run `task show` reported
+`tokenUsageTotal {input: 2714, output: 19724}` and
+`runtimeMsByPhase {plan: 48520, implement: 2338651}` (was 0 / empty).
 
 ---
 
