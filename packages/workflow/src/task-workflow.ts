@@ -172,7 +172,24 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
     }
 
     state = { ...state, attemptNumber: state.attemptNumber + 1 };
+    const phaseThatRan = state.phase;
     const result = await activities.runPhase({ phase: state.phase, state });
+
+    // Accumulate the agent usage this attempt reported (TASK-11) before routing mutates state.phase.
+    // Tokens sum across the whole task; runtime accumulates per phase across its attempts/loop-backs.
+    if (result.usage) {
+      state = {
+        ...state,
+        tokenUsageTotal: {
+          inputTokens: state.tokenUsageTotal.inputTokens + result.usage.inputTokens,
+          outputTokens: state.tokenUsageTotal.outputTokens + result.usage.outputTokens,
+        },
+        runtimeMsByPhase: {
+          ...state.runtimeMsByPhase,
+          [phaseThatRan]: (state.runtimeMsByPhase[phaseThatRan] ?? 0) + result.usage.runtimeMs,
+        },
+      };
+    }
 
     switch (result.outcome) {
       case 'candidate': {

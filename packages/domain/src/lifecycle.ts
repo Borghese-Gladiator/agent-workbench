@@ -90,31 +90,49 @@ export const FindingRefSchema = z.object({
 });
 export type FindingRef = z.infer<typeof FindingRefSchema>;
 
+/**
+ * Aggregate agent usage a phase attempt consumed, reported by the Activity back to the Workflow so
+ * it can accumulate `tokenUsageTotal` + `runtimeMsByPhase` (TASK-11). Optional on every result
+ * variant — phases with no agent session (or the mock runtime) simply omit it.
+ */
+export const PhaseUsageSchema = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  runtimeMs: z.number().int().nonnegative(),
+});
+export type PhaseUsage = z.infer<typeof PhaseUsageSchema>;
+
 export const PhaseAttemptResultSchema = z.discriminatedUnion('outcome', [
   z.object({
     outcome: z.literal('candidate'),
     candidate: CompletionCandidateSchema,
+    usage: PhaseUsageSchema.optional(),
   }),
   z.object({
     outcome: z.literal('repair'),
     target: z.literal('implement'),
     findings: z.array(FindingRefSchema),
+    usage: PhaseUsageSchema.optional(),
   }),
   z.object({
     outcome: z.literal('replan'),
     target: z.enum(['plan', 'specify']),
     findings: z.array(FindingRefSchema),
+    usage: PhaseUsageSchema.optional(),
   }),
   z.object({
     outcome: z.literal('await-human'),
     gate: HumanGateSchema,
+    usage: PhaseUsageSchema.optional(),
   }),
   z.object({
     outcome: z.literal('blocked'),
     reason: z.string(),
+    usage: PhaseUsageSchema.optional(),
   }),
   z.object({
     outcome: z.literal('cancelled'),
+    usage: PhaseUsageSchema.optional(),
   }),
 ]);
 export type PhaseAttemptResult = z.infer<typeof PhaseAttemptResultSchema>;

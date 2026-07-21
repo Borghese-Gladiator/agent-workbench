@@ -102,6 +102,38 @@ function allowedToolsForBrokerRole(
 }
 
 /**
+ * Per-runPhase-invocation usage accumulator (TASK-11). Each phase's agent sessions call
+ * `recordAgentUsage` with the adapter's reported tokens + measured wall-clock; the top-level
+ * `runPhase` reads the total and attaches it to the PhaseAttemptResult so the Workflow can
+ * accumulate `tokenUsageTotal` + `runtimeMsByPhase`. Reset at the start of every invocation because
+ * the Activity is called once per phase attempt.
+ */
+let currentUsage: { inputTokens: number; outputTokens: number; runtimeMs: number } = {
+  inputTokens: 0,
+  outputTokens: 0,
+  runtimeMs: 0,
+};
+
+function resetUsage(): void {
+  currentUsage = { inputTokens: 0, outputTokens: 0, runtimeMs: 0 };
+}
+
+function recordAgentUsage(usage: import('@awb/domain').ModelUsage | undefined, runtimeMs: number): void {
+  currentUsage = {
+    inputTokens: currentUsage.inputTokens + (usage?.inputTokens ?? 0),
+    outputTokens: currentUsage.outputTokens + (usage?.outputTokens ?? 0),
+    runtimeMs: currentUsage.runtimeMs + runtimeMs,
+  };
+}
+
+function usageForResult(): import('@awb/domain').PhaseUsage | undefined {
+  if (currentUsage.inputTokens === 0 && currentUsage.outputTokens === 0 && currentUsage.runtimeMs === 0) {
+    return undefined;
+  }
+  return { ...currentUsage };
+}
+
+/**
  * The candidate/base SHA downstream phases (verify/exercise/challenge/release) key evidence off.
  * On the claude runtime these are the real SHAs the worktree/builder produced (Stages 1-2); the
  * mock path has no real commit, so we fall back to the historical fake constants to keep every
@@ -257,12 +289,14 @@ async function runPlan(state: TaskWorkflowState): Promise<PhaseAttemptResult> {
         role: 'planner',
         phaseAttempt: `plan-${state.attemptNumber}`,
       });
+      const plannerStart = Date.now();
       const execution = await adapter.execute(
         session,
         { instruction: realPlanner ? plannerInstruction(contract) : 'Produce an implementation plan for the approved contract' },
         sink,
         new AbortController().signal,
       );
+      recordAgentUsage(execution.usage, Date.now() - plannerStart);
       // A behavioral claim requiring QA evidence must be covered by a QA scenario, or the plan gate
       // (everyBehavioralClaimHasQaScenario) rejects the plan. The single-slice fallback therefore
       // declares one scenario when the contract has such a claim.
@@ -305,12 +339,14 @@ async function runPlan(state: TaskWorkflowState): Promise<PhaseAttemptResult> {
         role: 'plan-critic',
         phaseAttempt: `plan-${state.attemptNumber}`,
       });
+      const criticStart = Date.now();
       const execution = await adapter.execute(
         session,
         { instruction: 'Critique the plan against the contract' },
         sink,
         new AbortController().signal,
       );
+      recordAgentUsage(execution.usage, Date.now() - criticStart);
       return execution.findings;
     },
   });
@@ -497,6 +533,7 @@ async function runImplement(state: TaskWorkflowState): Promise<PhaseAttemptResul
           runtimeBudgetMs: assignment.runtimeBudgetMs,
           eventSink: sink,
         });
+        recordAgentUsage(attempt.usage, attempt.runtimeMs);
         candidateSha = attempt.headSha;
         return attempt.outcome;
       },
@@ -779,12 +816,14 @@ async function runChallenge(state: TaskWorkflowState): Promise<PhaseAttemptResul
         role: 'adversarial-reviewer',
         phaseAttempt: `challenge-${state.attemptNumber}`,
       });
+      const reviewerStart = Date.now();
       const execution = await adapter.execute(
         session,
         { instruction: 'Adversarially review the contract, plan, diff, and evidence' },
         sink,
         new AbortController().signal,
       );
+      recordAgentUsage(execution.usage, Date.now() - reviewerStart);
       return {
         reviewerSessionId: session.id,
         completed: execution.completed,
@@ -1015,6 +1054,19 @@ async function runAssimilate(state: TaskWorkflowState): Promise<PhaseAttemptResu
  * rubber stamp.
  */
 export async function runPhase(input: {
+  phase: TaskPhase;
+  state: TaskWorkflowState;
+}): Promise<PhaseAttemptResult> {
+  resetUsage();
+  const result = await runPhaseInner(input);
+  // Attach the agent usage this attempt accumulated so the Workflow can aggregate token +
+  // per-phase runtime totals (TASK-11). undefined when no agent session ran (or on the mock
+  // runtime, whose adapter reports no usage) — the Workflow simply skips accumulation then.
+  const usage = usageForResult();
+  return usage ? { ...result, usage } : result;
+}
+
+async function runPhaseInner(input: {
   phase: TaskPhase;
   state: TaskWorkflowState;
 }): Promise<PhaseAttemptResult> {

@@ -109,7 +109,7 @@ comment linking a real `releases/download/...` URL that actually downloads the
 
 ## P2 — Bugs found during the live run
 
-### [ ] TASK-8: `repo refresh` discovers 0 commands on a workspace repo
+### [x] TASK-8: `repo refresh` discovers 0 commands on a workspace repo
 On `wip-browser-games`, discovery found 0 `ValidatedCommand`s because the games
 are pnpm/npm-workspace sub-packages and the root `package.json` scripts didn't
 classify. This makes Fix 2's verify fall back to `echo ok`.
@@ -118,7 +118,7 @@ classify. This makes Fix 2's verify fall back to `echo ok`.
 **Done when:** refresh on `wip-browser-games` returns real per-game test/build
 commands.
 
-### [ ] TASK-9: CLI `--version` flag collision breaks `task approve-contract`
+### [x] TASK-9: CLI `--version` flag collision breaks `task approve-contract`
 `node apps/cli/dist/index.js task approve-contract <ids> --version 1` prints
 `0.1.0` and no-ops, because it collides with the global `program.version('0.1.0')`
 flag. Had to approve via the daemon route in the live run.
@@ -127,7 +127,7 @@ flag. Had to approve via the daemon route in the live run.
 **Done when:** `awb task approve-contract ... --contract-version 1` works and a
 test covers it.
 
-### [ ] TASK-10: `cli` npm script injects `--`, breaking required options
+### [x] TASK-10: `cli` npm script injects `--`, breaking required options
 `pnpm --filter @awb/cli cli -- <args>` prepends its own `--`, so required options
 like `--prompt` get swallowed; had to run the built `dist` directly.
 **Do:** fix the `cli` script (or document `awb`-via-`pnpm link` as the supported
@@ -135,7 +135,7 @@ path) so `--prompt`/`--version` pass through.
 **Done when:** driving a task via the documented CLI invocation works without the
 `dist` workaround.
 
-### [ ] TASK-11: Per-phase token/runtime usage is not aggregated
+### [x] TASK-11: Per-phase token/runtime usage is not aggregated
 `tokenUsageTotal` stays 0 and `runtimeMsByPhase` empty even on a live run — the
 workflow doesn't aggregate usage the activity/adapter reports.
 **Do:** thread `AgentExecutionResult.usage` from the activity back into

@@ -1,6 +1,6 @@
 import { runGit, getHeadSha, getStatus } from '@awb/repository';
 import type { CodingAgentAdapter, AgentEventSink } from '@awb/agent-gateway';
-import type { PlanSlice } from '@awb/domain';
+import type { PlanSlice, ModelUsage } from '@awb/domain';
 import type { SliceAttemptOutcome } from '@awb/planning';
 
 export interface RealBuilderAttemptInput {
@@ -18,6 +18,10 @@ export interface RealBuilderAttemptResult {
   outcome: SliceAttemptOutcome;
   /** HEAD SHA after the attempt committed its changes; unchanged base SHA when nothing was committed. */
   headSha: string;
+  /** Agent usage the builder session reported, for per-phase aggregation (TASK-11). */
+  usage?: ModelUsage;
+  /** Wall-clock the builder session took, for per-phase runtime aggregation (TASK-11). */
+  runtimeMs: number;
 }
 
 /**
@@ -36,6 +40,7 @@ export async function runRealBuilderAttempt(input: RealBuilderAttemptInput): Pro
   });
 
   try {
+    const startedAt = Date.now();
     const execution = await input.adapter.execute(
       session,
       {
@@ -45,12 +50,13 @@ export async function runRealBuilderAttempt(input: RealBuilderAttemptInput): Pro
       input.eventSink,
       new AbortController().signal,
     );
+    const runtimeMs = Date.now() - startedAt;
 
     const status = await getStatus(input.worktreePath);
     if (status.length === 0) {
       // No file changes — a no-meaningful-diff attempt (drives runSliceLoop's no-progress detection).
       const headSha = await getHeadSha(input.worktreePath);
-      return { outcome: { success: false, noMeaningfulDiff: true }, headSha };
+      return { outcome: { success: false, noMeaningfulDiff: true }, headSha, usage: execution.usage, runtimeMs };
     }
 
     await runGit(input.worktreePath, ['add', '-A']);
@@ -73,6 +79,8 @@ export async function runRealBuilderAttempt(input: RealBuilderAttemptInput): Pro
             },
           },
       headSha,
+      usage: execution.usage,
+      runtimeMs,
     };
   } finally {
     await input.adapter.dispose(session);

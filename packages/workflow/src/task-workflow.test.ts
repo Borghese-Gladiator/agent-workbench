@@ -61,6 +61,13 @@ function makeGate(phase: TaskPhase, reason: 'task-contract-approval' | 'pr-readi
   };
 }
 
+function candidateWithUsage(
+  phase: TaskPhase,
+  usage: { inputTokens: number; outputTokens: number; runtimeMs: number },
+): PhaseAttemptResult {
+  return { ...candidate(phase), usage };
+}
+
 function repair(): PhaseAttemptResult {
   return { outcome: 'repair', target: 'implement', findings: [] };
 }
@@ -115,6 +122,23 @@ describe('TaskWorkflow', () => {
     );
     expect(result.phase).toBe('assimilate');
     expect(result.condition).toBe('completed');
+  }, 30_000);
+
+  it('aggregates token usage across phases and runtime per phase (TASK-11)', async () => {
+    const { result } = await runWithActivities(
+      {
+        specify: [candidateWithUsage('specify', { inputTokens: 100, outputTokens: 20, runtimeMs: 500 })],
+        plan: [candidateWithUsage('plan', { inputTokens: 200, outputTokens: 40, runtimeMs: 1500 })],
+        implement: [candidateWithUsage('implement', { inputTokens: 300, outputTokens: 60, runtimeMs: 3000 })],
+      },
+      async () => {},
+    );
+    expect(result.phase).toBe('assimilate');
+    // Tokens sum across the whole task; runtime is bucketed per phase.
+    expect(result.tokenUsageTotal).toEqual({ inputTokens: 600, outputTokens: 120 });
+    expect(result.runtimeMsByPhase.specify).toBe(500);
+    expect(result.runtimeMsByPhase.plan).toBe(1500);
+    expect(result.runtimeMsByPhase.implement).toBe(3000);
   }, 30_000);
 
   it('blocks at specify awaiting contract approval, then resumes once approved', async () => {

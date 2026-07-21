@@ -34,7 +34,12 @@ class FakeBuilderAdapter implements CodingAgentAdapter {
   }
   async execute(_s: AgentSession, _a: AgentAssignment, _sink: AgentEventSink): Promise<AgentExecutionResult> {
     await this.onExecute(this.cwd);
-    return { completed: this.completed, findings: [], summary: 'fake builder ran' };
+    return {
+      completed: this.completed,
+      findings: [],
+      summary: 'fake builder ran',
+      usage: { provider: 'fake', model: 'fake', inputTokens: 42, outputTokens: 7 },
+    };
   }
   async interrupt(): Promise<void> {}
   async dispose(): Promise<void> {}
@@ -93,6 +98,10 @@ describe('runRealBuilderAttempt (Stage 2 real builder)', () => {
     // The change is really committed on the branch.
     const { stdout } = await execFileAsync('git', ['show', '--stat', 'HEAD'], { cwd: worktree });
     expect(stdout).toContain('greeting.txt');
+
+    // TASK-11: the builder reports the session's usage + wall-clock for per-phase aggregation.
+    expect(result.usage).toEqual({ provider: 'fake', model: 'fake', inputTokens: 42, outputTokens: 7 });
+    expect(result.runtimeMs).toBeGreaterThanOrEqual(0);
   });
 
   it('reports noMeaningfulDiff when the agent changes nothing', async () => {
