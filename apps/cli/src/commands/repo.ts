@@ -9,6 +9,7 @@ import {
   getLatestSnapshot,
 } from '@awb/repository';
 import { openWorkbenchDatabase } from '../db.js';
+import { rememberRepositoryId, resolveRepositoryId } from '../remembered.js';
 
 export function registerRepoCommands(program: Command): void {
   const repo = program.command('repo').description('Manage registered repositories');
@@ -17,10 +18,16 @@ export function registerRepoCommands(program: Command): void {
     .command('add <path>')
     .description('Register a local Git repository')
     .option('--name <name>', 'Display name for the repository')
-    .action(async (path: string, opts: { name?: string }) => {
+    .option('--json', 'Print the registered repository as JSON')
+    .action(async (path: string, opts: { name?: string; json?: boolean }) => {
       const { db } = openWorkbenchDatabase();
       const canonicalPath = resolve(path);
       const repository = await registerRepository(db, { canonicalPath, name: opts.name });
+      rememberRepositoryId(repository.id);
+      if (opts.json) {
+        console.log(JSON.stringify(repository, null, 2));
+        return;
+      }
       console.log(`Registered repository ${repository.id} (${repository.name}) — untrusted until approved.`);
       console.log(`Run 'awb repo refresh ${repository.id}' to discover its structure, then 'awb repo approve ${repository.id}'.`);
     });
@@ -28,9 +35,14 @@ export function registerRepoCommands(program: Command): void {
   repo
     .command('list')
     .description('List registered repositories')
-    .action(async () => {
+    .option('--json', 'Print the repository list as JSON')
+    .action(async (opts: { json?: boolean }) => {
       const { db } = openWorkbenchDatabase();
       const repositories = await listRepositories(db);
+      if (opts.json) {
+        console.log(JSON.stringify(repositories, null, 2));
+        return;
+      }
       if (repositories.length === 0) {
         console.log('No repositories registered yet. Use `awb repo add <path>`.');
         return;
@@ -41,28 +53,30 @@ export function registerRepoCommands(program: Command): void {
     });
 
   repo
-    .command('inspect <repositoryId>')
-    .description('Show details for a registered repository')
-    .action(async (repositoryId: string) => {
+    .command('inspect [repositoryId]')
+    .description('Show details for a registered repository (falls back to the last one used)')
+    .action(async (repositoryId: string | undefined) => {
       const { db } = openWorkbenchDatabase();
-      const repository = await getRepository(db, repositoryId);
+      const id = resolveRepositoryId(repositoryId);
+      const repository = await getRepository(db, id);
       if (!repository) {
-        console.error(`No repository with id ${repositoryId}`);
+        console.error(`No repository with id ${id}`);
         process.exitCode = 1;
         return;
       }
-      const snapshot = await getLatestSnapshot(db, repositoryId);
+      const snapshot = await getLatestSnapshot(db, id);
       console.log(JSON.stringify({ repository, latestSnapshot: snapshot }, null, 2));
     });
 
   repo
-    .command('refresh <repositoryId>')
-    .description('Run discovery and record a new repository snapshot')
-    .action(async (repositoryId: string) => {
+    .command('refresh [repositoryId]')
+    .description('Run discovery and record a new repository snapshot (falls back to the last one used)')
+    .action(async (repositoryId: string | undefined) => {
       const { db } = openWorkbenchDatabase();
-      const repository = await getRepository(db, repositoryId);
+      const id = resolveRepositoryId(repositoryId);
+      const repository = await getRepository(db, id);
       if (!repository) {
-        console.error(`No repository with id ${repositoryId}`);
+        console.error(`No repository with id ${id}`);
         process.exitCode = 1;
         return;
       }
@@ -73,17 +87,18 @@ export function registerRepoCommands(program: Command): void {
     });
 
   repo
-    .command('approve <repositoryId>')
-    .description('Mark a discovered repository profile as trusted')
-    .action(async (repositoryId: string) => {
+    .command('approve [repositoryId]')
+    .description('Mark a discovered repository profile as trusted (falls back to the last one used)')
+    .action(async (repositoryId: string | undefined) => {
       const { db } = openWorkbenchDatabase();
-      const repository = await getRepository(db, repositoryId);
+      const id = resolveRepositoryId(repositoryId);
+      const repository = await getRepository(db, id);
       if (!repository) {
-        console.error(`No repository with id ${repositoryId}`);
+        console.error(`No repository with id ${id}`);
         process.exitCode = 1;
         return;
       }
-      await approveRepository(db, repositoryId);
-      console.log(`Repository ${repositoryId} is now trusted.`);
+      await approveRepository(db, id);
+      console.log(`Repository ${id} is now trusted.`);
     });
 }

@@ -44,40 +44,47 @@ task list for the full detail on each.
 
 ## Running it
 
-Four processes, each in its own terminal:
+The fast path — one command boots the whole stack (Temporal dev server,
+worker, and daemon) and waits for the daemon to report healthy:
 
 ```bash
 pnpm install
-
-# 1. Local Temporal dev server (must be up before the worker connects)
-temporal server start-dev
-
-# 2. Temporal worker — runs the real 9-phase runPhase Activity
-pnpm --filter @awb/temporal-worker dev
-
-# 3. The daemon — Fastify API on :4417
-pnpm --filter @awb/daemon dev
-
-# 4. The web dashboard on :5317 (optional — you can drive everything via the CLI instead)
-pnpm --filter @awb/web dev
+pnpm --filter @awb/cli cli -- up      # boots Temporal + worker + daemon, waits for /api/health
 ```
 
-Each `dev` script runs the app's TypeScript directly via `tsx watch` (auto-
-restarts on save) — no separate build step needed. The worker's `dev` script
-builds `packages/workflow` first automatically, since Temporal's bundler
-needs a real compiled `task-workflow.js` to package, not live TS.
+`awb down` tears it back down. Logs stream to `~/.agentic-workbench/runtime/logs/`.
+The web dashboard is optional (`pnpm --filter @awb/web dev`, on :5317) — you
+can drive everything from the CLI.
 
-Once the daemon is up, drive it with the CLI (built once via `pnpm build`):
+If you'd rather run the processes yourself (e.g. to watch each one's output),
+they are, in order — each `dev` runs TypeScript directly via `tsx watch`, no
+build step; the worker's `dev` compiles `packages/workflow` first since
+Temporal's bundler needs a real `task-workflow.js`, not live TS:
 
 ```bash
-node apps/cli/dist/index.js init
-node apps/cli/dist/index.js repo add /path/to/some/real/git/repo
-node apps/cli/dist/index.js repo refresh <repositoryId>
-node apps/cli/dist/index.js repo approve <repositoryId>
-node apps/cli/dist/index.js task create <repositoryId> --prompt "..."
-node apps/cli/dist/index.js task show <repositoryId> <taskId>
-node apps/cli/dist/index.js task approve-contract <repositoryId> <taskId> --version 1
+temporal server start-dev
+pnpm --filter @awb/temporal-worker dev
+pnpm --filter @awb/daemon dev
 ```
+
+Once the stack is up, drive it with the CLI. Run it buildless via the `cli`
+script (no `pnpm build` needed):
+
+```bash
+awb() { pnpm --filter @awb/cli cli -- "$@"; }   # or `pnpm link` the CLI package for a bare `awb`
+
+awb repo add /path/to/some/real/git/repo --json   # prints the repo, remembers its id
+awb repo refresh                                   # id falls back to the last one used
+awb repo approve
+awb task create --prompt "..." --json              # prints the task, remembers its id
+awb task show                                       # ids fall back to the last ones used
+awb task approve-contract --version 1
+awb task list                                       # tasks created this session
+```
+
+Repo and task ids are remembered between commands, so you only pass them when
+you want to target something other than the most recent. To drive a full task
+from Claude Code, see `.claude/skills/drive-task`.
 
 `apps/cli/package.json` declares a `bin: awb` entry for when this is
 installed as a real package; `pnpm link` the CLI package yourself if you
