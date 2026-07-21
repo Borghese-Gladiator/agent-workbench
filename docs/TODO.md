@@ -136,6 +136,27 @@ comment linking a real `releases/download/...` URL that actually downloads the
 
 ## P2 — Bugs found during the live run
 
+### [ ] TASK-19: Planner over-decomposes trivial tasks → ~1–2h per run
+**Live-run finding (runs 3/5, 2026-07-21):** the builder spends ~1–2h on the
+*trivial* "add a Games section to the README" task because the planner splits it
+into discovery/author/verify slices, and each slice is a full, separate Claude
+builder session (`runSliceLoop` → one `runRealBuilderAttempt` per slice; on run 5
+`runtimeMsByPhase.implement` was ~5.1M ms ≈ 85 min, plan ~14 min). Most of that
+is the discovery/verify slices doing repo-wide exploration that the single
+feature edit didn't need. This isn't a correctness bug (the runs converged) but
+it makes iteration painfully slow and burns tokens.
+**Do (options, cheapest first):**
+- Bias the planner toward fewer slices for low-risk/doc-only work — e.g. tell it
+  in `plannerInstruction` to prefer a single slice unless the work genuinely
+  spans independent units, and/or collapse a plan whose slices all touch the
+  same paths.
+- Carry context across slices so a later slice doesn't re-discover from scratch
+  (today each builder session starts cold; resume/session-reuse or a shared
+  discovery note would cut the repeated exploration).
+- Cap per-slice budget more aggressively for non-code slices.
+**Done when:** the README task completes in minutes, not hours, without
+regressing convergence.
+
 ### [x] TASK-15: Worktree deps never installed → verify's build failed
 **Live-run finding (run 5):** with the verify-env fix, verify actually ran the
 discovered commands, but `npm run build` (vite build) failed
@@ -264,3 +285,37 @@ contract gate; possibly reject a too-coarse plan).
 **Done when:** a real Draft PR for President exists on the repo with real QA
 evidence, reached via the workbench with no fake artifacts, and we stop at the
 pr-readiness gate (no auto-merge).
+
+**Assessment (2026-07-21) — would this work today? Partially; not unattended.**
+What now works, proven on the README run: the mechanical spine
+(specify→plan→implement→verify with a real worktree, real builder edits/commits,
+real candidate SHA, real discovered test/build after prepare installs deps, real
+usage aggregation). President is a bigger *code* task than a README, but the same
+machinery applies, so the spine should hold.
+The real risks are NOT in the plumbing anymore, they are:
+1. **Convergence/quality of a hard multi-file task.** President is a real engine
+   + React client + server `useGameSocket` wiring + Playwright e2e across several
+   packages. The builder runs each plan slice as an *independent, cold* session
+   (see TASK-19) with no shared memory, a 10k-token / 60s per-slice budget, and a
+   diff-based success signal. A cross-cutting feature that needs coordinated
+   edits across engine/client/server is exactly where cold per-slice sessions and
+   tight budgets tend to stall or produce a partial, non-wiring-complete change.
+   Expect iteration, not a clean first pass.
+2. **The critic + adversarial reviewer are no-ops (TASK-14).** They never see the
+   plan/diff, so nothing catches an under-wired or subtly-wrong implementation —
+   the run can "pass" challenge with a broken feature. For President's
+   correctness that matters a lot.
+3. **Browser QA (TASK-4) is unproven live** and President's "done" REQUIRES a
+   real qa-video/trace. It needs a discoverable dev-server start command
+   (`resolveStartCommand`) and the server to actually come up in the worktree;
+   that path has only been fixture-tested.
+4. **Runtime.** At ~1–2h for a README (TASK-19), a multi-slice President run is
+   plausibly many hours — needs supervision and probably a plan reject or two.
+5. **Release opens a REAL draft PR + pushes** to the target remote (no dry-run
+   guard) — must be run with a human present, never unattended.
+**Bottom line:** the pipeline will very likely *drive* President through the
+phases and produce a branch + commits, but reaching a *correct, QA-evidenced*
+Draft PR in one shot is unlikely without (a) TASK-14 so review actually guards
+quality, (b) TASK-4 proven so browser QA is real, and (c) TASK-19 so iteration is
+tractable. Best run interactively, prepared to reject a too-coarse plan and to
+repair after review.
