@@ -35,6 +35,13 @@ export function plannerInstruction(contract: TaskContract): string {
     '"requiredTargetedChecks": string[] (non-empty), "claimIds": string[], "dependencies": string[],',
     '"qaScenarioIds": string[]}]}',
     'as a fenced ```json code block. Each slice must have at least one targeted check.',
+    // Bias toward the smallest plan that covers the work (TASK-19): each slice is executed as a
+    // separate, cold builder session, so extra slices multiply runtime and token cost. Investigation
+    // is not its own slice — fold discovery and verification into the slice that makes the change.
+    'IMPORTANT: use as FEW slices as possible — prefer a SINGLE slice unless the work spans genuinely',
+    'independent units (e.g. separate packages/files that can be built and checked on their own).',
+    'Do NOT create separate "investigate/discover" or "verify/validate" slices: exploring the repo',
+    'and running the checks are part of implementing the change, so put them in the same slice.',
     qaLine,
   ]
     .filter(Boolean)

@@ -382,7 +382,12 @@ async function runPlan(state: TaskWorkflowState): Promise<PhaseAttemptResult> {
       const criticStart = Date.now();
       const execution = await adapter.execute(
         session,
-        { instruction: 'Critique the plan against the contract' },
+        {
+          instruction:
+            'The plan to critique is in the JSON context above. Critique it against the contract: ' +
+            'find missing claim coverage, slices without targeted checks, behavioral claims lacking a ' +
+            'QA scenario, over-engineering, and scope gaps. Report concrete findings.',
+        },
         sink,
         new AbortController().signal,
       );
@@ -755,9 +760,9 @@ async function runExercise(state: TaskWorkflowState): Promise<PhaseAttemptResult
     qaResult = await runBrowserQaViaServer({
       startCommand,
       worktreePath: runState.worktreePath,
-      baseUrl: process.env.AWB_QA_BASE_URL ?? 'http://127.0.0.1:5173',
+      baseUrl: process.env.AWB_QA_BASE_URL ?? 'http://localhost:5173',
       scenario: {
-        baseUrl: process.env.AWB_QA_BASE_URL ?? 'http://127.0.0.1:5173',
+        baseUrl: process.env.AWB_QA_BASE_URL ?? 'http://localhost:5173',
         steps: [{ kind: 'navigate', url: '/' }, { kind: 'screenshot', name: 'landing' }],
       },
       context,
@@ -872,7 +877,13 @@ async function runChallenge(state: TaskWorkflowState): Promise<PhaseAttemptResul
       const reviewerStart = Date.now();
       const execution = await adapter.execute(
         session,
-        { instruction: 'Adversarially review the contract, plan, diff, and evidence' },
+        {
+          instruction:
+            'The contract, plan, candidate diff, changed paths, and evidence ids are in the JSON ' +
+            'context above. Adversarially review the diff against the contract + plan: hunt for ' +
+            'correctness bugs, unhandled edge cases, missing wiring, and claims not actually met. ' +
+            'Report concrete findings with severity.',
+        },
         sink,
         new AbortController().signal,
       );

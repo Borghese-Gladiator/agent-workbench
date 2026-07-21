@@ -16,18 +16,34 @@ export interface BrowserQaViaServerInput {
   readinessTimeoutMs?: number;
 }
 
-async function waitForUrl(url: string, timeoutMs: number): Promise<boolean> {
+/**
+ * Probes a URL until it responds. Tries both the given host and its localhost counterpart, because
+ * dev servers (Vite in particular) bind to `localhost` which may resolve to IPv6 `::1` only — so a
+ * probe hardcoded to `127.0.0.1` never connects even though the server is up. Returns the URL that
+ * actually responded (the caller drives the browser at that one), or undefined on timeout.
+ */
+async function waitForServer(url: string, timeoutMs: number): Promise<string | undefined> {
+  const candidates = [url, ...localhostVariants(url)];
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url);
-      if (res.ok || res.status < 500) return true;
-    } catch {
-      // not up yet
+    for (const candidate of candidates) {
+      try {
+        const res = await fetch(candidate);
+        if (res.ok || res.status < 500) return candidate;
+      } catch {
+        // not up yet
+      }
     }
     await new Promise((r) => setTimeout(r, 500));
   }
-  return false;
+  return undefined;
+}
+
+/** The same URL with the host swapped between `localhost` and `127.0.0.1` (dedup handled by caller). */
+function localhostVariants(url: string): string[] {
+  if (url.includes('localhost')) return [url.replace('localhost', '127.0.0.1')];
+  if (url.includes('127.0.0.1')) return [url.replace('127.0.0.1', 'localhost')];
+  return [];
 }
 
 /**
@@ -46,11 +62,14 @@ export async function runBrowserQaViaServer(input: BrowserQaViaServerInput): Pro
   });
 
   try {
-    const ready = await waitForUrl(input.baseUrl, input.readinessTimeoutMs ?? 30_000);
-    if (!ready) {
+    const readyUrl = await waitForServer(input.baseUrl, input.readinessTimeoutMs ?? 30_000);
+    if (!readyUrl) {
       throw new Error(`dev server did not become ready at ${input.baseUrl} within the timeout`);
     }
-    return await runBrowserQa(input.scenario, input.context, input.artifactStore);
+    // Drive the browser at the host that actually responded (may differ from the requested one when
+    // the server bound only localhost/IPv6 or only 127.0.0.1).
+    const scenario = readyUrl === input.baseUrl ? input.scenario : { ...input.scenario, baseUrl: readyUrl };
+    return await runBrowserQa(scenario, input.context, input.artifactStore);
   } finally {
     if (child.pid !== undefined) {
       try {

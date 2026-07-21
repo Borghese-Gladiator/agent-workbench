@@ -123,8 +123,32 @@ const realQuery: ClaudeQueryFn = (params) => query(params) as unknown as ClaudeS
 interface ClaudeSessionState {
   cwd: string;
   allowedTools: string[];
+  /** The caller's context payload (contract/plan/diff/evidence), serialized into the first prompt. */
+  contextPayload: unknown;
   resumeSessionId?: string;
   liveQuery?: ClaudeSdkQueryHandle;
+}
+
+/**
+ * Serializes the session's contextPayload into a prompt preamble. The SDK only sends
+ * `assignment.instruction` as the prompt, so without this a role whose instruction doesn't embed
+ * its inputs (plan-critic, adversarial-reviewer) never sees the plan/diff/contract it is meant to
+ * judge and returns nothing useful. Only prepended on the FIRST turn of a session (a resumed turn
+ * already has the context in its transcript). Large payloads are truncated so a huge diff can't
+ * blow the prompt.
+ */
+function contextPreamble(contextPayload: unknown): string {
+  if (contextPayload === undefined || contextPayload === null) return '';
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(contextPayload, null, 2);
+  } catch {
+    return '';
+  }
+  if (!serialized || serialized === '{}' || serialized === 'null') return '';
+  const MAX = 60_000;
+  const body = serialized.length > MAX ? `${serialized.slice(0, MAX)}\n…[truncated ${serialized.length - MAX} chars]` : serialized;
+  return `Context for this task (JSON):\n\`\`\`json\n${body}\n\`\`\`\n\n`;
 }
 
 function summarizeToolResultContent(content: unknown): string {
@@ -183,6 +207,7 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
     this.state.set(session.id, {
       cwd: input.cwd,
       allowedTools: input.allowedTools,
+      contextPayload: input.contextPayload,
     });
     return session;
   }
@@ -206,8 +231,15 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
     const onAbort = () => abortController.abort();
     signal.addEventListener('abort', onAbort);
 
+    // First turn of the session (no resume id yet): prepend the serialized contextPayload so the
+    // agent actually sees its inputs. Resumed turns already carry the context in the transcript.
+    const prompt =
+      state.resumeSessionId === undefined
+        ? `${contextPreamble(state.contextPayload)}${assignment.instruction}`
+        : assignment.instruction;
+
     const handle = this.queryFn({
-      prompt: assignment.instruction,
+      prompt,
       options: {
         cwd: state.cwd,
         tools: state.allowedTools,

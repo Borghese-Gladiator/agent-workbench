@@ -104,6 +104,12 @@ describe('parsePlannerOutput', () => {
     expect(instruction).toContain('json');
   });
 
+  it('plannerInstruction biases toward the fewest slices (TASK-19)', () => {
+    const instruction = plannerInstruction(contract);
+    expect(instruction).toMatch(/FEW slices|SINGLE slice/);
+    expect(instruction).toMatch(/investigate|discover|verify/i);
+  });
+
   it('plannerInstruction demands qaScenarioIds when a behavioral qa claim exists', () => {
     const behavioralContract = {
       ...contract,

@@ -167,6 +167,44 @@ describe('ClaudeAgentAdapter', () => {
     expect(calls[0]?.options?.cwd).toBe('/tmp/my-worktree');
     expect(calls[0]?.options?.tools).toEqual(['Read', 'Bash']);
     expect(calls[0]?.options?.maxTurns).toBe(7);
+    // Headless worker runs need auto-approved tools (TASK-13).
+    expect(calls[0]?.options?.permissionMode).toBe('bypassPermissions');
+  });
+
+  it('prepends the serialized contextPayload to the first prompt (TASK-14)', async () => {
+    const { queryFn, calls } = fakeQuery([]);
+    const adapter = new ClaudeAgentAdapter(queryFn);
+    const session = await adapter.createSession({
+      role: 'plan-critic',
+      taskId: 'task-1',
+      cwd: '/tmp/worktree',
+      contextPayload: { plan: { summary: 'do the thing', slices: ['a'] } },
+      allowedTools: ['Read'],
+    });
+    await adapter.execute(session, { instruction: 'Critique the plan' }, () => {}, new AbortController().signal);
+
+    expect(calls[0]?.prompt).toContain('do the thing');
+    expect(calls[0]?.prompt).toContain('Critique the plan');
+    // Instruction comes after the context preamble.
+    expect(calls[0]?.prompt.indexOf('do the thing')).toBeLessThan(calls[0]!.prompt.indexOf('Critique the plan'));
+  });
+
+  it('does not prepend context on a resumed turn (context already in transcript)', async () => {
+    const messages: ClaudeSdkMessage[] = [{ type: 'system', subtype: 'init', session_id: 'sess-1' }];
+    const { queryFn, calls } = fakeQuery(messages);
+    const adapter = new ClaudeAgentAdapter(queryFn);
+    const session = await adapter.createSession({
+      role: 'plan-critic',
+      taskId: 'task-1',
+      cwd: '/tmp/worktree',
+      contextPayload: { plan: 'PAYLOAD_MARKER' },
+      allowedTools: ['Read'],
+    });
+    await adapter.execute(session, { instruction: 'turn one' }, () => {}, new AbortController().signal);
+    await adapter.execute(session, { instruction: 'turn two' }, () => {}, new AbortController().signal);
+    expect(calls[0]?.prompt).toContain('PAYLOAD_MARKER');
+    expect(calls[1]?.prompt).not.toContain('PAYLOAD_MARKER');
+    expect(calls[1]?.prompt).toBe('turn two');
   });
 
   it('threads the resume session id captured from a prior call into the next execute() call', async () => {
