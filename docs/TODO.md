@@ -109,6 +109,24 @@ comment linking a real `releases/download/...` URL that actually downloads the
 
 ## P2 — Bugs found during the live run
 
+### [x] TASK-13: Builder session had no file tools (only ambient MCP) — implement stalled
+**Live-run finding (2026-07-21, after the plan fix):** the task converged
+through plan and reached `implement`, then blocked `repeated-failure-no-progress`
+at attempt 1. The captured builder log showed the session had NO
+`Read`/`Write`/`Edit`/`Bash` — only the ambient MCP servers
+(Buildkite/Chronosphere/Figma/Playwright/Sentry) — so it could not edit files,
+produced no diff, and looped to no-progress.
+**Root cause:** run-phase passed the capability broker's *abstract* capability
+names (`worktree.write`, `repository.read`, …) straight to the SDK `tools`
+option, which expects concrete tool names and recognized none, falling through
+to ambient MCP inheritance. Compounded by the headless worker having no human
+to answer per-tool permission prompts (every call denied).
+**Fixed:** added `capabilitiesToSdkTools` (agent-gateway) mapping abstract
+capabilities → `Read/Write/Edit/Grep/Glob/Bash`, applied on the claude runtime;
+set the SDK `permissionMode` to `bypassPermissions` for the headless worker.
+**Done when:** the builder edits + commits a real diff on a live run
+(verifying).
+
 ### [x] TASK-8: `repo refresh` discovers 0 commands on a workspace repo
 On `wip-browser-games`, discovery found 0 `ValidatedCommand`s because the games
 are pnpm/npm-workspace sub-packages and the root `package.json` scripts didn't
@@ -117,6 +135,9 @@ classify. This makes Fix 2's verify fall back to `echo ok`.
 `workspaces`/`pnpm-workspace.yaml`, discover per-package `test`/`build`).
 **Done when:** refresh on `wip-browser-games` returns real per-game test/build
 commands.
+**DONE (live-confirmed 2026-07-21):** `repo refresh` on `wip-browser-games` now
+records 13 units + 6 commands (was 0) — real root `test`/`build`/`dev`
+discovered, plus nested `packages/engines/*`, `games/*`, `portal` units.
 
 ### [x] TASK-9: CLI `--version` flag collision breaks `task approve-contract`
 `node apps/cli/dist/index.js task approve-contract <ids> --version 1` prints
@@ -126,6 +147,9 @@ flag. Had to approve via the daemon route in the live run.
 --version` for the same collision.
 **Done when:** `awb task approve-contract ... --contract-version 1` works and a
 test covers it.
+**DONE (live-confirmed 2026-07-21):** approved the live task's contract with
+`awb task approve-contract --contract-version 1` (reached the daemon, no
+`0.1.0` short-circuit). `approve-plan` renamed to `--plan-version` too.
 
 ### [x] TASK-10: `cli` npm script injects `--`, breaking required options
 `pnpm --filter @awb/cli cli -- <args>` prepends its own `--`, so required options
