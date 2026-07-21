@@ -1,7 +1,55 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { runCommand } from '@awb/execution';
 import { createDatabase } from '@awb/database';
 import { initDataDir } from '@awb/config';
 import { getRepositoryCommands, getRepository, runGit, getChangedPaths } from '@awb/repository';
 import type { ValidatedCommand, CommandPurpose } from '@awb/domain';
+
+function inheritedEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
+/**
+ * Installs the worktree's dependencies during prepare (a real live-run blocker: a fresh
+ * `git worktree` has no `node_modules`, so verify's `vite build` failed with "Cannot find package
+ * 'vite'"). Uses the repo's discovered `install` command when present, else a package-manager
+ * default inferred from the lockfile in the worktree. Node-ecosystem only for now — repos without a
+ * recognized lockfile are treated as nothing-to-install (returns true) rather than failing prepare.
+ * Runs with the worker's real env so the package manager resolves on PATH.
+ */
+export async function installWorktreeDependencies(input: {
+  repositoryId: string;
+  worktreePath: string;
+  timeoutMs?: number;
+}): Promise<{ ran: boolean; ok: boolean; command?: string }> {
+  const discovered = await resolveInstallCommand(input.repositoryId);
+  const command = discovered ?? defaultInstallCommand(input.worktreePath);
+  if (!command) return { ran: false, ok: true };
+
+  const [executable, ...args] = command.split(/\s+/);
+  const result = await runCommand({
+    command: executable ?? command,
+    args,
+    cwd: input.worktreePath,
+    env: inheritedEnv(),
+    timeoutMs: input.timeoutMs ?? 600_000,
+  });
+  return { ran: true, ok: result.exitCode === 0, command };
+}
+
+/** Infers the install command from the lockfile present in the worktree. Undefined = nothing to do. */
+function defaultInstallCommand(worktreePath: string): string | undefined {
+  if (existsSync(join(worktreePath, 'pnpm-lock.yaml'))) return 'pnpm install';
+  if (existsSync(join(worktreePath, 'yarn.lock'))) return 'yarn install';
+  if (existsSync(join(worktreePath, 'package-lock.json'))) return 'npm install';
+  if (existsSync(join(worktreePath, 'package.json'))) return 'npm install';
+  return undefined;
+}
 
 /**
  * Resolves the registered repository's canonical on-disk path (Fix: planner cwd). The plan phase
@@ -39,6 +87,24 @@ export async function resolveVerificationCommands(input: {
     return all
       .filter((c) => verifyPurposes.includes(c.purpose))
       .map((c) => ({ ...c, cwd: input.worktreePath }));
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Resolves the repository's discovered dependency-install command (purpose `install`), if any.
+ * The prepare phase runs this in the fresh worktree so verify/QA don't fail on missing
+ * `node_modules` (a real live-run blocker: a `git worktree` has no deps of its own, so `vite build`
+ * failed with "Cannot find package 'vite'"). Returns undefined when discovery found no install
+ * command; the caller then falls back to a sensible default per package manager.
+ */
+export async function resolveInstallCommand(repositoryId: string): Promise<string | undefined> {
+  const { layout } = initDataDir();
+  const database = createDatabase(layout.workbenchSqlite);
+  try {
+    const all = await getRepositoryCommands(database.db, repositoryId);
+    return all.find((c) => c.purpose === 'install')?.command;
   } finally {
     database.close();
   }

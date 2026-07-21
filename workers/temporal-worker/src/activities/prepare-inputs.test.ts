@@ -68,6 +68,24 @@ describe('computeRealPrepareInputs (Fix 3)', () => {
     expect(inputs.baseShaRecorded).toBe(false);
   });
 
+  it('reports dependenciesPrepared from the real install result, not rubber-stamped', async () => {
+    const failed = await computeRealPrepareInputs({
+      lease: readyLease(dir),
+      worktreePath: dir,
+      baseSha: realSha,
+      dependenciesInstalled: false,
+    });
+    expect(failed.dependenciesPrepared).toBe(false);
+
+    const ok = await computeRealPrepareInputs({
+      lease: readyLease(dir),
+      worktreePath: dir,
+      baseSha: realSha,
+      dependenciesInstalled: true,
+    });
+    expect(ok.dependenciesPrepared).toBe(true);
+  });
+
   it('reports leaseActive false when the lease is not ready/active', async () => {
     const inputs = await computeRealPrepareInputs({
       lease: { ...readyLease(dir), state: 'failed' },

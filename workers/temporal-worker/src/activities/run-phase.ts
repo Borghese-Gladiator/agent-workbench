@@ -17,7 +17,13 @@ import { createAgentAdapter, scriptMockTurns, resolveAgentRuntime } from './agen
 import { materializeWorktree } from './worktree-support.js';
 import { runRealBuilderAttempt } from './builder-support.js';
 import { plannerInstruction, parsePlannerOutput } from './plan-support.js';
-import { resolveVerificationCommands, resolveReviewDiff, resolveStartCommand, resolveRepositoryPath } from './command-support.js';
+import {
+  resolveVerificationCommands,
+  resolveReviewDiff,
+  resolveStartCommand,
+  resolveRepositoryPath,
+  installWorktreeDependencies,
+} from './command-support.js';
 import { runBrowserQaViaServer } from './browser-qa-support.js';
 import { draftContractInputFromPrompt } from './contract-support.js';
 import { resolveRepoRef, createRealDelivery } from './delivery-support.js';
@@ -76,6 +82,8 @@ export interface TaskRunState {
   reviewFindings: import('@awb/domain').Finding[];
   artifactStore: ArtifactStore;
   artifactsDir?: string;
+  /** Whether prepare successfully installed the worktree's dependencies (real path). */
+  dependenciesInstalled?: boolean;
 }
 
 const taskRunStates = new Map<string, TaskRunState>();
@@ -440,7 +448,7 @@ async function runPlan(state: TaskWorkflowState): Promise<PhaseAttemptResult> {
  * reported honestly as attempted-but-trivial rather than asserted as done work.
  */
 export async function computeRealPrepareInputs(
-  runState: Pick<TaskRunState, 'lease' | 'worktreePath' | 'baseSha'>,
+  runState: Pick<TaskRunState, 'lease' | 'worktreePath' | 'baseSha' | 'dependenciesInstalled'>,
 ): Promise<NonNullable<CompletionContext['prepare']>> {
   const lease = runState.lease;
   const worktreePath = runState.worktreePath;
@@ -453,7 +461,9 @@ export async function computeRealPrepareInputs(
     worktreeExists,
     branchExists,
     executionProfileApproved: lease?.executionProfile === 'native-trusted',
-    dependenciesPrepared: worktreeExists,
+    // Reflects the real install attempt in runPrepare (falls back to worktreeExists only for older
+    // callers that didn't record a result), so a failed install doesn't get rubber-stamped.
+    dependenciesPrepared: runState.dependenciesInstalled ?? worktreeExists,
     baselineCommandsAttempted: true,
     preExistingFailuresClassified: true,
     leaseActive: lease?.state === 'ready' || lease?.state === 'active',
@@ -479,6 +489,13 @@ async function runPrepare(state: TaskWorkflowState): Promise<PhaseAttemptResult>
     runState.lease = lease;
     runState.baseSha = lease.baseSha;
     runState.worktreePath = lease.worktreePath;
+    // A fresh git worktree has no node_modules of its own, so install deps now or verify/QA fail on
+    // missing packages (the observed `vite build` "Cannot find package 'vite'" verify block).
+    const install = await installWorktreeDependencies({
+      repositoryId: state.repositoryId,
+      worktreePath: lease.worktreePath,
+    });
+    runState.dependenciesInstalled = install.ok;
   } else {
     runState.baseSha = runState.baseSha ?? '0'.repeat(40);
     runState.worktreePath = runState.worktreePath ?? process.env.AWB_RUN_PHASE_FIXTURE_REPO ?? process.cwd();
