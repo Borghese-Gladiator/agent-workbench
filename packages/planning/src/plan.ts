@@ -17,11 +17,18 @@ export interface DraftPlanInput {
 }
 
 function buildClaimCoverage(claims: AcceptanceClaim[], slices: PlanSlice[]): ClaimCoverage[] {
-  return claims.map((claim) => ({
-    claimId: claim.id,
-    planSliceIds: slices.filter((s) => s.claimIds.includes(claim.id)).map((s) => s.id),
-    qaScenarioIds: [],
-  }));
+  return claims.map((claim) => {
+    const coveringSlices = slices.filter((s) => s.claimIds.includes(claim.id));
+    return {
+      claimId: claim.id,
+      planSliceIds: coveringSlices.map((s) => s.id),
+      // QA scenarios are derived from the covering slices' declared scenarios, not hand-authored,
+      // so a behavioral claim's coverage is satisfied exactly when a slice that covers it declares
+      // one. (Previously hardcoded to [], which made everyBehavioralClaimHasQaScenario impossible
+      // to satisfy — the plan phase then always blocked as repeated-failure-no-progress.)
+      qaScenarioIds: [...new Set(coveringSlices.flatMap((s) => s.qaScenarioIds ?? []))],
+    };
+  });
 }
 
 /**

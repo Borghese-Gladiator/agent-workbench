@@ -7,6 +7,12 @@ export const PlanSliceSchema = z.object({
   likelyPaths: z.array(z.string()),
   requiredTargetedChecks: z.array(z.string()),
   dependencies: z.array(z.string()),
+  /**
+   * QA scenario identifiers this slice exercises. A behavioral claim with `qaEvidenceRequired`
+   * is only satisfied at the plan gate when a slice covering it declares at least one scenario
+   * (see everyBehavioralClaimHasQaScenario). Optional so non-behavioral plans/fixtures are unaffected.
+   */
+  qaScenarioIds: z.array(z.string()).optional(),
 });
 export type PlanSlice = z.infer<typeof PlanSliceSchema>;
 

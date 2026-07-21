@@ -11,18 +11,34 @@ interface PlannerPlanJson {
     likelyPaths?: string[];
     requiredTargetedChecks?: string[];
     dependencies?: string[];
+    qaScenarioIds?: string[];
   }>;
 }
 
 /** The instruction handed to the planner session, telling it exactly what JSON to emit. */
 export function plannerInstruction(contract: TaskContract): string {
+  const behavioralClaimIds = contract.claims
+    .filter((c) => c.category === 'behavior' && c.qaEvidenceRequired)
+    .map((c) => c.id);
+  const qaLine =
+    behavioralClaimIds.length > 0
+      ? [
+          `The contract has behavioral claim(s) requiring QA evidence: ${behavioralClaimIds.join(', ')}.`,
+          'At least one slice that lists such a claim in its "claimIds" MUST also declare a non-empty',
+          '"qaScenarioIds" naming the QA scenario(s) that exercise it, or the plan will be rejected.',
+        ].join(' ')
+      : '';
   return [
     `Produce an implementation plan for this contract objective: ${contract.objective}.`,
     'Decompose the work into ordered slices. Respond with a JSON object of the form',
     '{"summary": string, "slices": [{"objective": string, "likelyPaths": string[],',
-    '"requiredTargetedChecks": string[] (non-empty), "claimIds": string[], "dependencies": string[]}]}',
+    '"requiredTargetedChecks": string[] (non-empty), "claimIds": string[], "dependencies": string[],',
+    '"qaScenarioIds": string[]}]}',
     'as a fenced ```json code block. Each slice must have at least one targeted check.',
-  ].join(' ');
+    qaLine,
+  ]
+    .filter(Boolean)
+    .join(' ');
 }
 
 function extractJsonBlock(text: string): string | undefined {
@@ -56,16 +72,42 @@ export function parsePlannerOutput(
   if (!Array.isArray(parsed.slices) || parsed.slices.length === 0) return undefined;
 
   const allClaimIds = contract.claims.map((c) => c.id);
+  const behavioralClaimIds = new Set(
+    contract.claims.filter((c) => c.category === 'behavior' && c.qaEvidenceRequired).map((c) => c.id),
+  );
   const slices: DraftSlice[] = parsed.slices
     .filter((s) => typeof s.objective === 'string' && s.objective.trim().length > 0)
-    .map((s) => ({
-      objective: s.objective as string,
-      claimIds: s.claimIds?.length ? s.claimIds : allClaimIds,
-      likelyPaths: s.likelyPaths ?? [],
-      requiredTargetedChecks: s.requiredTargetedChecks?.length ? s.requiredTargetedChecks : ['test'],
-      dependencies: s.dependencies ?? [],
-    }));
+    .map((s) => {
+      const claimIds = s.claimIds?.length ? s.claimIds : allClaimIds;
+      // Forgiving fallback: if this slice covers a behavioral+QA-required claim but the planner
+      // forgot to name a scenario, synthesize one from the slice objective. Without this the plan
+      // gate (everyBehavioralClaimHasQaScenario) would reject an otherwise-fine plan and stall the
+      // whole task at plan with `repeated-failure-no-progress`.
+      const coversBehavioral = claimIds.some((id) => behavioralClaimIds.has(id));
+      let qaScenarioIds = s.qaScenarioIds?.length ? s.qaScenarioIds : [];
+      if (coversBehavioral && qaScenarioIds.length === 0) {
+        qaScenarioIds = [`qa-${slugify(s.objective as string)}`];
+      }
+      return {
+        objective: s.objective as string,
+        claimIds,
+        likelyPaths: s.likelyPaths ?? [],
+        requiredTargetedChecks: s.requiredTargetedChecks?.length ? s.requiredTargetedChecks : ['test'],
+        dependencies: s.dependencies ?? [],
+        qaScenarioIds,
+      };
+    });
 
   if (slices.length === 0) return undefined;
   return { summary: parsed.summary ?? text.slice(0, 200), slices };
+}
+
+function slugify(text: string): string {
+  return (
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'scenario'
+  );
 }

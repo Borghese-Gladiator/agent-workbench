@@ -8,7 +8,29 @@ Status legend: `[ ]` open · `[~]` in progress · `[x]` done
 
 ## P0 — Blocking the first real end-to-end run
 
-### [ ] TASK-1: Plan phase stalls on the live claude runtime (`repeated-failure-no-progress`)
+### [x] TASK-1: Plan phase stalls on the live claude runtime (`repeated-failure-no-progress`)
+**Root cause (diagnosed 2026-07-21, no model needed):** `buildClaimCoverage`
+in `@awb/planning` hardcoded `qaScenarioIds: []`, so
+`everyBehavioralClaimHasQaScenario` could NEVER be satisfied for the Fix-9
+contract (which always carries a `behavior` + `qaEvidenceRequired` claim). The
+plan gate therefore always returned `blocked`, which the Workflow surfaces as
+the misleading `repeated-failure-no-progress` reason (the phase's fallback gate
+label, not an actual repeated failure).
+**Fixed:**
+- `PlanSlice` gained an optional `qaScenarioIds`; `buildClaimCoverage` now
+  derives coverage `qaScenarioIds` from the covering slices.
+- `plannerInstruction` asks for `qaScenarioIds` and names the behavioral claim;
+  `parsePlannerOutput` parses them AND synthesizes a scenario when the planner
+  omits one for a covered behavioral claim (forgiving). The single-slice
+  fallback in `run-phase` does the same.
+- Every agent session (planner/critic/builder/reviewer) now writes its text +
+  tool + usage events to `agent-logs/<phase-attempt>-<role>.ndjson` under the
+  task's artifacts dir (replacing `NOOP_EVENT_SINK`), so a stall is inspectable.
+Verified the three plan paths (JSON+scenario, JSON-omitted-scenario,
+no-JSON-fallback) all pass the plan gate for the Fix-9 README contract.
+_Still needs a live claude run to confirm end-to-end (TASK-2+)._
+
+<details><summary>original</summary>
 **Symptom (observed 2026-07-21 live run):** a minimal real task ("add a Games
 section to the README") drafted a real contract, passed the contract gate, then
 advanced specify → plan and went `condition: blocked`, gate reason
@@ -31,6 +53,7 @@ returned blocking findings repeatedly. Unconfirmed.
 - If it's critic non-convergence: inspect the findings and adjust.
 **Done when:** the minimal task advances past plan to implement on the claude
 runtime, with the planner output visible in a log/artifact.
+</details>
 
 ---
 

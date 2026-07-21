@@ -21,6 +21,7 @@ import { resolveVerificationCommands, resolveReviewDiff, resolveStartCommand } f
 import { runBrowserQaViaServer } from './browser-qa-support.js';
 import { draftContractInputFromPrompt } from './contract-support.js';
 import { resolveRepoRef, createRealDelivery } from './delivery-support.js';
+import { createFileEventSink } from './event-sink-support.js';
 import { createCapabilityBroker } from '@awb/capability-broker';
 import {
   draftContract,
@@ -34,7 +35,6 @@ import {
   everySliceHasTargetedChecks,
   runPlannerCriticLoop,
   runSliceLoop,
-  NOOP_EVENT_SINK,
   type SliceAssignment,
 } from '@awb/planning';
 import { ArtifactStore, InMemoryArtifactMetadataStore } from '@awb/evidence';
@@ -251,11 +251,23 @@ async function runPlan(state: TaskWorkflowState): Promise<PhaseAttemptResult> {
         allowedTools: allowedToolsForBrokerRole('planner'),
       });
       const realPlanner = resolveAgentRuntime() === 'claude';
+      const { sink } = createFileEventSink({
+        artifactsDir: runState.artifactsDir as string,
+        taskId: state.taskId,
+        role: 'planner',
+        phaseAttempt: `plan-${state.attemptNumber}`,
+      });
       const execution = await adapter.execute(
         session,
         { instruction: realPlanner ? plannerInstruction(contract) : 'Produce an implementation plan for the approved contract' },
-        NOOP_EVENT_SINK,
+        sink,
         new AbortController().signal,
+      );
+      // A behavioral claim requiring QA evidence must be covered by a QA scenario, or the plan gate
+      // (everyBehavioralClaimHasQaScenario) rejects the plan. The single-slice fallback therefore
+      // declares one scenario when the contract has such a claim.
+      const hasBehavioralQaClaim = contract.claims.some(
+        (c) => c.category === 'behavior' && c.qaEvidenceRequired,
       );
       const fallbackSlice = {
         objective: contract.objective,
@@ -263,6 +275,7 @@ async function runPlan(state: TaskWorkflowState): Promise<PhaseAttemptResult> {
         likelyPaths: [],
         requiredTargetedChecks: ['echo ok'],
         dependencies: [],
+        qaScenarioIds: hasBehavioralQaClaim ? [`qa-${state.taskId}-e2e`] : [],
       };
       // Real path: let the planner's output shape the slices; fall back to the single slice only
       // when the agent returned nothing parseable (or on the mock path).
@@ -286,10 +299,16 @@ async function runPlan(state: TaskWorkflowState): Promise<PhaseAttemptResult> {
         contextPayload: { plan },
         allowedTools: allowedToolsForBrokerRole('plan-critic'),
       });
+      const { sink } = createFileEventSink({
+        artifactsDir: runState.artifactsDir as string,
+        taskId: state.taskId,
+        role: 'plan-critic',
+        phaseAttempt: `plan-${state.attemptNumber}`,
+      });
       const execution = await adapter.execute(
         session,
         { instruction: 'Critique the plan against the contract' },
-        NOOP_EVENT_SINK,
+        sink,
         new AbortController().signal,
       );
       return execution.findings;
@@ -462,6 +481,12 @@ async function runImplement(state: TaskWorkflowState): Promise<PhaseAttemptResul
           return { success: true };
         }
         // Real path: run the Claude builder in the worktree, commit, capture the candidate SHA.
+        const { sink } = createFileEventSink({
+          artifactsDir: runState.artifactsDir as string,
+          taskId: state.taskId,
+          role: 'builder',
+          phaseAttempt: `implement-${state.attemptNumber}`,
+        });
         const attempt = await runRealBuilderAttempt({
           adapter,
           taskId: state.taskId,
@@ -470,7 +495,7 @@ async function runImplement(state: TaskWorkflowState): Promise<PhaseAttemptResul
           allowedTools: allowedToolsForBrokerRole('builder'),
           tokenBudget: assignment.tokenBudget,
           runtimeBudgetMs: assignment.runtimeBudgetMs,
-          eventSink: NOOP_EVENT_SINK,
+          eventSink: sink,
         });
         candidateSha = attempt.headSha;
         return attempt.outcome;
@@ -748,10 +773,16 @@ async function runChallenge(state: TaskWorkflowState): Promise<PhaseAttemptResul
         contextPayload: { inputs },
         allowedTools: allowedToolsForBrokerRole('adversarial-reviewer'),
       });
+      const { sink } = createFileEventSink({
+        artifactsDir: runState.artifactsDir as string,
+        taskId: state.taskId,
+        role: 'adversarial-reviewer',
+        phaseAttempt: `challenge-${state.attemptNumber}`,
+      });
       const execution = await adapter.execute(
         session,
         { instruction: 'Adversarially review the contract, plan, diff, and evidence' },
-        NOOP_EVENT_SINK,
+        sink,
         new AbortController().signal,
       );
       return {

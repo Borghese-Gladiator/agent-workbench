@@ -58,9 +58,45 @@ describe('parsePlannerOutput', () => {
     expect(parsePlannerOutput('```json\n{"slices":[]}\n```', contract)).toBeUndefined();
   });
 
+  it('parses declared qaScenarioIds from a slice', () => {
+    const text =
+      '```json\n' +
+      JSON.stringify({
+        slices: [{ objective: 'do it', claimIds: ['claim-1'], qaScenarioIds: ['scenario-a'] }],
+      }) +
+      '\n```';
+    const parsed = parsePlannerOutput(text, contract);
+    expect(parsed?.slices[0]?.qaScenarioIds).toEqual(['scenario-a']);
+  });
+
+  // A behavioral + qaEvidenceRequired claim whose covering slice omits qaScenarioIds must get a
+  // synthesized scenario, or the plan gate stalls the task (TASK-1 root cause).
+  it('synthesizes a qa scenario for a covered behavioral claim when the planner omits one', () => {
+    const behavioralContract = {
+      ...contract,
+      claims: [
+        { id: 'b1', description: 'behaves', category: 'behavior', deterministicEvidenceRequired: false, qaEvidenceRequired: true, humanJudgmentRequired: false },
+      ],
+    } as unknown as TaskContract;
+    const text = '```json\n' + JSON.stringify({ slices: [{ objective: 'Play a round', claimIds: ['b1'] }] }) + '\n```';
+    const parsed = parsePlannerOutput(text, behavioralContract);
+    expect(parsed?.slices[0]?.qaScenarioIds?.length).toBeGreaterThan(0);
+  });
+
   it('plannerInstruction names the objective and asks for JSON slices', () => {
     const instruction = plannerInstruction(contract);
     expect(instruction).toContain('President');
     expect(instruction).toContain('json');
+  });
+
+  it('plannerInstruction demands qaScenarioIds when a behavioral qa claim exists', () => {
+    const behavioralContract = {
+      ...contract,
+      claims: [
+        { id: 'b1', description: 'behaves', category: 'behavior', deterministicEvidenceRequired: false, qaEvidenceRequired: true, humanJudgmentRequired: false },
+      ],
+    } as unknown as TaskContract;
+    expect(plannerInstruction(behavioralContract)).toContain('qaScenarioIds');
+    expect(plannerInstruction(behavioralContract)).toContain('b1');
   });
 });
