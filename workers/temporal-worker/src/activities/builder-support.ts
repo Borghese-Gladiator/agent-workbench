@@ -54,8 +54,16 @@ export async function runRealBuilderAttempt(input: RealBuilderAttemptInput): Pro
 
     const status = await getStatus(input.worktreePath);
     if (status.length === 0) {
-      // No file changes — a no-meaningful-diff attempt (drives runSliceLoop's no-progress detection).
       const headSha = await getHeadSha(input.worktreePath);
+      // No file changes. Distinguish two cases (a live-run finding): a session that ran to
+      // completion and deliberately made no edit is a legitimate no-op slice — e.g. a
+      // discovery/inventory or verify-only slice that a multi-slice plan produced — and must count
+      // as success, or the implement phase blocks `repeated-failure-no-progress` on a plan that was
+      // simply over-decomposed. Only an *incomplete* session with no diff is the edit/revert /
+      // stuck signal `noMeaningfulDiff` is meant to catch.
+      if (execution.completed) {
+        return { outcome: { success: true }, headSha, usage: execution.usage, runtimeMs };
+      }
       return { outcome: { success: false, noMeaningfulDiff: true }, headSha, usage: execution.usage, runtimeMs };
     }
 

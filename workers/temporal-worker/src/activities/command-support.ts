@@ -1,7 +1,25 @@
 import { createDatabase } from '@awb/database';
 import { initDataDir } from '@awb/config';
-import { getRepositoryCommands, runGit, getChangedPaths } from '@awb/repository';
+import { getRepositoryCommands, getRepository, runGit, getChangedPaths } from '@awb/repository';
 import type { ValidatedCommand, CommandPurpose } from '@awb/domain';
+
+/**
+ * Resolves the registered repository's canonical on-disk path (Fix: planner cwd). The plan phase
+ * runs BEFORE prepare materializes the task worktree, so without this the planner would inspect the
+ * workbench's own repo (process.cwd()) instead of the target — the observed effect was a planner
+ * that reported "no games in this repo" while planning against the wrong tree. Returns undefined
+ * when the repo is unknown, so the caller keeps its process.cwd() fallback.
+ */
+export async function resolveRepositoryPath(repositoryId: string): Promise<string | undefined> {
+  const { layout } = initDataDir();
+  const database = createDatabase(layout.workbenchSqlite);
+  try {
+    const repo = await getRepository(database.db, repositoryId);
+    return repo?.canonicalPath;
+  } finally {
+    database.close();
+  }
+}
 
 /**
  * Resolves the repository's real discovered verification commands (Fix 2), replacing the hardcoded

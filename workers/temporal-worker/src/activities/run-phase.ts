@@ -17,7 +17,7 @@ import { createAgentAdapter, scriptMockTurns, resolveAgentRuntime } from './agen
 import { materializeWorktree } from './worktree-support.js';
 import { runRealBuilderAttempt } from './builder-support.js';
 import { plannerInstruction, parsePlannerOutput } from './plan-support.js';
-import { resolveVerificationCommands, resolveReviewDiff, resolveStartCommand } from './command-support.js';
+import { resolveVerificationCommands, resolveReviewDiff, resolveStartCommand, resolveRepositoryPath } from './command-support.js';
 import { runBrowserQaViaServer } from './browser-qa-support.js';
 import { draftContractInputFromPrompt } from './contract-support.js';
 import { resolveRepoRef, createRealDelivery } from './delivery-support.js';
@@ -276,19 +276,28 @@ async function runPlan(state: TaskWorkflowState): Promise<PhaseAttemptResult> {
   const contract = runState.contract;
   if (!contract) return blockedResult('plan', ['no approved contract available from the specify phase']);
 
+  // The planner must inspect the TARGET repo, not the workbench's own tree. Plan runs before
+  // prepare creates the worktree, so resolve the registered repo's canonical path on the claude
+  // runtime; without this the planner ran in process.cwd() (the workbench) and planned against the
+  // wrong repository. Falls back to worktreePath (if a prior phase set it) then process.cwd().
+  const planCwd =
+    runState.worktreePath ??
+    (resolveAgentRuntime() === 'claude' ? await resolveRepositoryPath(state.repositoryId) : undefined) ??
+    process.cwd();
+
   const adapter = createAgentAdapter();
   scriptMockTurns(adapter, state.taskId, 'planner', { summary: 'Single-slice plan covering the task objective' });
   scriptMockTurns(adapter, state.taskId, 'plan-critic', { findings: [] });
 
   const loopResult = await runPlannerCriticLoop({
     taskId: state.taskId,
-    cwd: runState.worktreePath ?? process.cwd(),
+    cwd: planCwd,
     contextPayload: { contract },
     runPlanner: async (priorFindings) => {
       const session = await adapter.createSession({
         role: 'planner',
         taskId: state.taskId,
-        cwd: runState.worktreePath ?? process.cwd(),
+        cwd: planCwd,
         contextPayload: { contract, priorFindings },
         allowedTools: allowedToolsForBrokerRole('planner'),
       });
@@ -339,7 +348,7 @@ async function runPlan(state: TaskWorkflowState): Promise<PhaseAttemptResult> {
       const session = await adapter.createSession({
         role: 'plan-critic',
         taskId: state.taskId,
-        cwd: runState.worktreePath ?? process.cwd(),
+        cwd: planCwd,
         contextPayload: { plan },
         allowedTools: allowedToolsForBrokerRole('plan-critic'),
       });

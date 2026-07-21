@@ -104,11 +104,11 @@ describe('runRealBuilderAttempt (Stage 2 real builder)', () => {
     expect(result.runtimeMs).toBeGreaterThanOrEqual(0);
   });
 
-  it('reports noMeaningfulDiff when the agent changes nothing', async () => {
+  it('reports noMeaningfulDiff when an INCOMPLETE session changes nothing (stuck signal)', async () => {
     const baseSha = await getHeadSha(worktree);
     const adapter = new FakeBuilderAdapter(async () => {
       // no file change
-    });
+    }, /* completed */ false);
 
     const result = await runRealBuilderAttempt({
       adapter,
@@ -123,6 +123,31 @@ describe('runRealBuilderAttempt (Stage 2 real builder)', () => {
 
     expect(result.outcome.success).toBe(false);
     expect(result.outcome.noMeaningfulDiff).toBe(true);
+    expect(result.headSha).toBe(baseSha);
+  });
+
+  // A completed session that deliberately makes no edit (a discovery/inventory or verify-only
+  // slice) is a legitimate no-op, not a stuck loop — it must succeed so an over-decomposed plan
+  // doesn't stall the implement phase.
+  it('treats a COMPLETED no-edit session as a successful no-op slice', async () => {
+    const baseSha = await getHeadSha(worktree);
+    const adapter = new FakeBuilderAdapter(async () => {
+      // no file change, but the session ran to completion
+    }, /* completed */ true);
+
+    const result = await runRealBuilderAttempt({
+      adapter,
+      taskId: 'task-1',
+      worktreePath: worktree,
+      slice,
+      allowedTools: [],
+      tokenBudget: 1000,
+      runtimeBudgetMs: 1000,
+      eventSink: () => {},
+    });
+
+    expect(result.outcome.success).toBe(true);
+    expect(result.outcome.noMeaningfulDiff).toBeUndefined();
     expect(result.headSha).toBe(baseSha);
   });
 });
