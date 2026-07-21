@@ -78,7 +78,7 @@ awb repo refresh                                   # id falls back to the last o
 awb repo approve
 awb task create --prompt "..." --json              # prints the task, remembers its id
 awb task show                                       # ids fall back to the last ones used
-awb task approve-contract --version 1
+awb task approve-contract --contract-version 1
 awb task list                                       # tasks created this session
 ```
 

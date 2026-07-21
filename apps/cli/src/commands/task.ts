@@ -79,13 +79,13 @@ export function registerTaskCommands(program: Command): void {
   task
     .command('approve-contract [repositoryId] [taskId]')
     .description('Approve the current task contract (ids fall back to the last ones used)')
-    .requiredOption('--version <version>', 'Contract version to approve', '1')
-    .action(async (repositoryId: string | undefined, taskId: string | undefined, opts: { version: string }) => {
+    .requiredOption('--contract-version <version>', 'Contract version to approve', '1')
+    .action(async (repositoryId: string | undefined, taskId: string | undefined, opts: { contractVersion: string }) => {
       try {
         const repoId = resolveRepositoryId(repositoryId);
         const tId = resolveTaskId(taskId);
         await daemonClient.post(`/api/tasks/${repoId}/${tId}/approve-contract`, {
-          contractVersion: Number(opts.version),
+          contractVersion: Number(opts.contractVersion),
         });
         console.log('Contract approved.');
       } catch (err) {
@@ -96,12 +96,12 @@ export function registerTaskCommands(program: Command): void {
   task
     .command('approve-plan [repositoryId] [taskId]')
     .description('Approve the current implementation plan (ids fall back to the last ones used)')
-    .requiredOption('--version <version>', 'Plan version to approve', '1')
-    .action(async (repositoryId: string | undefined, taskId: string | undefined, opts: { version: string }) => {
+    .requiredOption('--plan-version <version>', 'Plan version to approve', '1')
+    .action(async (repositoryId: string | undefined, taskId: string | undefined, opts: { planVersion: string }) => {
       try {
         const repoId = resolveRepositoryId(repositoryId);
         const tId = resolveTaskId(taskId);
-        await daemonClient.post(`/api/tasks/${repoId}/${tId}/approve-plan`, { planVersion: Number(opts.version) });
+        await daemonClient.post(`/api/tasks/${repoId}/${tId}/approve-plan`, { planVersion: Number(opts.planVersion) });
         console.log('Plan approved.');
       } catch (err) {
         handleError(err);

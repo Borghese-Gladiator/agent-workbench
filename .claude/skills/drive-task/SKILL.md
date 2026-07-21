@@ -71,7 +71,7 @@ Look at `pendingHumanGate` in the JSON. When it names the contract gate,
 inspect the `state`'s contract, confirm it matches the user's intent, then:
 
 ```
-pnpm --filter @awb/cli cli -- task approve-contract --version 1
+pnpm --filter @awb/cli cli -- task approve-contract --contract-version 1
 ```
 
 Do NOT auto-approve without checking the contract text against what the user
@@ -87,8 +87,8 @@ advanced. You do NOT drive the loop — Temporal does. You only respond when
 
 | `pendingHumanGate.reason` | Respond with |
 | --- | --- |
-| `task-contract-approval` | `task approve-contract --version <n>` (or `reject-contract`) |
-| `planner-critic-non-convergence` | `task approve-plan --version <n>` (or `reject-plan --reason ...`) |
+| `task-contract-approval` | `task approve-contract --contract-version <n>` (or `reject-contract`) |
+| `planner-critic-non-convergence` | `task approve-plan --plan-version <n>` (or `reject-plan --reason ...`) |
 | `pr-readiness` (at `release`) | deliver, then `task pr-merged --sha <sha>` once the PR merges |
 
 On the happy path only two gates fire: the contract gate, then `pr-readiness`

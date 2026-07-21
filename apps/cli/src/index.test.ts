@@ -38,4 +38,58 @@ describe('awb CLI', () => {
       }),
     ).toThrow();
   });
+
+  // TASK-9: the contract/plan approval version options must NOT collide with commander's global
+  // `--version` (which prints "0.1.0" and no-ops). They were renamed to `--contract-version` /
+  // `--plan-version`; passing them must reach the daemon-request layer, not the version short-circuit.
+  it('approve-contract --contract-version reaches the daemon (no --version collision)', () => {
+    let output = '';
+    try {
+      output = execFileSync('node', [cliEntry, 'task', 'approve-contract', 'r', 't', '--contract-version', '1'], {
+        env: { ...process.env, AWB_DATA_DIR: dataDir },
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+    } catch (err) {
+      output = (err as { stdout?: string; stderr?: string }).stdout ?? '';
+      output += (err as { stderr?: string }).stderr ?? '';
+    }
+    expect(output).not.toContain('0.1.0');
+    expect(output).toContain('daemon');
+  });
+
+  // TASK-10: a single leading `--` (injected by `pnpm … cli -- <args>`) must be stripped so
+  // subcommand options like `--prompt` pass through instead of being swallowed by commander's
+  // options terminator.
+  it('strips a leading -- so --prompt passes through', () => {
+    let output = '';
+    try {
+      output = execFileSync('node', [cliEntry, '--', 'task', 'create', 'r', '--prompt', 'hello'], {
+        env: { ...process.env, AWB_DATA_DIR: dataDir },
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+    } catch (err) {
+      output = (err as { stdout?: string; stderr?: string }).stdout ?? '';
+      output += (err as { stderr?: string }).stderr ?? '';
+    }
+    expect(output).not.toContain("required option '--prompt");
+    expect(output).toContain('daemon');
+  });
+
+  it('approve-plan --plan-version reaches the daemon (no --version collision)', () => {
+    let output = '';
+    try {
+      output = execFileSync('node', [cliEntry, 'task', 'approve-plan', 'r', 't', '--plan-version', '1'], {
+        env: { ...process.env, AWB_DATA_DIR: dataDir },
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+    } catch (err) {
+      output = (err as { stdout?: string; stderr?: string }).stdout ?? '';
+      output += (err as { stderr?: string }).stderr ?? '';
+    }
+    expect(output).not.toContain('0.1.0');
+    expect(output).toContain('daemon');
+  });
 });

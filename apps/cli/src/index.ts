@@ -22,7 +22,17 @@ registerStub(program, 'task resume', 'Resume a paused task', 'Milestone 10 follo
 
 registerStub(program, 'open', 'Open the local UI', 'Milestone 10 (web UI)');
 
-program.parseAsync(process.argv).catch((err: unknown) => {
+// `pnpm --filter @awb/cli cli -- <args>` forwards a leading `--` into our argv. Commander treats
+// `--` as the options terminator, so it would swallow subcommand options like `--prompt`
+// (TASK-10). Strip a single `--` that appears before the first subcommand token so the documented
+// `pnpm … cli -- task create --prompt …` invocation parses identically to `awb task create …`.
+const argv = [...process.argv];
+const firstNonNodeArg = 2;
+if (argv[firstNonNodeArg] === '--') {
+  argv.splice(firstNonNodeArg, 1);
+}
+
+program.parseAsync(argv).catch((err: unknown) => {
   console.error(err);
   process.exitCode = 1;
 });
