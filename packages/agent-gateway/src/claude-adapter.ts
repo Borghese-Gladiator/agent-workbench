@@ -100,6 +100,14 @@ export interface ClaudeSdkQueryOptions {
   maxTurns?: number;
   resume?: string;
   abortController?: AbortController;
+  /**
+   * The SDK's permission mode. Workbench sessions run headless in a worker with no human to answer
+   * interactive tool-permission prompts, so the default mode leaves every tool call denied ("Claude
+   * requested permissions … but you haven't granted it yet") and the agent makes no edits. Sessions
+   * operate inside a task-scoped worktree already gated by the capability broker + human repo-trust,
+   * so `bypassPermissions` is the correct non-interactive mode here.
+   */
+  permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'dontAsk' | 'auto';
 }
 
 /**
@@ -206,6 +214,8 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
         maxTurns: assignment.stopConditions?.maxTurns,
         resume: state.resumeSessionId,
         abortController,
+        // Headless worker: no human to answer per-tool permission prompts. See the option's doc.
+        permissionMode: 'bypassPermissions',
       },
     });
     state.liveQuery = handle;

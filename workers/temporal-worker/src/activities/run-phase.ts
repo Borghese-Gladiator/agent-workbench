@@ -23,6 +23,7 @@ import { draftContractInputFromPrompt } from './contract-support.js';
 import { resolveRepoRef, createRealDelivery } from './delivery-support.js';
 import { createFileEventSink } from './event-sink-support.js';
 import { createCapabilityBroker } from '@awb/capability-broker';
+import { capabilitiesToSdkTools } from '@awb/agent-gateway';
 import {
   draftContract,
   markAwaitingApproval,
@@ -98,7 +99,16 @@ async function getOrCreateTaskRunState(taskId: string): Promise<TaskRunState> {
 function allowedToolsForBrokerRole(
   role: 'planner' | 'plan-critic' | 'builder' | 'verifier' | 'qa-executor' | 'adversarial-reviewer',
 ): string[] {
-  return [...createCapabilityBroker(role).listGranted()];
+  const capabilities = [...createCapabilityBroker(role).listGranted()];
+  // On the claude runtime the session's `tools` must be concrete SDK tool names (Read/Write/Edit/
+  // Bash/…), NOT the abstract capability strings — otherwise the SDK recognizes none of them, the
+  // agent gets no core file tools, and the session leaks in ambient MCP tools instead (the observed
+  // implement-phase stall). The mock adapter ignores `tools`, so keep the capability strings there
+  // to leave every deterministic test unchanged.
+  if (resolveAgentRuntime() === 'claude') {
+    return capabilitiesToSdkTools(capabilities);
+  }
+  return capabilities;
 }
 
 /**
