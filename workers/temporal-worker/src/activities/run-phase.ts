@@ -136,6 +136,19 @@ function recordAgentUsage(usage: import('@awb/domain').ModelUsage | undefined, r
   };
 }
 
+/**
+ * The worker's own environment, filtered to defined string values. Commands run by the verification
+ * runner / QA executor are spawned WITHOUT a shell and inherit exactly the env they are handed, so
+ * they need a real PATH (and the rest of the ambient env) to resolve `npm`/`pnpm`/`node`/`vite`.
+ */
+function inheritedEnv(): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
 function usageForResult(): import('@awb/domain').PhaseUsage | undefined {
   if (currentUsage.inputTokens === 0 && currentUsage.outputTokens === 0 && currentUsage.runtimeMs === 0) {
     return undefined;
@@ -637,7 +650,11 @@ async function runVerify(state: TaskWorkflowState): Promise<PhaseAttemptResult> 
     baseSha: resolveBaseSha(runState),
     policyVersion: 'v1',
     claimIds: runState.contract?.claims.map((c) => c.id) ?? [],
-    env: {},
+    // The verification runner spawns each command WITHOUT a shell, so the child inherits exactly
+    // this env. An empty env has no PATH, so `npm`/`pnpm`/`vite` can't be found (ENOENT → exitCode
+    // null → inconclusive → the verify gate blocks even though the real commands pass) — the
+    // observed live verify stall. Inherit the worker's environment so discovered commands resolve.
+    env: inheritedEnv(),
   };
 
   const results = await runVerificationMatrix(commands, context, runState.artifactStore);
