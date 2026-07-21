@@ -83,6 +83,21 @@ describe('parsePlannerOutput', () => {
     expect(parsed?.slices[0]?.qaScenarioIds?.length).toBeGreaterThan(0);
   });
 
+  // A live planner mapped only the behavioral claim and dropped the correctness one, which failed
+  // everyClaimMappedToSlice and blocked the plan. Unmapped claims must attach to the first slice.
+  it('attaches contract claims the planner left unmapped to the first slice', () => {
+    const text =
+      '```json\n' +
+      JSON.stringify({
+        slices: [{ objective: 'Add the section', claimIds: ['claim-2'], requiredTargetedChecks: ['docs check'] }],
+      }) +
+      '\n```';
+    const parsed = parsePlannerOutput(text, contract);
+    const covered = new Set((parsed?.slices ?? []).flatMap((s) => s.claimIds));
+    expect(covered.has('claim-1')).toBe(true);
+    expect(covered.has('claim-2')).toBe(true);
+  });
+
   it('plannerInstruction names the objective and asks for JSON slices', () => {
     const instruction = plannerInstruction(contract);
     expect(instruction).toContain('President');

@@ -183,6 +183,22 @@ workflow doesn't aggregate usage the activity/adapter reports.
 
 ---
 
+### [ ] TASK-14: plan-critic + adversarial-reviewer are no-ops on the claude runtime
+**Live-run finding (2026-07-21):** the ClaudeAgentAdapter sends only
+`assignment.instruction` as the prompt and NEVER reads `contextPayload`. The
+planner works because `plannerInstruction(contract)` embeds the objective, but
+the plan-critic's instruction ("Critique the plan against the contract") and the
+reviewer's ("Adversarially review …") embed nothing — the critic literally
+replied "I don't have the plan or the contract yet." So both effectively return
+no findings without seeing their inputs (the challenge diff is threaded via
+`reviewInputs`→`contextPayload`, also dropped).
+**Do:** thread the relevant context (plan text for the critic; contract/plan/
+diff/changed-paths/evidence for the reviewer) INTO the instruction prompt (or
+teach the adapter to serialize `contextPayload` into the first user turn).
+**Done when:** the critic/reviewer session input contains the real plan/diff and
+they produce grounded findings on a live run. Not pipeline-blocking (both pass
+through today), so deferred rather than rushed unsupervised.
+
 ## P3 — The capstone
 
 ### [ ] TASK-12: Full President dogfood → real Draft PR with QA artifacts

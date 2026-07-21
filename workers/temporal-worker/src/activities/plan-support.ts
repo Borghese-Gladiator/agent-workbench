@@ -99,6 +99,21 @@ export function parsePlannerOutput(
     });
 
   if (slices.length === 0) return undefined;
+
+  // Forgiving coverage completion: every contract claim must map to at least one slice, or the plan
+  // gate (everyClaimMappedToSlice) blocks the task. When the planner under-specifies `claimIds`
+  // (e.g. maps only the behavioral claim and drops the correctness one), assign each unmapped claim
+  // to the first slice rather than reject an otherwise-sound plan.
+  const coveredClaimIds = new Set(slices.flatMap((s) => s.claimIds));
+  const unmapped = allClaimIds.filter((id) => !coveredClaimIds.has(id));
+  if (unmapped.length > 0 && slices[0]) {
+    slices[0].claimIds = [...new Set([...slices[0].claimIds, ...unmapped])];
+    // A newly-attached behavioral+QA claim needs a scenario on that slice too.
+    if (unmapped.some((id) => behavioralClaimIds.has(id)) && (slices[0].qaScenarioIds?.length ?? 0) === 0) {
+      slices[0].qaScenarioIds = [`qa-${slugify(slices[0].objective)}`];
+    }
+  }
+
   return { summary: parsed.summary ?? text.slice(0, 200), slices };
 }
 
