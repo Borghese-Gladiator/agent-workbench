@@ -1,0 +1,195 @@
+import type {
+  TaskPhase,
+  PhaseAttemptResult,
+  CompletionCandidate,
+  ModelUsage,
+  PhaseUsage,
+} from '@awb/domain';
+import type { TaskWorkflowState } from '@awb/workflow';
+import { evaluatePhaseCompletion, type CompletionContext } from '@awb/workflow';
+import type { AgentRuntime } from './agent-factory.js';
+import type { RunStateStore, TaskRunState } from './run-state-store.js';
+
+/**
+ * Per-runPhase-invocation usage accumulator (TASK-11), carried on the driver's `PhaseContext`
+ * instead of a module-level global (TASK-30). Each phase's agent sessions call `record` with the
+ * adapter's reported tokens + measured wall-clock; the driver reads `forResult()` back and attaches
+ * it to the PhaseAttemptResult so the Workflow can accumulate `tokenUsageTotal` + `runtimeMsByPhase`.
+ * A fresh instance per invocation removes the reset-a-global dance the old code needed.
+ */
+export class UsageAccumulator {
+  private inputTokens = 0;
+  private outputTokens = 0;
+  private runtimeMs = 0;
+
+  record(usage: ModelUsage | undefined, runtimeMs: number): void {
+    this.inputTokens += usage?.inputTokens ?? 0;
+    this.outputTokens += usage?.outputTokens ?? 0;
+    this.runtimeMs += runtimeMs;
+  }
+
+  forResult(): PhaseUsage | undefined {
+    if (this.inputTokens === 0 && this.outputTokens === 0 && this.runtimeMs === 0) {
+      return undefined;
+    }
+    return { inputTokens: this.inputTokens, outputTokens: this.outputTokens, runtimeMs: this.runtimeMs };
+  }
+}
+
+/**
+ * Phase-level lifecycle event the driver emits around every attempt. This is the single hook TASK-22
+ * wires a real `SemanticEventBus`/SQLite sink into; today it defaults to a no-op so behavior is
+ * unchanged (only per-agent-turn events reach a sink; there is no phase-level event yet). The
+ * `phase.completed` event carries the rolled-up usage so TASK-22 can route it to `UsageAggregator`
+ * without reaching into a global.
+ */
+export type PhaseEvent =
+  | { kind: 'phase.started'; taskId: string; phase: TaskPhase; attemptNumber: number }
+  | {
+      kind: 'phase.completed';
+      taskId: string;
+      phase: TaskPhase;
+      attemptNumber: number;
+      outcome: PhaseAttemptResult['outcome'];
+      usage?: PhaseUsage;
+    };
+
+export type PhaseEventEmitter = (event: PhaseEvent) => void;
+
+export const NOOP_PHASE_EVENT_EMITTER: PhaseEventEmitter = () => {};
+
+/**
+ * Everything a phase handler needs for one attempt, threaded by the driver: the Workflow state, the
+ * task's accumulated `TaskRunState`, the store (so a handler that mutates `runState` persists it),
+ * the runtime strategy resolved ONCE at driver entry (so no handler re-decides real-vs-mock per
+ * phase — TASK-29), the per-invocation usage accumulator (TASK-30, was a module global), and the
+ * phase-event emitter (TASK-22 seam).
+ */
+export interface PhaseContext {
+  state: TaskWorkflowState;
+  runState: TaskRunState;
+  store: RunStateStore;
+  strategy: AgentRuntime;
+  usage: UsageAccumulator;
+  emit: PhaseEventEmitter;
+}
+
+/**
+ * What a handler returns. `early` short-circuits before completion evaluation (the per-phase
+ * await-human/repair/replan/blocked outcomes that some phases return before ever evaluating —
+ * specify attempt 1, plan non-convergence, verify/exercise repair, challenge repair/replan, release
+ * pr-readiness, and the various guard clauses). `evaluate` hands the driver the phase-specific
+ * `CompletionContext` + the evidence/finding IDs, and the driver builds the boilerplate
+ * `CompletionCandidate`, calls `evaluatePhaseCompletion` once, and maps the decision.
+ */
+export type PhaseOutcome =
+  | { kind: 'early'; result: PhaseAttemptResult }
+  | {
+      kind: 'evaluate';
+      completion: CompletionContext;
+      evidenceIds: string[];
+      openFindingIds: string[];
+      /** Overrides for the completion candidate literal (versions/SHAs); the rest is boilerplate. */
+      candidateOverrides?: Partial<CompletionCandidate>;
+      /** How to map a non-complete decision; defaults to `blockedResult(phase, missing)`. */
+      onBlocked?: (missing: string[]) => PhaseAttemptResult;
+    };
+
+export interface PhaseHandler {
+  phase: TaskPhase;
+  run(ctx: PhaseContext): Promise<PhaseOutcome>;
+}
+
+/**
+ * Builds the `CompletionCandidate` literal that was copy-pasted into all nine phases. The constant
+ * fields (`repositorySnapshotId`, `policyVersion`, `artifactManifestHash`, default versions) live
+ * here once; phase-specific bits (evidence/finding IDs, real SHAs, real contract/plan versions)
+ * arrive via `overrides`.
+ */
+export function buildPhaseAttempt(
+  state: TaskWorkflowState,
+  phase: TaskPhase,
+  evidenceIds: string[],
+  openFindingIds: string[],
+  overrides: Partial<CompletionCandidate> = {},
+): CompletionCandidate {
+  return {
+    phase,
+    phaseAttemptId: `${state.taskId}-${phase}-${state.attemptNumber}`,
+    repositorySnapshotId: `${state.repositoryId}-snapshot`,
+    contractVersion: 1,
+    planVersion: 1,
+    policyVersion: 'v1',
+    evidenceIds,
+    openFindingIds,
+    artifactManifestHash: 'run-phase-mvp',
+    ...overrides,
+  };
+}
+
+export function candidateResult(candidate: CompletionCandidate): PhaseAttemptResult {
+  return { outcome: 'candidate', candidate };
+}
+
+export function blockedResult(phase: TaskPhase, missing: string[]): PhaseAttemptResult {
+  return {
+    outcome: 'blocked',
+    reason: `Phase "${phase}" is not complete per evaluatePhaseCompletion: ${missing.join('; ')}`,
+  };
+}
+
+/**
+ * The shared driver TASK-28 factors out of the nine `runX` functions: emit `phase.started`, run the
+ * handler, and for the `evaluate` path build the boilerplate candidate, call
+ * `evaluatePhaseCompletion` once, and map the decision (complete → candidate; else → the handler's
+ * `onBlocked` or `blockedResult`). Handler mutations to `ctx.runState` are persisted via the store,
+ * the accumulated usage is attached to the result, and `phase.completed` is emitted with it.
+ */
+export async function drivePhase(handler: PhaseHandler, ctx: PhaseContext): Promise<PhaseAttemptResult> {
+  ctx.emit({
+    kind: 'phase.started',
+    taskId: ctx.state.taskId,
+    phase: handler.phase,
+    attemptNumber: ctx.state.attemptNumber,
+  });
+
+  const outcome = await handler.run(ctx);
+  await ctx.store.save(ctx.state.taskId, ctx.runState);
+
+  let result: PhaseAttemptResult;
+  if (outcome.kind === 'early') {
+    result = outcome.result;
+  } else {
+    const candidate = buildPhaseAttempt(
+      ctx.state,
+      handler.phase,
+      outcome.evidenceIds,
+      outcome.openFindingIds,
+      outcome.candidateOverrides,
+    );
+    const decision = evaluatePhaseCompletion(candidate, outcome.completion);
+    if (decision.complete) {
+      result = candidateResult(candidate);
+    } else {
+      result = outcome.onBlocked
+        ? outcome.onBlocked(decision.missing)
+        : blockedResult(handler.phase, decision.missing);
+    }
+  }
+
+  // Attach the agent usage this attempt accumulated so the Workflow can aggregate token +
+  // per-phase runtime totals (TASK-11). undefined when no agent session ran (or on the mock
+  // runtime, whose adapter reports no usage) — the Workflow simply skips accumulation then.
+  const usage = ctx.usage.forResult();
+  if (usage) result = { ...result, usage };
+
+  ctx.emit({
+    kind: 'phase.completed',
+    taskId: ctx.state.taskId,
+    phase: handler.phase,
+    attemptNumber: ctx.state.attemptNumber,
+    outcome: result.outcome,
+    usage,
+  });
+  return result;
+}
