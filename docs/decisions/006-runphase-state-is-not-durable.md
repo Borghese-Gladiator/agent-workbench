@@ -56,5 +56,15 @@ data layer at all).
 
 ## Status
 
-Tracked as an explicit follow-up, not a silent gap — see the task list
-entry created alongside this ADR.
+**Resolved (TASK-27).** The `RunStateStore` seam now has a durable,
+`@awb/database`-backed implementation (`SqliteRunStateStore` in
+`workers/temporal-worker/src/activities/sqlite-run-state-store.ts`) used on the
+claude runtime. It reads persisted lifecycle rows through a read-only DB handle
+and writes exclusively through the daemon's internal routes
+(`/internal/run-state`), so the daemon remains the single application writer
+(spec §8 / `docs/storage.md`, TASK-21). A worker restart mid-task now resumes
+with the real contract/plan/candidate-SHA/evidence intact rather than a fresh
+empty state, closing the "lifecycle moved forward on a lie" gap Decision 003
+guards against. The mock runtime keeps `InMemoryRunStateStore` (deterministic
+tests create no real rows), selected by `resolveRunStateStore` in
+`run-phase.ts`.

@@ -57,6 +57,7 @@ import {
   type RunStateStore,
   type TaskRunState,
 } from './run-state-store.js';
+import { SqliteRunStateStore } from './sqlite-run-state-store.js';
 import {
   drivePhase,
   blockedResult,
@@ -70,8 +71,22 @@ import {
 
 export type { TaskRunState } from './run-state-store.js';
 
-/** Default process-wide store. The seam (TASK-30) lets TASK-27 swap a `@awb/database`-backed impl. */
-const defaultStore: RunStateStore = new InMemoryRunStateStore();
+/**
+ * Process-wide stores. The mock runtime creates no real DB rows (mock adapter, deterministic tests),
+ * so it keeps the in-memory store — every existing test is unchanged. The claude runtime uses the
+ * durable SQLite-backed store (TASK-27) so a worker restart mid-task resumes with real state. Set
+ * `AWB_DURABLE_RUN_STATE=0` to force the in-memory store even on claude (e.g. a daemon-less smoke run).
+ */
+const inMemoryStore: RunStateStore = new InMemoryRunStateStore();
+let durableStore: RunStateStore | undefined;
+
+function resolveRunStateStore(strategy: AgentRuntime): RunStateStore {
+  if (strategy !== 'claude' || process.env.AWB_DURABLE_RUN_STATE === '0') {
+    return inMemoryStore;
+  }
+  if (!durableStore) durableStore = new SqliteRunStateStore();
+  return durableStore;
+}
 
 function allowedToolsForBrokerRole(
   role: 'planner' | 'plan-critic' | 'builder' | 'verifier' | 'qa-executor' | 'adversarial-reviewer',
@@ -1025,13 +1040,17 @@ export async function runPhase(input: {
   phase: TaskPhase;
   state: TaskWorkflowState;
 }): Promise<PhaseAttemptResult> {
-  const store = defaultStore;
+  const strategy = resolveAgentRuntime();
+  const store = resolveRunStateStore(strategy);
   const runState = await store.load(input.state.taskId);
+  // The workflow state is the source of truth for repositoryId; thread it onto the run state so the
+  // durable store can key persisted rows (the mock in-memory store ignores it).
+  runState.repositoryId = input.state.repositoryId;
   const ctx: PhaseContext = {
     state: input.state,
     runState,
     store,
-    strategy: resolveAgentRuntime(),
+    strategy,
     usage: new UsageAccumulator(),
     emit: NOOP_PHASE_EVENT_EMITTER,
   };

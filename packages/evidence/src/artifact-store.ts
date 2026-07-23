@@ -188,6 +188,11 @@ export class ArtifactStore {
     return this.metadata.listByCandidateSha(candidateSha);
   }
 
+  /** All metadata records this store knows about — used to snapshot artifact metadata for durability. */
+  allRecords(): ArtifactRecord[] {
+    return this.metadata.all();
+  }
+
   /** Removes files on disk with retention "temporary" whose metadata record no longer exists, and prunes orphan blobs. */
   async garbageCollect(): Promise<{ removed: number }> {
     let removed = 0;

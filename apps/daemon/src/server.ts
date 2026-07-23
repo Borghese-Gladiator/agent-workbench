@@ -6,6 +6,7 @@ import { SemanticEventBus } from './event-bus.js';
 import { registerRepositoryRoutes } from './routes/repositories.js';
 import { registerTaskRoutes } from './routes/tasks.js';
 import { registerWebSocketRoute } from './routes/websocket.js';
+import { registerInternalRoutes } from './routes/internal.js';
 
 export interface DaemonServer {
   app: FastifyInstance;
@@ -24,8 +25,9 @@ export async function buildServer(): Promise<DaemonServer> {
   app.get('/api/health', async () => ({ status: 'ok' }));
 
   registerRepositoryRoutes(app, database);
-  registerTaskRoutes(app);
+  registerTaskRoutes(app, database);
   registerWebSocketRoute(app, eventBus);
+  registerInternalRoutes(app, database, eventBus);
 
   return {
     app,

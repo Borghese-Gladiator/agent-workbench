@@ -6,3 +6,4 @@ export * from './evidence.js';
 export * from './lifecycle.js';
 export * from './events.js';
 export * from './tasks.js';
+export * from './persistence.js';

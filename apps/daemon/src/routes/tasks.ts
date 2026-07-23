@@ -14,6 +14,8 @@ import {
   getOpenFindingsQuery,
   getPendingHumanGateQuery,
 } from '@awb/workflow';
+import type { WorkbenchDatabase } from '@awb/database';
+import { upsertTask, listTasks } from '@awb/database';
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
 import { TASK_QUEUE } from '../temporal-worker-constants.js';
 
@@ -25,15 +27,7 @@ export interface CreatedTaskRecord {
   createdAt: string;
 }
 
-/**
- * In-memory record of tasks created via POST /api/tasks, scoped to this daemon process's
- * lifetime only (cleared on restart). This is an honest MVP substitute for a real "list all
- * tasks" query — Temporal remains the source of truth for actual workflow state; this array only
- * lets the Tasks UI page show what was created this session. Not persisted to SQLite.
- */
-const createdTasks: CreatedTaskRecord[] = [];
-
-export function registerTaskRoutes(app: FastifyInstance): void {
+export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchDatabase): void {
   app.post<{ Body: { repositoryId: string; prompt: string } }>('/api/tasks', async (request, reply) => {
     const client = await getTemporalClient();
     const taskId = randomUUID();
@@ -46,14 +40,24 @@ export function registerTaskRoutes(app: FastifyInstance): void {
       args: [{ taskId, repositoryId, prompt }],
     });
 
-    createdTasks.unshift({ taskId, repositoryId, workflowId, prompt, createdAt: new Date().toISOString() });
+    // Persist the task row so it survives a daemon restart and `task show` reads lifecycle state
+    // from SQLite (TASK-27), replacing the previous session-scoped in-memory array.
+    upsertTask(database.db, { id: taskId, repositoryId, prompt });
 
     reply.code(201);
     return { taskId, repositoryId, workflowId };
   });
 
   app.get('/api/tasks', async () => {
-    return createdTasks;
+    return listTasks(database.db).map(
+      (t): CreatedTaskRecord => ({
+        taskId: t.id,
+        repositoryId: t.repositoryId,
+        workflowId: workflowIdFor(t.repositoryId, t.id),
+        prompt: t.prompt,
+        createdAt: t.createdAt,
+      }),
+    );
   });
 
   app.get<{ Params: { repositoryId: string; taskId: string } }>(

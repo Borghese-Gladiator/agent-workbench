@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { repositories } from '@awb/database';
 import { buildServer, type DaemonServer } from '../server.js';
 import { setTemporalClientForTesting } from '../temporal-client.js';
 import { TASK_QUEUE } from '../temporal-worker-constants.js';
@@ -51,6 +52,24 @@ beforeAll(async () => {
   // against a real workflow with no separately running Temporal server.
   setTemporalClientForTesting(testEnv.client);
   server = await buildServer();
+
+  // The tasks row now FK-references repositories (TASK-27 persistence). Seed the repo row the task
+  // is created under so `POST /api/tasks` can persist its durable task row. The workflow resolves the
+  // fixture repo path from AWB_RUN_PHASE_FIXTURE_REPO, so the id just needs to satisfy the FK.
+  const now = new Date().toISOString();
+  server.database.db
+    .insert(repositories)
+    .values({
+      id: 'daemon-e2e-repo',
+      canonicalPath: repoDir,
+      name: 'daemon-e2e-repo',
+      remoteUrl: null,
+      defaultBranch: 'main',
+      trusted: true,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run();
 }, 60_000);
 
 afterAll(async () => {

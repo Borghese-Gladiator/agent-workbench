@@ -1,6 +1,10 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Client } from '@temporalio/client';
 import Fastify, { type FastifyInstance } from 'fastify';
+import { createDatabase, type WorkbenchDatabase } from '@awb/database';
 import { registerTaskRoutes } from './tasks.js';
 import { setTemporalClientForTesting, workflowIdFor } from '../temporal-client.js';
 
@@ -28,17 +32,23 @@ function makeStubClient(recorded: RecordedSignal[], opts: { failWith?: Error } =
 describe('task PR-lifecycle signal routes', () => {
   let app: FastifyInstance;
   let recorded: RecordedSignal[];
+  let dbDir: string;
+  let database: WorkbenchDatabase;
 
   beforeEach(async () => {
     recorded = [];
     setTemporalClientForTesting(makeStubClient(recorded));
+    dbDir = await mkdtemp(join(tmpdir(), 'awb-tasks-route-db-'));
+    database = createDatabase(join(dbDir, 'workbench.sqlite'));
     app = Fastify({ logger: false });
-    registerTaskRoutes(app);
+    registerTaskRoutes(app, database);
     await app.ready();
   });
 
   afterEach(async () => {
     await app.close();
+    database.close();
+    await rm(dbDir, { recursive: true, force: true });
     setTemporalClientForTesting(undefined);
   });
 

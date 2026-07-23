@@ -1,4 +1,4 @@
-import { createDatabase } from '@awb/database';
+import { createReadOnlyDatabase } from '@awb/database';
 import { initDataDir } from '@awb/config';
 import { getRepository } from '@awb/repository';
 import { createWorktree, removeWorktree } from '@awb/workspace';
@@ -18,7 +18,7 @@ export async function materializeWorktree(input: {
   slugSource?: string;
 }): Promise<WorkspaceLease> {
   const { layout } = initDataDir();
-  const database = createDatabase(layout.workbenchSqlite);
+  const database = createReadOnlyDatabase(layout.workbenchSqlite);
   try {
     const repository = await getRepository(database.db, input.repositoryId);
     if (!repository) {
@@ -46,7 +46,7 @@ export async function teardownWorktree(input: {
   preserve: boolean;
 }): Promise<void> {
   const { layout } = initDataDir();
-  const database = createDatabase(layout.workbenchSqlite);
+  const database = createReadOnlyDatabase(layout.workbenchSqlite);
   try {
     const repository = await getRepository(database.db, input.repositoryId);
     if (!repository) return;

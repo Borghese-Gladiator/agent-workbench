@@ -16,6 +16,7 @@
   "dependencies": {
     "@awb/config": "workspace:*",
     "@awb/domain": "workspace:*",
+    "@awb/evidence": "workspace:*",
     "better-sqlite3": "^11.7.0",
     "drizzle-orm": "^0.38.3"
   },

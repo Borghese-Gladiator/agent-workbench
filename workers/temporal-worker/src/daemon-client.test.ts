@@ -1,0 +1,66 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SemanticEvent } from '@awb/domain';
+import { createDaemonClient } from './daemon-client.js';
+
+interface Call {
+  url: string;
+  method: string;
+  body: unknown;
+}
+
+describe('daemon client', () => {
+  let calls: Call[];
+  let status: number;
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    calls = [];
+    status = 200;
+    process.env.AWB_DAEMON_URL = 'http://127.0.0.1:9999';
+    globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({
+        url: String(url),
+        method: init?.method ?? 'GET',
+        body: init?.body ? JSON.parse(init.body as string) : undefined,
+      });
+      return new Response(JSON.stringify({ ok: status < 400 }), { status });
+    }) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    delete process.env.AWB_DAEMON_URL;
+  });
+
+  it('PUTs a task upsert to the configured daemon URL', async () => {
+    await createDaemonClient().upsertTask({ taskId: 'task-1', repositoryId: 'repo-1', prompt: 'p' });
+    expect(calls[0]?.method).toBe('PUT');
+    expect(calls[0]?.url).toBe('http://127.0.0.1:9999/internal/tasks/task-1');
+    expect(calls[0]?.body).toEqual({ repositoryId: 'repo-1', prompt: 'p' });
+  });
+
+  it('POSTs a semantic event', async () => {
+    const event: SemanticEvent = {
+      id: 'e1',
+      runId: 'r1',
+      sequence: 0,
+      occurredAt: new Date().toISOString(),
+      phase: 'plan',
+      phaseAttemptId: 'r1-plan-1',
+      producer: 'planner',
+      type: 'message',
+      summary: 'hi',
+    };
+    await createDaemonClient().postEvent(event);
+    expect(calls[0]?.method).toBe('POST');
+    expect(calls[0]?.url).toBe('http://127.0.0.1:9999/internal/events');
+    expect(calls[0]?.body).toEqual(event);
+  });
+
+  it('throws on a non-2xx response', async () => {
+    status = 500;
+    await expect(
+      createDaemonClient().upsertTask({ taskId: 'task-1', repositoryId: 'repo-1', prompt: 'p' }),
+    ).rejects.toThrow(/returned 500/);
+  });
+});

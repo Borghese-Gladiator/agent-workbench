@@ -10,6 +10,8 @@ import { ArtifactStore, InMemoryArtifactMetadataStore } from '@awb/evidence';
  * so a durable `@awb/database`-backed impl (TASK-27) drops in without touching phase code.
  */
 export interface TaskRunState {
+  /** The repository this task belongs to; threaded so the durable store can key persisted rows. */
+  repositoryId?: string;
   contract?: TaskContract;
   plan?: ImplementationPlan;
   builderSessionId?: string;

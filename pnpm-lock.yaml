@@ -206,6 +206,9 @@ importers:
       '@awb/domain':
         specifier: workspace:*
         version: link:../domain
+      '@awb/evidence':
+        specifier: workspace:*
+        version: link:../evidence
       better-sqlite3:
         specifier: ^11.7.0
         version: 11.10.0

@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { runCommand } from '@awb/execution';
-import { createDatabase } from '@awb/database';
+import { createReadOnlyDatabase } from '@awb/database';
 import { initDataDir } from '@awb/config';
 import { getRepositoryCommands, getRepository, runGit, getChangedPaths } from '@awb/repository';
 import type { ValidatedCommand, CommandPurpose } from '@awb/domain';
@@ -60,7 +60,7 @@ function defaultInstallCommand(worktreePath: string): string | undefined {
  */
 export async function resolveRepositoryPath(repositoryId: string): Promise<string | undefined> {
   const { layout } = initDataDir();
-  const database = createDatabase(layout.workbenchSqlite);
+  const database = createReadOnlyDatabase(layout.workbenchSqlite);
   try {
     const repo = await getRepository(database.db, repositoryId);
     return repo?.canonicalPath;
@@ -80,7 +80,7 @@ export async function resolveVerificationCommands(input: {
   worktreePath: string;
 }): Promise<ValidatedCommand[]> {
   const { layout } = initDataDir();
-  const database = createDatabase(layout.workbenchSqlite);
+  const database = createReadOnlyDatabase(layout.workbenchSqlite);
   try {
     const all = await getRepositoryCommands(database.db, input.repositoryId);
     const verifyPurposes: CommandPurpose[] = ['unit-test', 'build'];
@@ -101,7 +101,7 @@ export async function resolveVerificationCommands(input: {
  */
 export async function resolveInstallCommand(repositoryId: string): Promise<string | undefined> {
   const { layout } = initDataDir();
-  const database = createDatabase(layout.workbenchSqlite);
+  const database = createReadOnlyDatabase(layout.workbenchSqlite);
   try {
     const all = await getRepositoryCommands(database.db, repositoryId);
     return all.find((c) => c.purpose === 'install')?.command;
@@ -117,7 +117,7 @@ export async function resolveInstallCommand(repositoryId: string): Promise<strin
  */
 export async function resolveStartCommand(repositoryId: string): Promise<string | undefined> {
   const { layout } = initDataDir();
-  const database = createDatabase(layout.workbenchSqlite);
+  const database = createReadOnlyDatabase(layout.workbenchSqlite);
   try {
     const all = await getRepositoryCommands(database.db, repositoryId);
     return all.find((c) => c.purpose === 'start')?.command;
