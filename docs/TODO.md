@@ -29,7 +29,7 @@ upload comments say `undefined` instead of a real download URL).
 
 ## P0 — Blocking the first real end-to-end run
 
-### [~] TASK-7 (regression): QA media upload returns no download URL
+### [x] TASK-7 (regression): QA media upload returns no download URL — DONE 2026-07-23 (live)
 **Finding (2026-07-22):** on PR #2 the release phase posted
 `QA artifact (browser-trace): undefined` / `(qa-video): undefined` — the media
 upload returned an undefined `attachmentUrl` even though the real `.webm`/`.zip`
@@ -79,12 +79,16 @@ instead of `repos.uploadReleaseAsset`. Proven end-to-end through the *fixed uplo
 code* against real GitHub: returns 201, asset lands (`state: uploaded`,
 `contentType: video/webm`, `size: 53556`), and the `releases/download/...` URL
 downloads a real playable `.webm`. Unit tests updated to intercept `request()` (5/5
-pass). NOT yet re-run through the live pipeline (worker still on old build; a live
-re-run needs rebuild+fresh task — see P1 note below).
+pass).
+**LIVE RE-RUN CONFIRMED (2026-07-23, task 48cb12c4 → real Draft PR #4):** with the
+fixed uploader built into the worker, the release phase reached `awaiting-human`
+(pr-readiness) — NOT `blocked` — proving `requiredVideosUploaded=true`. PR #4 carries
+two workbench-posted QA-media brief comments ("Browser QA recording"/"Browser QA
+trace", each "2/2 assertions passed") linking real `releases/download/awb-qa-4/...`
+URLs; release `awb-qa-4` has **2 assets** (`.webm` 54 KB + `.zip` trace 56 KB, both
+`state: uploaded`); the `.webm` URL downloads a real playable WebM.
 **Done when:** ~~the PR comment links a `releases/download/...` URL that actually
-downloads the `.webm`, and the release has ≥1 asset.~~ Upload proven to land + download
-via fixed code; remaining = observe it once inside a live release phase (rebuild worker
-+ fresh task).
+downloads the `.webm`, and the release has ≥1 asset.~~ ✅ Met live on PR #4.
 _Files: `packages/github/src/release-asset-uploader.ts` (307→upload_url fix, DONE),
 `packages/github/src/release-asset-uploader.test.ts` (coverage updated, DONE),
 `qa-media-support.ts`/`.test.ts` (guard, already done).
@@ -118,15 +122,16 @@ matrix in a Test plan section (build ✅, unit-test ✅, qa-video ✅ "2/2 asser
 `deliverToGitHub` → `createRealDelivery` (real Octokit + git push, owner/repo resolved from
 the remote) works. Task reached `release` (though `blocked` not `awaiting-human` — see TASK-7).
 
-### [~] TASK-7: Live-validate QA-media upload to the PR (Fix 7 / Stage 4c) — ROOT CAUSE FOUND + FIXED, live re-run pending
-The live run exposed that the earlier fix was insufficient: release went `blocked`
-(`requiredVideosUploaded=false`), no media comment, release `awb-qa-3` had `assets: 0`.
-Root cause = **307 renamed-repo redirect** on `repos.uploadReleaseAsset` (see the P0 TASK-7
-section above for the full diagnosis + the `upload_url` fix). Browser QA itself fired for
+### [x] TASK-7: Live-validate QA-media upload to the PR (Fix 7 / Stage 4c) — DONE 2026-07-23
+First live run (task cedb9b68, PR #3) exposed the earlier fix as insufficient: release went
+`blocked` (`requiredVideosUploaded=false`), no media comment, release `awb-qa-3` had
+`assets: 0`. Root cause = **307 renamed-repo redirect** on `repos.uploadReleaseAsset` (full
+diagnosis + `upload_url` fix in the P0 TASK-7 section above). Browser QA itself fired for
 real: exercise produced a genuine WebM (53 KB) + Playwright trace zip (57 KB) + 1280×720 PNG.
-Fix proven end-to-end through the fixed uploader code (201, asset lands, `.webm` downloads);
-**still to observe once inside a live release phase** (rebuild worker + fresh task, since the
-running worker is on the pre-fix build and can't hot-reload without losing in-mem state).
+CONFIRMED live after the fix (task 48cb12c4, PR #4): release reached `awaiting-human`
+(pr-readiness), PR #4 has two QA-media brief comments linking real
+`releases/download/awb-qa-4/...` URLs, release `awb-qa-4` has 2 uploaded assets
+(`.webm` + trace `.zip`), and the `.webm` URL downloads a real playable video.
 
 ---
 
