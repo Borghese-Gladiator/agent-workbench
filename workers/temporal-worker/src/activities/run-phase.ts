@@ -22,7 +22,7 @@ import {
 import { runBrowserQaViaServer } from './browser-qa-support.js';
 import { draftContractInputFromPrompt } from './contract-support.js';
 import { resolveRepoRef, createRealDelivery } from './delivery-support.js';
-import { createFileEventSink } from './event-sink-support.js';
+import { createPhaseEventSink } from './durable-event-sink.js';
 import { createCapabilityBroker } from '@awb/capability-broker';
 import { capabilitiesToSdkTools } from '@awb/agent-gateway';
 import {
@@ -246,11 +246,13 @@ const planHandler: PhaseHandler = {
           contextPayload: { contract, priorFindings },
           allowedTools: allowedToolsForBrokerRole('planner', ctx.strategy),
         });
-        const { sink } = createFileEventSink({
+        const { sink, flush } = createPhaseEventSink({
           artifactsDir: runState.artifactsDir as string,
           taskId: state.taskId,
           role: 'planner',
-          phaseAttempt: `plan-${state.attemptNumber}`,
+          phase: 'plan',
+          attemptNumber: state.attemptNumber,
+          durable: ctx.strategy === 'claude',
         });
         const plannerStart = Date.now();
         const execution = await adapter.execute(
@@ -260,6 +262,7 @@ const planHandler: PhaseHandler = {
           new AbortController().signal,
         );
         ctx.usage.record(execution.usage, Date.now() - plannerStart);
+        await flush();
         // A behavioral claim requiring QA evidence must be covered by a QA scenario, or the plan gate
         // (everyBehavioralClaimHasQaScenario) rejects the plan. The single-slice fallback therefore
         // declares one scenario when the contract has such a claim.
@@ -296,11 +299,13 @@ const planHandler: PhaseHandler = {
           contextPayload: { plan },
           allowedTools: allowedToolsForBrokerRole('plan-critic', ctx.strategy),
         });
-        const { sink } = createFileEventSink({
+        const { sink, flush } = createPhaseEventSink({
           artifactsDir: runState.artifactsDir as string,
           taskId: state.taskId,
           role: 'plan-critic',
-          phaseAttempt: `plan-${state.attemptNumber}`,
+          phase: 'plan',
+          attemptNumber: state.attemptNumber,
+          durable: ctx.strategy === 'claude',
         });
         const criticStart = Date.now();
         const execution = await adapter.execute(
@@ -315,6 +320,7 @@ const planHandler: PhaseHandler = {
           new AbortController().signal,
         );
         ctx.usage.record(execution.usage, Date.now() - criticStart);
+        await flush();
         return execution.findings;
       },
     });
@@ -489,11 +495,13 @@ const implementHandler: PhaseHandler = {
             return { success: true };
           }
           // Real path: run the Claude builder in the worktree, commit, capture the candidate SHA.
-          const { sink } = createFileEventSink({
+          const { sink, flush } = createPhaseEventSink({
             artifactsDir: runState.artifactsDir as string,
             taskId: state.taskId,
             role: 'builder',
-            phaseAttempt: `implement-${state.attemptNumber}`,
+            phase: 'implement',
+            attemptNumber: state.attemptNumber,
+            durable: ctx.strategy === 'claude',
           });
           const attempt = await runRealBuilderAttempt({
             adapter,
@@ -506,6 +514,7 @@ const implementHandler: PhaseHandler = {
             eventSink: sink,
           });
           ctx.usage.record(attempt.usage, attempt.runtimeMs);
+          await flush();
           candidateSha = attempt.headSha;
           return attempt.outcome;
         },
@@ -750,11 +759,13 @@ const challengeHandler: PhaseHandler = {
           contextPayload: { inputs },
           allowedTools: allowedToolsForBrokerRole('adversarial-reviewer', ctx.strategy),
         });
-        const { sink } = createFileEventSink({
+        const { sink, flush } = createPhaseEventSink({
           artifactsDir: runState.artifactsDir as string,
           taskId: state.taskId,
           role: 'adversarial-reviewer',
-          phaseAttempt: `challenge-${state.attemptNumber}`,
+          phase: 'challenge',
+          attemptNumber: state.attemptNumber,
+          durable: ctx.strategy === 'claude',
         });
         const reviewerStart = Date.now();
         const execution = await adapter.execute(
@@ -770,6 +781,7 @@ const challengeHandler: PhaseHandler = {
           new AbortController().signal,
         );
         ctx.usage.record(execution.usage, Date.now() - reviewerStart);
+        await flush();
         return {
           reviewerSessionId: session.id,
           completed: execution.completed,

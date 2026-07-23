@@ -68,10 +68,12 @@ export function registerInternalRoutes(
       return { error: `Invalid semantic event: ${parsed.error.message}` };
     }
     try {
-      insertSemanticEvent(database.db, parsed.data);
+      // The daemon assigns the authoritative per-run sequence; publish the stored event so live
+      // WebSocket clients and the reconnect catch-up route agree on ordering.
+      const stored = insertSemanticEvent(database.db, parsed.data);
       // Deliver live to any connected WebSocket clients in this same process (single hop, no poll).
-      eventBus.publish(parsed.data);
-      return { ok: true };
+      eventBus.publish(stored);
+      return { ok: true, sequence: stored.sequence };
     } catch (err) {
       reply.code(500);
       return { error: err instanceof Error ? err.message : String(err) };

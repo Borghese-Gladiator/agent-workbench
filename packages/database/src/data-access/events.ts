@@ -44,15 +44,27 @@ function rowToEvent(row: SemanticEventRow): SemanticEvent {
   };
 }
 
-export function insertSemanticEvent(db: DrizzleDb, event: SemanticEvent): void {
-  db.transaction((tx) => {
-    ensureRunAndPhaseAttempt(tx as unknown as DrizzleDb, {
+/**
+ * Persists a semantic event and returns it with its authoritative `sequence`. The daemon (single
+ * writer) assigns the sequence as `max(sequence for run) + 1` inside the same transaction, so
+ * ordering is race-free regardless of how the worker filled the field — the reconnect catch-up
+ * (spec §31) depends on a gapless monotonic sequence per run. Idempotent by event id.
+ */
+export function insertSemanticEvent(db: DrizzleDb, event: SemanticEvent): SemanticEvent {
+  return db.transaction((tx) => {
+    const txDb = tx as unknown as DrizzleDb;
+    ensureRunAndPhaseAttempt(txDb, {
       runId: event.runId,
       phaseAttemptId: event.phaseAttemptId,
       phase: event.phase,
     });
-    const row = eventToRow(event);
+    // Re-persisting the same event id keeps its original sequence (idempotent); a new id gets the next.
+    const existing = tx.select().from(semanticEvents).where(eq(semanticEvents.id, event.id)).all()[0];
+    const sequence = existing ? existing.sequence : maxSemanticEventSequence(txDb, event.runId) + 1;
+    const stored: SemanticEvent = { ...event, sequence };
+    const row = eventToRow(stored);
     tx.insert(semanticEvents).values(row).onConflictDoUpdate({ target: semanticEvents.id, set: row }).run();
+    return stored;
   });
 }
 
