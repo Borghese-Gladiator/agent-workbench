@@ -6,141 +6,6 @@ Status legend: `[ ]` open · `[~]` in progress · `[x]` done
 
 ---
 
-## P0 — Tame run-phase.ts FIRST (structural groundwork for everything below)
-
-**Context (2026-07-22 design review — read `run-phase.ts` + `task-workflow.ts` +
-the event pipeline end-to-end).** The codebase is genuinely well-factored: packages
-are separated by domain, adapters are thin, and the Temporal Workflow
-(`packages/workflow/src/task-workflow.ts`) is a clean, replay-safe state machine that
-only interprets typed `PhaseAttemptResult`s. **All the complexity is concentrated in
-one file:** `workers/temporal-worker/src/activities/run-phase.ts` (1157 lines). Its
-nine `runX` phase functions (`runSpecify`…`runAssimilate`) repeat the same 6-step
-skeleton: (1) `getOrCreateTaskRunState(taskId)`, (2) branch on
-`resolveAgentRuntime() === 'claude'`, (3) do the real work (call a domain package),
-(4) hand-build a `CompletionContext` sub-object, (5) call `evaluatePhaseCompletion`
-with a ~15-line `phaseAttempt` literal that is ~90% copy-pasted, (6) map
-`decision.complete` → `candidateResult`/`blockedResult`/`repair`/`await-human`.
-
-**Why these go first (ahead of the durability + observability work below):** TASK-27
-(SQLite state) and TASK-22 (event sink) each have to touch every one of those nine
-sites. Against the current copy-paste that is a nine-site edit for each, done twice,
-and the prior fake-audit (memory: [[production-fakes-audit-2026-07-21]],
-[[validation-gate-cant-fail-audit]]) found the interleaved real/mock branches are
-exactly where live-only bugs hide. These three refactors cut that surface first, in
-order (each depends on the previous), and are **behavior-preserving** — the
-deterministic mock test suite must stay green with no changes.
-
-**Which patterns apply (and which explicitly do NOT):**
-- **Template Method** → TASK-28 (collapse the shared skeleton). *The core win.*
-- **Strategy** → TASK-29 (split real vs mock). *Highest risk-reduction.*
-- **Repository/Store seam** → TASK-30 (state + usage out of module globals).
-- **Observer — already present, do not add one.** `SemanticEventBus`
-  (`apps/daemon/src/event-bus.ts`, `publish`/`subscribe`) + `normalizeAgentEvent`
-  (`packages/agent-gateway/src/event-normalization.ts`) + `createFileEventSink`
-  (`event-sink-support.ts`) already ARE the observer. The gap is that the NDJSON file
-  sink is the only live subscriber and usage bypasses it via a global — that's
-  TASK-22 finishing the wiring, not a new pattern.
-- **Factory — already present, keep it scoped.** `createAgentAdapter()`
-  (`agent-factory.ts`) is the right factory. Do NOT add a "PhaseFactory": the nine
-  phases are a fixed, closed set and the exhaustive `switch` in `runPhaseInner`
-  (`run-phase.ts:1137`) gives compiler-checked completeness a registry would throw away.
-- **Determinism boundary — non-negotiable.** All of this lives in the *Activity*
-  (`run-phase.ts`). The *Workflow* (`task-workflow.ts`) must stay pure/replay-safe —
-  no fs/git/network/wall-clock. Any store or emitter these tasks introduce belongs on
-  the Activity side of that line; the Workflow already does its job and is left alone.
-
-### [ ] TASK-28: Extract the phase skeleton (Template Method — PhaseHandler + one driver)
-**What's wrong:** the nine `runSpecify`/`runPlan`/…/`runAssimilate` functions are
-structurally identical; the `phaseAttempt` object literal passed to
-`evaluatePhaseCompletion` is duplicated nine times with only 3–4 fields differing
-(most fields are constant: `repositorySnapshotId: `${repositoryId}-snapshot``,
-`policyVersion: 'v1'`, `artifactManifestHash: 'run-phase-mvp'`, `contractVersion`/
-`planVersion` defaulting to 1). The `getOrCreateTaskRunState` → work → evaluate →
-`candidateResult`/`blockedResult`/`repair`/`await-human` flow is copy-pasted around
-each phase's real logic. Keep the one good piece of structure — the exhaustive
-`switch` in `runPhaseInner` (`run-phase.ts:1137`) over the fixed 9-phase set — a
-closed, compiler-checked set is exactly right; do NOT turn it into a registry/factory.
-**Do:** define a `PhaseHandler` seam — e.g. `interface PhaseHandler { phase: TaskPhase;
-run(ctx): Promise<CompletionSignal> }` where `CompletionSignal` carries just the
-phase-specific bits: the `CompletionContext` sub-object, evidence/finding IDs, an
-optional candidate SHA, or an early non-candidate outcome
-(`await-human`/`repair`/`replan`/`blocked`, which some phases return before evaluating
-— e.g. `runSpecify` attempt 1, `runPlan` non-convergence, `runRelease` pr-readiness).
-A single shared driver then: loads `TaskRunState` (via the TASK-30 store), calls
-`handler.run`, and for the evaluated path builds the boilerplate `phaseAttempt` from
-`runState` + phase + `attemptNumber`, calls `evaluatePhaseCompletion` once, and maps
-the decision. Add `buildPhaseAttempt(runState, phase, state, overrides)` +
-`mapDecision(decision, signal)` helpers to kill the nine duplicated literals.
-Preserve the existing per-phase early-return outcomes exactly (they are not all
-"candidate": verify/exercise return `repair`, challenge returns `repair`/`replan`,
-specify/plan/release return `await-human`).
-**Done when:** `run-phase.ts` is a thin driver + nine small handlers, the duplicated
-`phaseAttempt` literal exists once, and every existing run-phase test
-(`run-phase-e2e.test.ts` + the per-phase suites) passes unchanged (behavior-preserving).
-
-### [ ] TASK-29: Split the real-vs-mock fork into two strategies (targets where live bugs hide)
-**What's wrong:** `resolveAgentRuntime() === 'claude'` is branched inside EVERY phase
-(specify/plan/prepare/implement/verify/exercise/challenge/release — 8 of the 9), so
-the real path and the mock/deterministic-test path are interleaved line-by-line in
-each function. The mock branch's rubber-stamped completion inputs (e.g. `runPrepare`'s
-all-`true` prepare context at `run-phase.ts:512`, `runImplement`'s
-`candidateCommitExists: true`, `runVerify`'s `echo ok` placeholder) sit right next to
-the real logic, so the fake shape leaks into the real path and "real vs fake" is
-decided nine times. The prior fake-audit ([[production-fakes-audit-2026-07-21]])
-found this interleaving is exactly where live-only bugs hide — invisible to the mock
-tests, caught only by a live run (TASK-1/13/15/16/17/18 were all this class).
-**Do:** once TASK-28 gives a `PhaseHandler` seam, provide two implementations —
-`ClaudePhaseHandler` (real worktree/builder/discovered-commands/browser-QA/delivery)
-and `MockPhaseHandler` (scripted, deterministic) — and SELECT one, once, via the
-existing `agent-factory` (`resolveAgentRuntime`/`createAgentAdapter`), instead of
-re-deciding per phase. The driver + gate logic (TASK-28) stay shared; only the "do the
-real work" middle differs by strategy. Note the genuinely-shared real logic
-(`runVerify`, `runExercise` are described in-code as "genuinely real" regardless of a
-mock fallback) — keep the mock path byte-for-byte equivalent so the deterministic
-suite is unchanged. Watch the fixture escape hatch `AWB_RUN_PHASE_FIXTURE_REPO`
-(`run-phase.ts:506`) used by the mock E2E — it must keep working.
-**Done when:** `=== 'claude'` no longer appears inside individual phase logic (runtime
-resolved once at handler selection), the two paths are separately readable, and both
-the mock test suite and a live claude run behave exactly as before.
-
-### [ ] TASK-30: Introduce the RunStateStore + usage/event seams (unblocks TASK-27 + TASK-22)
-**What's wrong:** two module-level side-channels make the durability/observability work
-below harder than it should be:
-- (a) **State:** `TaskRunState` is a module-level `const taskRunStates = new
-  Map<string, TaskRunState>()` (`run-phase.ts:89`), read/written directly by all nine
-  phases via `getOrCreateTaskRunState`. TASK-27 wants this in SQLite (a worker restart
-  today finds nothing and silently rebuilds an EMPTY state — the "advanced on a lie"
-  class Decision 003 exists to prevent), but with nine direct callers that is a
-  nine-site change.
-- (b) **Usage:** agent usage/timing is a mutable module global (`currentUsage` +
-  `resetUsage()` + `recordAgentUsage()`, `run-phase.ts:129-145`) that each phase pokes
-  as a side effect; `runPhase` reads it back via `usageForResult()`
-  (`run-phase.ts:160`) and attaches it to the result. This is a poor fit for the
-  per-role/per-model attribution TASK-22 needs, and it is invisible to the event
-  stream (the file sink at `event-sink-support.ts` sees agent events but not this
-  rolled-up total).
-**Do (seams only — the real SQLite/stream impls are TASK-27/TASK-22):**
-- Put `TaskRunState` access behind a small `RunStateStore` interface
-  (`load(taskId)`/`save(taskId, state)`) with the current in-memory Map as the default
-  impl, so TASK-27 drops in a `@awb/database`-backed impl without touching phase code.
-  (Aligns with TASK-21's single-writer decision — the worker's store impl may need a
-  daemon-routed or read-scoped write path.)
-- Carry usage/timing on the shared driver's per-invocation context instead of the
-  `currentUsage` global (the driver already owns the single `runPhase` entry point at
-  `run-phase.ts:1120` where `resetUsage()`/`usageForResult()` bracket the call), so
-  TASK-22 can route it to `UsageAggregator`
-  (`packages/agent-gateway/src/usage-aggregator.ts`, currently orphaned test-only
-  code) + the `SemanticEventBus`.
-- Give the driver ONE place to emit `phase.started`/`phase.completed` (+ usage)
-  events — the single hook TASK-22 wires the real sink into (today only per-agent-turn
-  events reach `createFileEventSink`; there is no phase-level event).
-**Done when:** no phase reads the `taskRunStates` Map or the usage global directly (all
-go through the store / driver-context seam), and TASK-27 + TASK-22 become
-single-implementation swaps rather than nine-site edits. Behavior-preserving — the
-default in-memory store + result-attached usage match today's behavior exactly.
-
----
-
 ## Live shakeout run — game-count UI feature (2026-07-22)
 
 Drove a trivial UI feature ("show N games available in the portal header") on
@@ -274,9 +139,10 @@ findings, evidence + join tables, artifacts, human_decisions, waivers,
 pull_requests + feedback, memory_entries + sources, failure_signatures,
 repository_symbols, repository_dependencies (repository_facts + sources are
 written from tests only). Their FTS5 mirrors are therefore empty at runtime too.
-**Prereq:** TASK-30 first — it puts the Map behind a `RunStateStore` interface so
-this becomes a single drop-in impl (a `@awb/database`-backed store) rather than a
-nine-site rewrite of `getOrCreateTaskRunState` callers.
+**Prereq DONE:** TASK-30 landed — the Map is behind a `RunStateStore` interface
+(`workers/temporal-worker/src/activities/run-state-store.ts`, `InMemoryRunStateStore`
+default), so this is now a single drop-in impl (a `@awb/database`-backed store) rather
+than a nine-site rewrite.
 **Do:** have the `RunStateStore` impl read/write `TaskContract`/`ImplementationPlan`/
 `Evidence`/`Finding`/lease rows through `@awb/database` (via the daemon's data layer,
 or its own handle) instead of the in-memory Map; persist the `tasks` row on create;
@@ -323,10 +189,11 @@ Beyond the sink, spec §27 also asks for detail we don't have at all:
   input/output total exists (`model_invocations` columns exist but are unwritten).
 - **context-composition tracking** (8 buckets) — does not exist at all.
 - **cost estimation** to the UI — `cost_usd` column exists, never populated.
-**Prereq:** TASK-30 first — it gives the driver ONE `phase.started`/`phase.completed`
-emit hook and moves usage off the `currentUsage` global onto driver context, so this
-task wires a real sink into a single seam instead of five scattered `NOOP_EVENT_SINK`
-call sites, and can feed `UsageAggregator` without reading a global.
+**Prereq DONE:** TASK-30 landed — the driver has ONE `phase.started`/`phase.completed`
+emit hook (`PhaseEventEmitter` on `PhaseContext`, no-op default in `phase-driver.ts`)
+and usage now rides a per-invocation `UsageAccumulator` on the context (was the
+`currentUsage` global), so this task wires a real sink into that single seam and feeds
+`UsageAggregator` without reading a global.
 **Do:** replace `NOOP_EVENT_SINK` (and the file-only sink) with a real sink that
 (a) persists normalized `SemanticEvent` rows to SQLite, (b) publishes them to the
 `SemanticEventBus` for the live WebSocket, and (c) feeds `UsageAggregator` for the
