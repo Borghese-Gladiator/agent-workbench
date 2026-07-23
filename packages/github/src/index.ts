@@ -3,6 +3,7 @@ export * from './github-client.js';
 export * from './real-github-client.js';
 export * from './push.js';
 export * from './evidence-matrix.js';
+export * from './pr-content.js';
 export * from './feedback-classification.js';
 export * from './media-uploader.js';
 export * from './release-asset-uploader.js';

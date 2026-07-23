@@ -28,8 +28,9 @@ const baseInput = {
   branchName: 'awb/task-1-add-feature',
   worktreePath: '/tmp/worktree',
   baseBranch: 'main',
-  title: 'Add feature X',
-  bodyIntro: 'Implements feature X.',
+  objective: 'Add feature X to the widgets page — e.g. show a badge.',
+  planSummary: 'Add a badge component and wire it into the widgets page.',
+  changedPaths: ['src/widgets/page.tsx'],
   candidateSha: 'a'.repeat(40),
   evidence: [makeEvidence()],
 };
@@ -49,15 +50,32 @@ describe('deliverToGitHub', () => {
     expect(result.pr.number).toBe(1);
   });
 
-  it('posts an evidence-matrix comment referencing the candidate SHA', async () => {
+  it('uses a short brief title with no [AWB] prefix', async () => {
+    const client = new FakeGitHubClient();
+    const pushRunner = new FakeGitPushRunner();
+
+    const result = await deliverToGitHub(baseInput, client, pushRunner);
+
+    expect(result.title).not.toContain('[AWB]');
+    expect(result.title).not.toContain('e.g.');
+    expect(result.title.length).toBeLessThanOrEqual(72);
+    expect(client.createdPrs[0]?.title).toBe(result.title);
+  });
+
+  it('renders a templated body (Background/Changes/Test plan) and posts NO comment', async () => {
     const client = new FakeGitHubClient();
     const pushRunner = new FakeGitPushRunner();
 
     await deliverToGitHub(baseInput, client, pushRunner);
 
-    expect(client.postedComments).toHaveLength(1);
-    expect(client.postedComments[0]?.body).toContain(baseInput.candidateSha.slice(0, 12));
-    expect(client.postedComments[0]?.body).toContain('unit-test');
+    const body = client.createdPrs[0]?.body ?? '';
+    expect(body).toContain('## Background');
+    expect(body).toContain('## Changes');
+    expect(body).toContain('## Test plan');
+    // Evidence is folded into the body's Test plan, not a separate matrix comment.
+    expect(body).toContain('unit-test');
+    expect(body).toContain('src/widgets/page.tsx');
+    expect(client.postedComments).toHaveLength(0);
   });
 
   it('updates the existing PR instead of creating a new one when existingPrNumber is given', async () => {

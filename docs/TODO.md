@@ -42,20 +42,34 @@ it *would* do). The latter is the safer default for dogfooding.
 **Done when:** a run can be driven through challenge and stop with NO branch
 pushed and NO PR opened, verifiably.
 
-### [ ] TASK-7 (regression): QA media comments link `undefined`, not a real URL
+### [~] TASK-7 (regression): QA media upload returns no download URL
 **Finding (2026-07-22):** on PR #2 the release phase posted
-`QA artifact (browser-trace): undefined` and `QA artifact (qa-video): undefined`
-— the media upload returned an undefined `attachmentUrl` even though the real
-`.webm`/trace `.zip` exist on disk. The evidence *matrix* comment was correct;
-only the media *upload* link is broken.
+`QA artifact (browser-trace): undefined` / `(qa-video): undefined` — the media
+upload returned an undefined `attachmentUrl` even though the real `.webm`/`.zip`
+exist on disk.
 **Suspected cause:** `media.path` from the ArtifactStore is a content-hash blob
 (no extension/content-type), so `octokit.repos.uploadReleaseAsset` returns no
-`browser_download_url`; run-phase still posts the comment with the undefined URL.
-**Do:** upload with the real filename + correct content-type (name the asset
-`<kind>.webm`/`.zip`), and treat an undefined `browser_download_url` as a failed
-upload (set `requiredVideosUploaded=false`, don't post an `undefined` comment).
-**Done when:** the PR comment links a `releases/download/...` URL that actually
-downloads the `.webm`.
+`browser_download_url`.
+**Partial fix DONE (2026-07-22):** run-phase now treats an undefined URL as a
+FAILED upload — it sets `requiredVideosUploaded=false` and does NOT post a broken
+`undefined` comment. The QA media comment is also now a descriptive brief
+(`renderQaMediaBrief`: "Browser QA recording — <what was tested>" + link) rather
+than "QA artifact (kind): url".
+**Still open:** make the upload actually succeed — name the release asset
+`<kind>.webm`/`.zip` with the right content-type so GitHub returns a real
+`browser_download_url`. **Done when:** the PR comment links a
+`releases/download/...` URL that downloads the `.webm`.
+
+### [x] PR delivery: short title, real body template, no evidence-matrix comment
+**Requested (2026-07-22):** the PR title was `[AWB] <whole long objective>`, the
+body was a one-liner, and the comments were a non-actionable "Evidence matrix" +
+`QA artifact: undefined`.
+**DONE:** added `@awb/github/pr-content` — `derivePrTitle` (short brief title, no
+`[AWB]`, drops the "In <file>," preamble + `e.g.` tail, caps at 72 chars) and
+`renderPrBody` (Background / Changes [plan summary + files] / Test plan [evidence
+as readable rows]). `deliverToGitHub` uses these and NO LONGER posts a separate
+evidence-matrix comment (folded into the body). QA media comments are descriptive
+briefs. Applied in place to the open PR #2. Unit-tested; full suite green (577).
 
 
 ### [x] TASK-1: Plan phase stalls on the live claude runtime (`repeated-failure-no-progress`)
@@ -197,10 +211,14 @@ orchestration, §8 SQLite schema, §18 capability enforcement, §27 observabilit
 §37 constraints) surfaced by the 2026-07-21 spec-vs-code audit. They are not
 live-run bugs; the pipeline *runs* without them. They are the parts that make the
 system durable, inspectable, and safe as designed. Grouped here at P1 because the
-persistence gap (TASK-20) can silently reintroduce Decision-003's "advanced on a
+persistence gap (TASK-27) can silently reintroduce Decision-003's "advanced on a
 lie" failure after a worker restart.
 
-### [ ] TASK-20: Heavy lifecycle state lives in an activity-local Map, not SQLite
+### [ ] TASK-27: Heavy lifecycle state lives in an activity-local Map, not SQLite
+**Owner note:** these lifecycle entities are workbench-application state (source
+of truth the completion policy reads by ID), NOT observability telemetry — the
+observability layer (TASK-22) may *emit* an `evidence-created` semantic event when
+a record is written, but must never *own* the record itself (see Decision 003).
 **What's wrong:** there are two state layers. The Workflow's own
 `TaskWorkflowState` (phase/condition/attempt/evidence-IDs/finding-IDs/usage) IS
 durable — Temporal replays it correctly across a worker crash, by construction.
@@ -241,9 +259,9 @@ worker only SELECTs, so nothing is corrupted, but it attaches read-write and can
 run DDL.
 **Do:** give the worker a read-only connection (open with a readonly handle, no
 `runMigrations`), or route all worker reads through a daemon API. Decide this
-alongside TASK-20 (the worker needs *some* DB access for persistence — make it a
+alongside TASK-27 (the worker needs *some* DB access for persistence — make it a
 scoped/read path, or funnel writes through the daemon so the invariant holds).
-**Done when:** the worker cannot write to or migrate the workbench DB, and TASK-20
+**Done when:** the worker cannot write to or migrate the workbench DB, and TASK-27
 persistence goes through a path that preserves "daemon is the only writer."
 
 ### [ ] TASK-22: Wire the event sink — semantic events, live stream, §27 attribution
@@ -273,7 +291,7 @@ Beyond the sink, spec §27 also asks for detail we don't have at all:
 `SemanticEvent` rows to SQLite, (b) publishes them to the `SemanticEventBus` for
 the live WebSocket, and (c) feeds `UsageAggregator` for the by-model breakdown;
 write `agent_sessions`/`model_invocations` rows; add at least the coarsest useful
-runtime-attribution buckets. (Depends on TASK-20 for the SQLite write path.)
+runtime-attribution buckets. (Depends on TASK-27 for the SQLite write path.)
 **Done when:** a live run streams semantic events to the UI over the WebSocket,
 `semantic_events`/`model_invocations` have real rows, and `task show` reports a
 by-model token/cost breakdown — not just the flat total.
@@ -348,6 +366,85 @@ task loop; decide whether to promote discovery to a real workflow or explicitly
 document the daemon-route choice as an accepted deviation (an ADR).
 **Done when:** a task that loops many times continues-as-new instead of growing
 history without bound, and the discovery-workflow decision is recorded.
+
+---
+
+## P1 — Refactoring to tame run-phase.ts before persistence + observability land
+
+**Context (2026-07-22 design review):** the codebase is well-factored *except* for
+`workers/temporal-worker/src/activities/run-phase.ts` (1157 lines), where all nine
+`runX` phase functions repeat the same 6-step skeleton — load `TaskRunState`, branch
+on `resolveAgentRuntime() === 'claude'`, do the real work, hand-build a
+`CompletionContext`, call `evaluatePhaseCompletion` with a ~15-line near-identical
+`phaseAttempt` literal, then map the decision to a `PhaseAttemptResult`. TASK-27
+(SQLite state) and TASK-22 (event sink) both have to touch every one of those nine
+sites; doing them against the current copy-paste means editing the same boilerplate
+nine times and multiplies the risk. These three refactors cut that surface FIRST.
+They are behavior-preserving (no new features) and should land before, or as the
+opening move of, TASK-27/TASK-22. Do them in order — each depends on the previous.
+
+### [ ] TASK-28: Extract the phase skeleton (Template Method / PhaseHandler + one driver)
+**What's wrong:** the nine `runSpecify/runPlan/.../runAssimilate` functions are
+structurally identical; the `phaseAttempt` object literal passed to
+`evaluatePhaseCompletion` is duplicated nine times with only 3–4 fields differing,
+and the `getOrCreateTaskRunState` → work → evaluate → `candidateResult`/
+`blockedResult`/`repair`/`await-human` flow is copy-pasted around each phase's real
+logic. The one useful piece of structure — the exhaustive `switch` in
+`runPhaseInner` over the fixed 9-phase set — should STAY (a closed, compiler-checked
+set is exactly right; do not turn it into a registry/factory).
+**Do:** define a `PhaseHandler` seam — e.g. `interface PhaseHandler { phase; run(ctx):
+Promise<CompletionSignal> }` where `CompletionSignal` carries just the phase-specific
+bits (the `CompletionContext` sub-object, evidence/finding IDs, optional candidate
+SHA, or an early `await-human`/`repair`/`replan` outcome). A single shared driver
+loads `TaskRunState`, builds the boilerplate `phaseAttempt` from `runState` + phase +
+attempt, calls `evaluatePhaseCompletion` once, and maps the result — so each phase
+shrinks to its ~40-line middle. Add an `evaluate(runState, phase, signal)` /
+`buildPhaseAttempt(...)` helper to kill the nine duplicated literals.
+**Done when:** run-phase.ts is a thin driver + nine small handlers, the duplicated
+`phaseAttempt` literal exists once, and every existing run-phase test still passes
+unchanged (behavior-preserving).
+
+### [ ] TASK-29: Split the real-vs-mock fork into two strategies (targets where live bugs hide)
+**What's wrong:** `resolveAgentRuntime() === 'claude'` is branched inside EVERY phase
+(specify/plan/prepare/implement/verify/exercise/challenge/release), so the real path
+and the mock/deterministic-test path are interleaved line-by-line in one function
+each. The prior fake-audit (see the durability section + memory
+"production-fakes-audit") found this interleaving is exactly where live-only bugs
+hide — the mock branch's rubber-stamped completion inputs leak into the shape of the
+real path, and "real vs fake" is decided nine times.
+**Do:** once TASK-28 gives a `PhaseHandler` seam, provide two implementations —
+`ClaudePhaseHandler` (real worktree/builder/discovered-commands/browser-QA/delivery)
+and `MockPhaseHandler` (scripted, deterministic) — and SELECT one, once, via the
+existing `agent-factory` (`createAgentAdapter`/`resolveAgentRuntime`), instead of
+re-deciding per phase. The driver and gate logic stay shared; only the "do the real
+work" middle differs by strategy. Keep the mock path byte-for-byte equivalent so the
+deterministic test suite is unchanged.
+**Done when:** `=== 'claude'` no longer appears inside individual phase logic (the
+runtime is resolved once at handler selection), the two paths are separately readable,
+and both the mock test suite and a live claude run behave exactly as before.
+
+### [ ] TASK-30: Introduce the RunStateStore + event-emission seams (unblocks TASK-27/TASK-22)
+**What's wrong:** two hidden side-channels make the durability/observability work
+harder than it should be. (a) `TaskRunState` is a module-level
+`Map<taskId, TaskRunState>` (`run-phase.ts:89`) that every phase reads/writes
+directly — TASK-27 wants to swap this for SQLite-backed rows, but with nine direct
+`getOrCreateTaskRunState` callers that is a nine-site change. (b) Agent usage is
+tracked through a module-level mutable global (`currentUsage` + `resetUsage` +
+`recordAgentUsage`) that each phase pokes as a side effect — a poor fit for the
+per-model/per-role attribution TASK-22 needs, and invisible to the event stream.
+**Do (seams only — the real implementations are TASK-27/TASK-22):**
+- Put `TaskRunState` access behind a small `RunStateStore` interface
+  (`load(taskId)`/`save(...)`) with the current in-memory Map as the default impl,
+  so TASK-27 can drop in a `@awb/database`-backed impl without touching phase code.
+- Replace the `currentUsage` global with usage/timing carried on the shared driver's
+  per-invocation context (or emitted through the existing `createFileEventSink`
+  seam), so TASK-22 can route it to `UsageAggregator` + the `SemanticEventBus`
+  instead of reading a global.
+- Give the driver a single place to emit `phase.started`/`phase.completed`
+  (+ usage) events — the one hook TASK-22 wires the real sink into.
+**Done when:** no phase reads the `taskRunStates` Map or the usage global directly;
+all go through the store/context seam, and TASK-27/TASK-22 become single-implementation
+swaps rather than nine-site edits. Behavior-preserving (default impls match today).
 
 ---
 

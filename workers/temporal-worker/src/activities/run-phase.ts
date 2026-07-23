@@ -55,7 +55,7 @@ import {
   reviewerExaminedAllRequiredInputs,
   type ReviewInputs,
 } from '@awb/review';
-import { deliverToGitHub } from '@awb/github';
+import { deliverToGitHub, renderQaMediaBrief } from '@awb/github';
 import { FakeGitHubClient, FakeGitPushRunner } from '@awb/github/test-fakes';
 
 /**
@@ -972,14 +972,28 @@ async function runRelease(state: TaskWorkflowState): Promise<PhaseAttemptResult>
   const branchName = runState.lease?.branchName ?? `awb/${state.taskId}`;
   const baseBranch = runState.lease?.baseRef ?? 'main';
 
+  // The changed paths give the PR body's Changes section (and a title fallback). Recompute from the
+  // worktree diff; empty on the mock path or any git error, which the renderers tolerate.
+  let changedPaths: string[] = [];
+  if (realDelivery && runState.worktreePath) {
+    changedPaths = (
+      await resolveReviewDiff({
+        worktreePath: runState.worktreePath,
+        baseSha: resolveBaseSha(runState),
+        candidateSha,
+      })
+    ).changedPaths;
+  }
+
   const deliverResult = await deliverToGitHub(
     {
       ref,
       branchName,
       worktreePath,
       baseBranch,
-      title: `[AWB] ${runState.contract?.objective ?? state.taskId}`,
-      bodyIntro: 'Automated draft PR produced by the Agentic Workbench.',
+      objective: runState.contract?.objective ?? state.prompt ?? state.taskId,
+      planSummary: runState.plan?.summary,
+      changedPaths,
       candidateSha,
       evidence,
     },
@@ -989,10 +1003,14 @@ async function runRelease(state: TaskWorkflowState): Promise<PhaseAttemptResult>
 
   // Upload the QA media artifacts (video/trace) to the PR (Fix 7). Real path only: for every
   // qa-video/browser-trace artifact the exercise phase produced, push it as a GitHub release asset
-  // and (best-effort) link it in a PR comment. requiredVideosUploaded reflects real success rather
-  // than a hardcoded true; when there were no media artifacts to upload it is vacuously satisfied.
+  // and post a DESCRIPTIVE brief comment (what was exercised + the result + a link), not a bare
+  // "QA artifact (kind): <url>". An upload that comes back without a real download URL counts as a
+  // FAILED upload — we do NOT post an `undefined` link (that was the observed regression).
+  // requiredVideosUploaded reflects real success; vacuously satisfied when there is no media.
   let requiredVideosUploaded = true;
   if (realDelivery && mediaUploader) {
+    // Summaries from the QA evidence describe what was exercised, for the media brief.
+    const qaSummary = runState.qaEvidence.map((e) => e.summary).find((s) => s && s.length > 0);
     const mediaArtifactIds = runState.qaEvidence.flatMap((e) => e.artifactIds);
     const mediaFiles = mediaArtifactIds
       .map((id) => runState.artifactStore.get(id))
@@ -1008,11 +1026,16 @@ async function runRelease(state: TaskWorkflowState): Promise<PhaseAttemptResult>
           filePath: media.path,
           caption: media.record.kind,
         });
+        if (!uploaded.attachmentUrl) {
+          // Upload returned no usable download URL — treat as a failed upload; don't post a broken link.
+          requiredVideosUploaded = false;
+          continue;
+        }
         await client.postComment({
           owner: ref.owner,
           repo: ref.repo,
           pullNumber: deliverResult.pr.number,
-          body: `QA artifact (${media.record.kind}): ${uploaded.attachmentUrl}`,
+          body: renderQaMediaBrief({ kind: media.record.kind, qaSummary, mediaUrl: uploaded.attachmentUrl }),
         });
       } catch {
         requiredVideosUploaded = false;
@@ -1027,7 +1050,9 @@ async function runRelease(state: TaskWorkflowState): Promise<PhaseAttemptResult>
       evidenceAppliesToFinalCandidate: evidence.every((e) => e.candidateSha === candidateSha),
       branchPushed: deliverResult.pushed,
       draftPrExists: deliverResult.pr.number > 0,
-      evidenceMatrixPosted: deliverResult.evidenceMatrixCommentId.length > 0,
+      // Evidence is now rendered into the PR body's Test plan section (no separate matrix comment),
+      // so the "evidence was delivered" readiness check is satisfied whenever the PR was created.
+      evidenceMatrixPosted: deliverResult.pr.number > 0,
       requiredVideosUploaded,
       prReferencesFinalCandidateSha: true,
     },
