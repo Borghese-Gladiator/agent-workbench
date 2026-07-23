@@ -182,18 +182,47 @@ pushed and NO PR opened, verifiably.
 `QA artifact (browser-trace): undefined` / `(qa-video): undefined` — the media
 upload returned an undefined `attachmentUrl` even though the real `.webm`/`.zip`
 exist on disk.
-**Suspected cause:** `media.path` from the ArtifactStore is a content-hash blob
-(no extension/content-type), so `octokit.repos.uploadReleaseAsset` returns no
-`browser_download_url`.
-**Partial fix DONE (2026-07-22):** run-phase now treats an undefined URL as a
-FAILED upload — it sets `requiredVideosUploaded=false` and does NOT post a broken
-`undefined` comment. The QA media comment is also now a descriptive brief
-(`renderQaMediaBrief`: "Browser QA recording — <what was tested>" + link) rather
-than "QA artifact (kind): url".
-**Still open:** make the upload actually succeed — name the release asset
-`<kind>.webm`/`.zip` with the right content-type so GitHub returns a real
-`browser_download_url`. **Done when:** the PR comment links a
-`releases/download/...` URL that downloads the `.webm`.
+
+**Root cause — CONFIRMED against the real API (2026-07-23), no longer a guess:**
+- `gh api repos/Borghese-Gladiator/browser-games__ai/releases/tags/awb-qa-2` →
+  the release WAS created (`id=358135821`) but has **`assets: 0`**. So
+  `octokit.repos.uploadReleaseAsset` **returned without throwing** and with
+  `data.browser_download_url === undefined` — GitHub silently accepted the call
+  but attached nothing.
+- Why the asset is rejected: in `packages/github/src/release-asset-uploader.ts`
+  the asset `name` is `` `${prNumber}-${basename(filePath)}` `` and `filePath` is
+  the ArtifactStore **content-hash blob path** (e.g. `sha256/76/76e64273c949…`),
+  so the asset name has **no extension** and no explicit content-type is sent.
+  GitHub needs a real filename/content-type to store a release asset.
+- Because the failure is a silent undefined-return (NOT a throw), the release
+  step's existing `try/catch` never saw it — that's why the broken `undefined`
+  comment got posted.
+
+**Partial fix DONE (2026-07-22/23):** the release media loop was extracted to
+`postQaMediaBriefs()` (`workers/temporal-worker/src/activities/qa-media-support.ts`),
+which treats an undefined/empty `attachmentUrl` as a FAILED upload
+(`requiredVideosUploaded=false`) and does NOT post a broken `undefined` comment;
+successful uploads post a descriptive brief via `renderQaMediaBrief`
+("Browser QA recording — <what was tested>" + link), not "QA artifact (kind): url".
+This is unit-proven in `qa-media-support.test.ts` (undefined-URL → no comment +
+false; real URL → brief; throw → false; no media → vacuously true; mixed →
+posts good one + flags failure). The guard is confirmed on the correct code path.
+
+**Still open (the actual upload):** make `uploadReleaseAsset` succeed —
+- give the asset a real filename with the right extension per kind
+  (`qa-video` → `.webm`, `browser-trace` → `.zip`) instead of the bare hash, and
+  pass the matching `headers['content-type']` (`video/webm`, `application/zip`);
+  the ArtifactStore record carries `mediaType`, so read it from there rather than
+  guessing. Consider copying the blob to a temp file with the right name, or
+  deriving the name from `record.kind`/`record.mediaType`.
+- after fixing, treat a still-undefined `browser_download_url` as an error (the
+  guard already does), and add a real/integration check that an asset actually
+  lands (`assets.length > 0`).
+**Done when:** the PR comment links a `releases/download/...` URL that actually
+downloads the `.webm`, and the release has ≥1 asset.
+_Files: `packages/github/src/release-asset-uploader.ts` (the fix),
+`packages/github/src/release-asset-uploader.test.ts` (coverage),
+`qa-media-support.ts`/`.test.ts` (guard, already done)._
 
 ### [x] PR delivery: short title, real body template, no evidence-matrix comment
 **Requested (2026-07-22):** the PR title was `[AWB] <whole long objective>`, the
