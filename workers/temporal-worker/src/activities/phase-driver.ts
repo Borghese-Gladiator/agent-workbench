@@ -9,6 +9,9 @@ import type { TaskWorkflowState } from '@awb/workflow';
 import { evaluatePhaseCompletion, type CompletionContext } from '@awb/workflow';
 import type { AgentRuntime } from './agent-factory.js';
 import type { RunStateStore, TaskRunState } from './run-state-store.js';
+import type { ObservabilityAccumulator } from './observability-accumulator.js';
+import type { DaemonClient } from '../daemon-client.js';
+import { runIdForTask } from '@awb/database';
 
 /**
  * Per-runPhase-invocation usage accumulator (TASK-11), carried on the driver's `PhaseContext`
@@ -72,6 +75,10 @@ export interface PhaseContext {
   strategy: AgentRuntime;
   usage: UsageAccumulator;
   emit: PhaseEventEmitter;
+  /** §27 runtime-attribution + per-session observability for this attempt (TASK-22). */
+  observability: ObservabilityAccumulator;
+  /** Daemon client for persisting observability; undefined on the mock path (nothing to persist). */
+  daemon?: DaemonClient;
 }
 
 /**
@@ -191,5 +198,25 @@ export async function drivePhase(handler: PhaseHandler, ctx: PhaseContext): Prom
     outcome: result.outcome,
     usage,
   });
+
+  // Persist §27 observability for this attempt (runtime-attribution buckets + agent sessions +
+  // model invocations + context composition). Best-effort: a failed persist never fails the phase.
+  if (ctx.daemon) {
+    const payload = ctx.observability.toPayload({
+      taskId: ctx.state.taskId,
+      runId: runIdForTask(ctx.state.taskId),
+      phaseAttemptId: `${ctx.state.taskId}-${handler.phase}-${ctx.state.attemptNumber}`,
+      phase: handler.phase,
+      attemptNumber: ctx.state.attemptNumber,
+    });
+    if (payload) {
+      try {
+        await ctx.daemon.postObservability(payload);
+      } catch {
+        // best-effort observability
+      }
+    }
+  }
+
   return result;
 }

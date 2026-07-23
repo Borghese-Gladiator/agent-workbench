@@ -39,6 +39,9 @@ function fakeDaemonClient(database: WorkbenchDatabase): DaemonClient {
     async postEvent() {
       /* not exercised here */
     },
+    async postObservability() {
+      /* not exercised here */
+    },
   };
 }
 

@@ -40,6 +40,11 @@ describe('createDatabase', () => {
     const migrations = handle.sqlite.prepare('SELECT name FROM _migrations').all() as {
       name: string;
     }[];
-    expect(migrations).toHaveLength(1);
+    // Every migration is applied exactly once across repeated opens (idempotent); no re-application.
+    const names = migrations.map((row) => row.name);
+    expect(names).toEqual([...names].sort());
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toContain('0001_init.sql');
+    expect(names).toContain('0002_observability.sql');
   });
 });

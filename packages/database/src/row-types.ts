@@ -107,3 +107,9 @@ export type NewMemorySourceRow = typeof schema.memorySources.$inferInsert;
 
 export type FailureSignatureRow = typeof schema.failureSignatures.$inferSelect;
 export type NewFailureSignatureRow = typeof schema.failureSignatures.$inferInsert;
+
+export type RuntimeAttributionRow = typeof schema.runtimeAttribution.$inferSelect;
+export type NewRuntimeAttributionRow = typeof schema.runtimeAttribution.$inferInsert;
+
+export type ContextCompositionRow = typeof schema.contextComposition.$inferSelect;
+export type NewContextCompositionRow = typeof schema.contextComposition.$inferInsert;

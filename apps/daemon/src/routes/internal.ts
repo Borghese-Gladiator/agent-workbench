@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { WorkbenchDatabase } from '@awb/database';
-import { upsertTask, persistRunStateSnapshot, insertSemanticEvent } from '@awb/database';
-import { RunStateSnapshotSchema, SemanticEventSchema } from '@awb/domain';
+import { upsertTask, persistRunStateSnapshot, insertSemanticEvent, persistPhaseObservability } from '@awb/database';
+import { RunStateSnapshotSchema, SemanticEventSchema, PhaseObservabilitySchema } from '@awb/domain';
 import type { SemanticEventBus } from '../event-bus.js';
 
 /**
@@ -54,6 +54,21 @@ export function registerInternalRoutes(
         prompt: parsed.data.prompt ?? '',
       });
       persistRunStateSnapshot(database.db, parsed.data);
+      return { ok: true };
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  app.post<{ Body: unknown }>('/internal/observability', async (request, reply) => {
+    const parsed = PhaseObservabilitySchema.safeParse(request.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: `Invalid observability payload: ${parsed.error.message}` };
+    }
+    try {
+      persistPhaseObservability(database.db, parsed.data);
       return { ok: true };
     } catch (err) {
       reply.code(500);

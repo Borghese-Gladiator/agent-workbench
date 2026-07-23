@@ -58,6 +58,8 @@ import {
   type TaskRunState,
 } from './run-state-store.js';
 import { SqliteRunStateStore } from './sqlite-run-state-store.js';
+import { ObservabilityAccumulator, estimateContextComposition } from './observability-accumulator.js';
+import { createDaemonClient } from '../daemon-client.js';
 import {
   drivePhase,
   blockedResult,
@@ -255,13 +257,27 @@ const planHandler: PhaseHandler = {
           durable: ctx.strategy === 'claude',
         });
         const plannerStart = Date.now();
+        const plannerInstr = realPlanner ? plannerInstruction(contract) : 'Produce an implementation plan for the approved contract';
         const execution = await adapter.execute(
           session,
-          { instruction: realPlanner ? plannerInstruction(contract) : 'Produce an implementation plan for the approved contract' },
+          { instruction: plannerInstr },
           sink,
           new AbortController().signal,
         );
-        ctx.usage.record(execution.usage, Date.now() - plannerStart);
+        const plannerMs = Date.now() - plannerStart;
+        ctx.usage.record(execution.usage, plannerMs);
+        ctx.observability.recordSession({
+          sessionId: session.id,
+          taskId: state.taskId,
+          runId: `${state.taskId}-run`,
+          phaseAttemptId: `${state.taskId}-plan-${state.attemptNumber}`,
+          phase: 'plan',
+          role: 'planner',
+          runtime: ctx.strategy,
+          usage: execution.usage,
+          runtimeMs: plannerMs,
+          contextComposition: estimateContextComposition({ contract, priorFindings }, plannerInstr),
+        });
         await flush();
         // A behavioral claim requiring QA evidence must be covered by a QA scenario, or the plan gate
         // (everyBehavioralClaimHasQaScenario) rejects the plan. The single-slice fallback therefore
@@ -308,18 +324,30 @@ const planHandler: PhaseHandler = {
           durable: ctx.strategy === 'claude',
         });
         const criticStart = Date.now();
+        const criticInstr =
+          'The plan to critique is in the JSON context above. Critique it against the contract: ' +
+          'find missing claim coverage, slices without targeted checks, behavioral claims lacking a ' +
+          'QA scenario, over-engineering, and scope gaps. Report concrete findings.';
         const execution = await adapter.execute(
           session,
-          {
-            instruction:
-              'The plan to critique is in the JSON context above. Critique it against the contract: ' +
-              'find missing claim coverage, slices without targeted checks, behavioral claims lacking a ' +
-              'QA scenario, over-engineering, and scope gaps. Report concrete findings.',
-          },
+          { instruction: criticInstr },
           sink,
           new AbortController().signal,
         );
-        ctx.usage.record(execution.usage, Date.now() - criticStart);
+        const criticMs = Date.now() - criticStart;
+        ctx.usage.record(execution.usage, criticMs);
+        ctx.observability.recordSession({
+          sessionId: session.id,
+          taskId: state.taskId,
+          runId: `${state.taskId}-run`,
+          phaseAttemptId: `${state.taskId}-plan-${state.attemptNumber}`,
+          phase: 'plan',
+          role: 'plan-critic',
+          runtime: ctx.strategy,
+          usage: execution.usage,
+          runtimeMs: criticMs,
+          contextComposition: estimateContextComposition({ plan }, criticInstr),
+        });
         await flush();
         return execution.findings;
       },
@@ -426,10 +454,12 @@ const prepareHandler: PhaseHandler = {
       runState.worktreePath = lease.worktreePath;
       // A fresh git worktree has no node_modules of its own, so install deps now or verify/QA fail on
       // missing packages (the observed `vite build` "Cannot find package 'vite'" verify block).
-      const install = await installWorktreeDependencies({
-        repositoryId: state.repositoryId,
-        worktreePath: lease.worktreePath,
-      });
+      const install = await ctx.observability.time('dependencyInstallMs', () =>
+        installWorktreeDependencies({
+          repositoryId: state.repositoryId,
+          worktreePath: lease.worktreePath,
+        }),
+      );
       runState.dependenciesInstalled = install.ok;
     } else {
       runState.baseSha = runState.baseSha ?? '0'.repeat(40);
@@ -514,6 +544,18 @@ const implementHandler: PhaseHandler = {
             eventSink: sink,
           });
           ctx.usage.record(attempt.usage, attempt.runtimeMs);
+          ctx.observability.recordSession({
+            sessionId: `${state.taskId}-implement-${state.attemptNumber}-${slice.id}`,
+            taskId: state.taskId,
+            runId: `${state.taskId}-run`,
+            phaseAttemptId: `${state.taskId}-implement-${state.attemptNumber}`,
+            phase: 'implement',
+            role: 'builder',
+            runtime: ctx.strategy,
+            usage: attempt.usage,
+            runtimeMs: attempt.runtimeMs,
+            contextComposition: estimateContextComposition({ plan: slice }, ''),
+          });
           await flush();
           candidateSha = attempt.headSha;
           return attempt.outcome;
@@ -597,7 +639,9 @@ const verifyHandler: PhaseHandler = {
       env: inheritedEnv(),
     };
 
-    const results = await runVerificationMatrix(commands, context, runState.artifactStore);
+    const results = await ctx.observability.time('testExecutionMs', () =>
+      runVerificationMatrix(commands, context, runState.artifactStore),
+    );
     runState.verificationEvidence.push(...results.map((r) => r.evidence));
     const allPass = allRequiredCommandsPass(results);
 
@@ -656,19 +700,22 @@ const exerciseHandler: PhaseHandler = {
 
     if (startCommand && runState.worktreePath) {
       ranBrowserQa = true;
-      qaResult = await runBrowserQaViaServer({
-        startCommand,
-        worktreePath: runState.worktreePath,
-        baseUrl: process.env.AWB_QA_BASE_URL ?? 'http://localhost:5173',
-        scenario: {
+      qaResult = await ctx.observability.time('qaExecutionMs', () =>
+        runBrowserQaViaServer({
+          startCommand,
+          worktreePath: runState.worktreePath as string,
           baseUrl: process.env.AWB_QA_BASE_URL ?? 'http://localhost:5173',
-          steps: [{ kind: 'navigate', url: '/' }, { kind: 'screenshot', name: 'landing' }],
-        },
-        context,
-        artifactStore: runState.artifactStore,
-      });
+          scenario: {
+            baseUrl: process.env.AWB_QA_BASE_URL ?? 'http://localhost:5173',
+            steps: [{ kind: 'navigate', url: '/' }, { kind: 'screenshot', name: 'landing' }],
+          },
+          context,
+          artifactStore: runState.artifactStore,
+        }),
+      );
     } else {
-      qaResult = await runCliQa(
+      qaResult = await ctx.observability.time('qaExecutionMs', () =>
+        runCliQa(
         {
           command: 'echo',
           args: ['qa-ok'],
@@ -677,6 +724,7 @@ const exerciseHandler: PhaseHandler = {
         },
         context,
         runState.artifactStore,
+        ),
       );
     }
     runState.qaEvidence.push(qaResult.evidence);
@@ -768,19 +816,31 @@ const challengeHandler: PhaseHandler = {
           durable: ctx.strategy === 'claude',
         });
         const reviewerStart = Date.now();
+        const reviewerInstr =
+          'The contract, plan, candidate diff, changed paths, and evidence ids are in the JSON ' +
+          'context above. Adversarially review the diff against the contract + plan: hunt for ' +
+          'correctness bugs, unhandled edge cases, missing wiring, and claims not actually met. ' +
+          'Report concrete findings with severity.';
         const execution = await adapter.execute(
           session,
-          {
-            instruction:
-              'The contract, plan, candidate diff, changed paths, and evidence ids are in the JSON ' +
-              'context above. Adversarially review the diff against the contract + plan: hunt for ' +
-              'correctness bugs, unhandled edge cases, missing wiring, and claims not actually met. ' +
-              'Report concrete findings with severity.',
-          },
+          { instruction: reviewerInstr },
           sink,
           new AbortController().signal,
         );
-        ctx.usage.record(execution.usage, Date.now() - reviewerStart);
+        const reviewerMs = Date.now() - reviewerStart;
+        ctx.usage.record(execution.usage, reviewerMs);
+        ctx.observability.recordSession({
+          sessionId: session.id,
+          taskId: state.taskId,
+          runId: `${state.taskId}-run`,
+          phaseAttemptId: `${state.taskId}-challenge-${state.attemptNumber}`,
+          phase: 'challenge',
+          role: 'adversarial-reviewer',
+          runtime: ctx.strategy,
+          usage: execution.usage,
+          runtimeMs: reviewerMs,
+          contextComposition: estimateContextComposition(inputs, reviewerInstr),
+        });
         await flush();
         return {
           reviewerSessionId: session.id,
@@ -905,20 +965,22 @@ const releaseHandler: PhaseHandler = {
       committedMedia = branchMedia.map((m, i) => ({ kind: m.record.kind, repoPath: commit.committedPaths[i] as string }));
     }
 
-    const deliverResult = await deliverToGitHub(
-      {
-        ref,
-        branchName,
-        worktreePath,
-        baseBranch,
-        objective: runState.contract?.objective ?? state.prompt ?? state.taskId,
-        planSummary: runState.plan?.summary,
-        changedPaths,
-        candidateSha,
-        evidence,
-      },
-      client,
-      pushRunner,
+    const deliverResult = await ctx.observability.time('githubOperationMs', () =>
+      deliverToGitHub(
+        {
+          ref,
+          branchName,
+          worktreePath,
+          baseBranch,
+          objective: runState.contract?.objective ?? state.prompt ?? state.taskId,
+          planSummary: runState.plan?.summary,
+          changedPaths,
+          candidateSha,
+          evidence,
+        },
+        client,
+        pushRunner,
+      ),
     );
 
     // requiredVideosUploaded reflects real success: the branch media committed (when there was any)
@@ -1058,6 +1120,7 @@ export async function runPhase(input: {
   // The workflow state is the source of truth for repositoryId; thread it onto the run state so the
   // durable store can key persisted rows (the mock in-memory store ignores it).
   runState.repositoryId = input.state.repositoryId;
+  const durable = strategy === 'claude';
   const ctx: PhaseContext = {
     state: input.state,
     runState,
@@ -1065,6 +1128,8 @@ export async function runPhase(input: {
     strategy,
     usage: new UsageAccumulator(),
     emit: NOOP_PHASE_EVENT_EMITTER,
+    observability: new ObservabilityAccumulator(),
+    daemon: durable ? createDaemonClient() : undefined,
   };
 
   const result = await drivePhase(HANDLERS[input.phase], ctx);

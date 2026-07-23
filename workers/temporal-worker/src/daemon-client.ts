@@ -1,4 +1,4 @@
-import type { RunStateSnapshot, SemanticEvent } from '@awb/domain';
+import type { RunStateSnapshot, SemanticEvent, PhaseObservability } from '@awb/domain';
 
 /**
  * Thin HTTP client the worker uses to persist through the daemon's internal routes (TASK-21/27).
@@ -40,6 +40,7 @@ export interface DaemonClient {
   }): Promise<void>;
   saveRunState(snapshot: RunStateSnapshot): Promise<void>;
   postEvent(event: SemanticEvent): Promise<void>;
+  postObservability(payload: PhaseObservability): Promise<void>;
 }
 
 export function createDaemonClient(): DaemonClient {
@@ -53,6 +54,9 @@ export function createDaemonClient(): DaemonClient {
     },
     async postEvent(event) {
       await postOrPut('POST', `/internal/events`, event);
+    },
+    async postObservability(payload) {
+      await postOrPut('POST', `/internal/observability`, payload);
     },
   };
 }

@@ -14,6 +14,7 @@ function collectingClient(events: SemanticEvent[], opts: { throwOnPost?: boolean
       if (opts.throwOnPost) throw new Error('daemon down');
       events.push(event);
     },
+    async postObservability() {},
   };
 }
 

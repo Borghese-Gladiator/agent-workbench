@@ -7,3 +7,4 @@ export * from './sessions.js';
 export * from './evidence.js';
 export * from './delivery.js';
 export * from './memory.js';
+export * from './observability.js';
