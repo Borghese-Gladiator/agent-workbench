@@ -49,8 +49,8 @@ import {
   reviewerExaminedAllRequiredInputs,
   type ReviewInputs,
 } from '@awb/review';
-import { deliverToGitHub } from '@awb/github';
-import { postQaMediaBriefs } from './qa-media-support.js';
+import { deliverToGitHub, commitQaMediaToBranch } from '@awb/github';
+import { postQaMediaBriefs, qaMediaFileName } from './qa-media-support.js';
 import { FakeGitHubClient, FakeGitPushRunner } from '@awb/github/test-fakes';
 import {
   InMemoryRunStateStore,
@@ -853,6 +853,31 @@ const releaseHandler: PhaseHandler = {
       ).changedPaths;
     }
 
+    // QA media for the PR. The screenshot + video are COMMITTED into the branch (below, before the
+    // push) so the reviewer can open them in a browser tab (raw image renders inline; the video's
+    // blob-view page is GitHub's native in-tab player) — release-asset links can't, GitHub always
+    // serves those as forced downloads. The Playwright trace stays a release asset (no in-browser
+    // viewer). All are linked from one consolidated comment after the PR exists.
+    const allMedia =
+      realDelivery && mediaUploader
+        ? runState.qaEvidence
+            .flatMap((e) => e.artifactIds)
+            .map((id) => runState.artifactStore.get(id))
+            .filter((a): a is { record: import('@awb/domain').ArtifactRecord; path: string } => a !== undefined)
+        : [];
+    const branchMedia = allMedia.filter((a) => a.record.kind === 'qa-video' || a.record.kind === 'screenshot');
+    const traceMedia = allMedia.filter((a) => a.record.kind === 'browser-trace');
+
+    // Commit the screenshot + video into the branch BEFORE the push, so they ship with the PR.
+    let committedMedia: { kind: string; repoPath: string }[] = [];
+    if (realDelivery && branchMedia.length > 0) {
+      const commit = await commitQaMediaToBranch({
+        worktreePath,
+        files: branchMedia.map((m) => ({ srcPath: m.path, name: qaMediaFileName(m.record) })),
+      });
+      committedMedia = branchMedia.map((m, i) => ({ kind: m.record.kind, repoPath: commit.committedPaths[i] as string }));
+    }
+
     const deliverResult = await deliverToGitHub(
       {
         ref,
@@ -869,30 +894,24 @@ const releaseHandler: PhaseHandler = {
       pushRunner,
     );
 
-    // Upload the QA media artifacts (video/trace) to the PR (Fix 7). Real path only: for every
-    // qa-video/browser-trace artifact the exercise phase produced, push it as a GitHub release asset
-    // and post a DESCRIPTIVE brief comment (what was exercised + the result + a link), not a bare
-    // "QA artifact (kind): <url>". An upload that comes back without a real download URL counts as a
-    // FAILED upload — we do NOT post an `undefined` link (that was the observed regression).
-    // requiredVideosUploaded reflects real success; vacuously satisfied when there is no media.
+    // requiredVideosUploaded reflects real success: the branch media committed (when there was any)
+    // AND the trace uploaded to a real URL. Vacuously satisfied when there is no media.
     let requiredVideosUploaded = true;
     if (realDelivery && mediaUploader) {
-      const mediaFiles = runState.qaEvidence
-        .flatMap((e) => e.artifactIds)
-        .map((id) => runState.artifactStore.get(id))
-        .filter((a): a is { record: import('@awb/domain').ArtifactRecord; path: string } => a !== undefined)
-        .filter((a) => a.record.kind === 'qa-video' || a.record.kind === 'browser-trace');
+      if (branchMedia.length > 0 && committedMedia.length === 0) requiredVideosUploaded = false;
       const result = await postQaMediaBriefs({
         owner: ref.owner,
         repo: ref.repo,
         pullRequestNumber: deliverResult.pr.number,
-        mediaFiles,
-        // Summaries from the QA evidence describe what was exercised, for the media brief.
+        branch: branchName,
+        committedMedia,
+        traceFiles: traceMedia,
+        // Summaries from the QA evidence describe what was exercised, for the media section.
         qaSummary: runState.qaEvidence.map((e) => e.summary).find((s) => s && s.length > 0),
         uploader: mediaUploader,
         client,
       });
-      requiredVideosUploaded = result.requiredVideosUploaded;
+      if (!result.requiredVideosUploaded) requiredVideosUploaded = false;
     }
 
     const completionContext: CompletionContext = {

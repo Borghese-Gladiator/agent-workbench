@@ -60,45 +60,73 @@ This is unit-proven in `qa-media-support.test.ts` (undefined-URL → no comment 
 false; real URL → brief; throw → false; no media → vacuously true; mixed →
 posts good one + flags failure). The guard is confirmed on the correct code path.
 
-**Still open (the actual upload):** make `uploadReleaseAsset` succeed —
-- give the asset a real filename with the right extension per kind
-  (`qa-video` → `.webm`, `browser-trace` → `.zip`) instead of the bare hash, and
-  pass the matching `headers['content-type']` (`video/webm`, `application/zip`);
-  the ArtifactStore record carries `mediaType`, so read it from there rather than
-  guessing. Consider copying the blob to a temp file with the right name, or
-  deriving the name from `record.kind`/`record.mediaType`.
-- after fixing, treat a still-undefined `browser_download_url` as an error (the
-  guard already does), and add a real/integration check that an asset actually
-  lands (`assets.length > 0`).
-**Done when:** the PR comment links a `releases/download/...` URL that actually
-downloads the `.webm`, and the release has ≥1 asset.
-_Files: `packages/github/src/release-asset-uploader.ts` (the fix),
-`packages/github/src/release-asset-uploader.test.ts` (coverage),
+**REAL ROOT CAUSE FOUND + FIXED (2026-07-23, live run task cedb9b68 → real Draft
+PR #3):** the filename/content-type part of the earlier fix was necessary but NOT
+sufficient — the upload still failed and release still `blocked` on
+`requiredVideosUploaded=false`. Reproduced directly against the API: the real
+qa-video blob uploaded via `octokit.repos.uploadReleaseAsset({owner,repo,release_id})`
+returns **HTTP 307** (redirect) with `browser_download_url === undefined` and does
+NOT throw; the asset never lands (`assets: 0`). The 307 is the **renamed-repo
+redirect**: the remote is `wip-browser-games` but GitHub has renamed the repo to
+`browser-games__ai`, so `api.github.com/.../wip-browser-games/...` 307-redirects to
+the canonical repo and Octokit follows the redirect **without re-sending the body**.
+The guard (throw-on-undefined-URL) then correctly fires → `postQaMediaBriefs` reports
+failure → release blocks. So the guard works; the upload host was wrong.
+**Fix (DONE):** post the asset to the release's own `upload_url` (already returned by
+`getReleaseByTag`/`createRelease`, on `uploads.github.com` and carrying the canonical
+repo) via `octokit.request({method:'POST', url: uploadUrl, name, headers, data})`
+instead of `repos.uploadReleaseAsset`. Proven end-to-end through the *fixed uploader
+code* against real GitHub: returns 201, asset lands (`state: uploaded`,
+`contentType: video/webm`, `size: 53556`), and the `releases/download/...` URL
+downloads a real playable `.webm`. Unit tests updated to intercept `request()` (5/5
+pass). NOT yet re-run through the live pipeline (worker still on old build; a live
+re-run needs rebuild+fresh task — see P1 note below).
+**Done when:** ~~the PR comment links a `releases/download/...` URL that actually
+downloads the `.webm`, and the release has ≥1 asset.~~ Upload proven to land + download
+via fixed code; remaining = observe it once inside a live release phase (rebuild worker
++ fresh task).
+_Files: `packages/github/src/release-asset-uploader.ts` (307→upload_url fix, DONE),
+`packages/github/src/release-asset-uploader.test.ts` (coverage updated, DONE),
 `qa-media-support.ts`/`.test.ts` (guard, already done).
 
 ## P1 — Validate the real-pipeline code we wrote but have NOT proven live
 
-### [ ] TASK-5: Live-validate real adversarial review input (Fix 4)
-Confirm the challenge phase reviews the real `git diff baseSha..candidateSha`,
-not the placeholder string. **Done when:** the reviewer session's input contains
-the real diff/changed paths for a live task.
-_Not yet reached in a single clean run. TASK-14 is now fixed, so the reviewer's
-prompt DOES contain the real diff/changed-paths/contract/plan (via the
-contextPayload preamble) — TASK-5 is now just waiting on a live run to observe it._
+**Live validation run 2026-07-23 (task cedb9b68, claude runtime + AWB_QA_MODE=browser,
+footer feature on wip-browser-games).** Two false starts first, both instructive:
+(1) restarting the worker mid-task to inject an env var wiped the in-memory contract →
+permanent `blocked` at specify ("no contract was drafted before approval was expected")
+= **live repro of TASK-27**; (2) a default `up` runs the whole pipeline on the **mock**
+runtime (0 tokens, fake "Draft PR #1", ~90s) because `resolveAgentRuntime()` defaults to
+mock unless `AWB_AGENT_RUNTIME=claude` is in the WORKER env — the drive-task skill never
+sets it. Third run (both env vars set before `up`, no restart) reached the release gate
+with real usage (tok 106/12696; plan 242s / implement 87s / challenge 111s).
 
-### [ ] TASK-6: Live-validate real draft PR delivery (Fix 6 / Stage 4a)
-Confirm `runRelease` opens a **real draft PR** on the target repo via Octokit
-(authed by `gh auth token`) + git-CLI push, with the correct owner/repo resolved
-from the remote and the real branch/base. **Done when:** a real draft PR exists
-on the repo with the evidence-matrix comment, and the task reaches
-`release`/`awaiting-human`.
-_Blocked by TASK-1._
+### [x] TASK-5: Live-validate real adversarial review input (Fix 4) — DONE 2026-07-23
+CONFIRMED live: the challenge-phase reviewer session (`challenge-1-adversarial-reviewer.ndjson`)
+operated on the REAL worktree — read the actual changed files (`Portal.jsx`, `portal.css`,
+`main.jsx`), ran `git -C <worktree> diff/status`, ran the targeted + full vitest suite
+("All 251 tests pass, including the new Portal test"), and probed for e2e coverage. It
+received the real changed paths (went straight to the footer files), not the PLACEHOLDER
+diff. `resolveReviewDiff` → `contextPayload.inputs.finalDiff` path (run-phase.ts:705-713)
+works end-to-end.
 
-### [ ] TASK-7: Live-validate QA-media upload to the PR (Fix 7 / Stage 4c)
-Confirm the release-asset uploader hosts the qa-video/trace as a GitHub release
-asset and links it in a PR comment. **Done when:** the PR from TASK-6 has a
-comment linking a real `releases/download/...` URL that actually downloads the
-`.webm`. _Blocked by TASK-6._
+### [x] TASK-6: Live-validate real draft PR delivery (Fix 6 / Stage 4a) — DONE 2026-07-23
+CONFIRMED live: release opened **real Draft PR #3** on `Borghese-Gladiator/wip-browser-games`
+(`isDraft:true`, branch `awb/in-the-browser-games-portal-landing-page-cedb9b68` pushed to
+the real remote, real commit `17d2fe26`, title from objective). PR body carries the evidence
+matrix in a Test plan section (build ✅, unit-test ✅, qa-video ✅ "2/2 assertions passed").
+`deliverToGitHub` → `createRealDelivery` (real Octokit + git push, owner/repo resolved from
+the remote) works. Task reached `release` (though `blocked` not `awaiting-human` — see TASK-7).
+
+### [~] TASK-7: Live-validate QA-media upload to the PR (Fix 7 / Stage 4c) — ROOT CAUSE FOUND + FIXED, live re-run pending
+The live run exposed that the earlier fix was insufficient: release went `blocked`
+(`requiredVideosUploaded=false`), no media comment, release `awb-qa-3` had `assets: 0`.
+Root cause = **307 renamed-repo redirect** on `repos.uploadReleaseAsset` (see the P0 TASK-7
+section above for the full diagnosis + the `upload_url` fix). Browser QA itself fired for
+real: exercise produced a genuine WebM (53 KB) + Playwright trace zip (57 KB) + 1280×720 PNG.
+Fix proven end-to-end through the fixed uploader code (201, asset lands, `.webm` downloads);
+**still to observe once inside a live release phase** (rebuild worker + fresh task, since the
+running worker is on the pre-fix build and can't hot-reload without losing in-mem state).
 
 ---
 

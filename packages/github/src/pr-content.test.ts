@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { derivePrTitle, renderPrBody, renderQaMediaBrief } from './pr-content.js';
+import { derivePrTitle, renderPrBody, renderQaMediaSection } from './pr-content.js';
 import type { Evidence } from '@awb/domain';
 
 function ev(overrides: Partial<Evidence> = {}): Evidence {
@@ -68,23 +68,44 @@ describe('renderPrBody', () => {
   });
 });
 
-describe('renderQaMediaBrief', () => {
-  it('describes what was tested and links the recording when a URL is present', () => {
-    const brief = renderQaMediaBrief({
-      kind: 'qa-video',
+describe('renderQaMediaSection', () => {
+  const ref = { owner: 'o', repo: 'r' };
+
+  it('links each media kind in a form the reviewer can open in a tab where GitHub allows it', () => {
+    const section = renderQaMediaSection({
+      ref,
+      branch: 'awb/feature',
       qaSummary: 'Browser QA: 2 step(s), 2/2 assertions passed',
-      mediaUrl: 'https://example.com/releases/download/x/qa.webm',
+      items: [
+        { kind: 'screenshot', repoPath: '.awb/qa/screenshot.png' },
+        { kind: 'qa-video', repoPath: '.awb/qa/recording.webm' },
+        { kind: 'browser-trace', downloadUrl: 'https://example.com/releases/download/x/trace.zip' },
+      ],
     });
-    expect(brief).toContain('Browser QA recording');
-    expect(brief).toContain('2/2 assertions passed');
-    expect(brief).toContain('](https://example.com/releases/download/x/qa.webm)');
-    expect(brief).not.toContain('undefined');
-    expect(brief).not.toContain('QA artifact');
+    // Screenshot: inline image via the raw URL (renders + opens in tab).
+    expect(section).toContain('![Browser QA screenshot](https://raw.githubusercontent.com/o/r/awb/feature/.awb/qa/screenshot.png)');
+    // Video: GitHub blob-view player (in-tab), NOT a raw/download link.
+    expect(section).toContain('(https://github.com/o/r/blob/awb/feature/.awb/qa/recording.webm)');
+    expect(section).toContain('opens in a tab');
+    // Trace: release-asset download link + how to view it.
+    expect(section).toContain('https://example.com/releases/download/x/trace.zip');
+    expect(section).toContain('show-trace');
+    expect(section).toContain('2/2 assertions passed');
+    expect(section).not.toContain('undefined');
   });
 
-  it('omits the link when no URL is available (never prints undefined)', () => {
-    const brief = renderQaMediaBrief({ kind: 'qa-video', qaSummary: 'exercised the change' });
-    expect(brief).not.toContain('undefined');
-    expect(brief).not.toContain('](');
+  it('returns empty when there is nothing to show', () => {
+    expect(renderQaMediaSection({ ref, branch: 'b', items: [] })).toBe('');
+  });
+
+  it('omits a kind whose link is missing (no broken markdown)', () => {
+    const section = renderQaMediaSection({
+      ref,
+      branch: 'b',
+      items: [{ kind: 'qa-video' }, { kind: 'screenshot', repoPath: '.awb/qa/s.png' }],
+    });
+    expect(section).toContain('.awb/qa/s.png');
+    expect(section).not.toContain('blob/b/undefined');
+    expect(section).not.toContain('Recording');
   });
 });

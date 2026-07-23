@@ -111,18 +111,61 @@ function renderTestPlan(evidence: Evidence[]): string {
 }
 
 /**
- * A descriptive brief for a QA-media artifact posted as a PR comment (replaces the bare
- * "QA artifact (qa-video): <url>"). Describes what was exercised + the result, then links the
- * recording. `mediaUrl` may be undefined when the upload failed — the caller decides whether to
- * post at all; this only formats.
+ * The `raw.githubusercontent.com` URL for a file committed to a branch. Serves an image with its
+ * real content-type and NO attachment disposition, so cmd+click opens it viewable in a tab.
  */
-export function renderQaMediaBrief(input: {
+export function rawContentUrl(owner: string, repo: string, branch: string, repoPath: string): string {
+  return `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${repoPath}`;
+}
+
+/**
+ * The GitHub blob-view URL for a file committed to a branch. For a committed video this page renders
+ * GitHub's native inline <video> player — cmd+click opens it and plays in a tab (no download), which
+ * the raw URL cannot do for video (raw serves video as an attachment).
+ */
+export function blobViewUrl(owner: string, repo: string, branch: string, repoPath: string): string {
+  return `https://github.com/${owner}/${repo}/blob/${branch}/${repoPath}`;
+}
+
+export interface QaMediaItem {
   kind: string;
+  /** Repo-relative path of the media committed to the PR branch (screenshot + video). */
+  repoPath?: string;
+  /** Release-asset download URL (used for the trace zip, which has no in-browser viewer). */
+  downloadUrl?: string;
+}
+
+/**
+ * One consolidated QA-media section for a PR comment. Each artifact links to a form the reviewer can
+ * open WITHOUT a local download where GitHub allows it:
+ *   - screenshot   → inline image via the raw URL (also opens in a tab)
+ *   - qa-video     → GitHub blob-view player via the blob URL ("Watch recording (opens in tab)")
+ *   - browser-trace→ release-asset download link (no in-browser viewer exists; needs
+ *                    `npx playwright show-trace`)
+ * Returns '' when there is nothing to show.
+ */
+export function renderQaMediaSection(input: {
+  ref: { owner: string; repo: string };
+  branch: string;
   qaSummary?: string;
-  mediaUrl?: string;
+  items: QaMediaItem[];
 }): string {
-  const label = input.kind === 'qa-video' ? 'Browser QA recording' : input.kind === 'browser-trace' ? 'Browser QA trace' : input.kind;
+  const { owner, repo } = input.ref;
+  const lines: string[] = [];
+  for (const item of input.items) {
+    if (item.kind === 'screenshot' && item.repoPath) {
+      lines.push(`**Screenshot**`, '', `![Browser QA screenshot](${rawContentUrl(owner, repo, input.branch, item.repoPath)})`);
+    } else if (item.kind === 'qa-video' && item.repoPath) {
+      lines.push(`**Recording** — [▶ Watch recording (opens in a tab)](${blobViewUrl(owner, repo, input.branch, item.repoPath)})`);
+    } else if (item.kind === 'browser-trace' && item.downloadUrl) {
+      lines.push(
+        `**Playwright trace** — [⬇ Download trace](${item.downloadUrl}) · view with \`npx playwright show-trace <file>\``,
+      );
+    }
+    lines.push('');
+  }
+  if (lines.length === 0) return '';
+
   const what = input.qaSummary?.trim() || 'Exercised the changed behavior in a real browser.';
-  const link = input.mediaUrl ? `\n\n[▶ ${label}](${input.mediaUrl})` : '';
-  return `**${label}** — ${what}${link}`;
+  return [`## Browser QA`, '', what, '', ...lines].join('\n').trimEnd();
 }

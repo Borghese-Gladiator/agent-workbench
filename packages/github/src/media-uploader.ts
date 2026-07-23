@@ -4,6 +4,12 @@ export interface UploadToPullRequestInput {
   pullRequestNumber: number;
   filePath: string;
   caption: string;
+  /**
+   * MIME type of the file (e.g. `video/webm`, `application/zip`). The ArtifactStore path is a
+   * content-hash blob with no extension, so GitHub silently rejects the asset unless we give it a
+   * real filename + content-type derived from this.
+   */
+  mediaType?: string;
 }
 
 export interface UploadToPullRequestResult {

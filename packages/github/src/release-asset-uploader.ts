@@ -13,6 +13,26 @@ import type { GitHubMediaUploader, UploadToPullRequestInput, UploadToPullRequest
  * All artifacts for a task share one release, tagged `awb-qa-<pullRequestNumber>`, created lazily on
  * first upload and reused thereafter.
  */
+const EXTENSION_BY_MEDIA_TYPE: Record<string, string> = {
+  'video/webm': '.webm',
+  'application/zip': '.zip',
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'text/plain': '.txt',
+  'application/json': '.json',
+  'application/x-ndjson': '.ndjson',
+};
+
+function assetName(prNumber: number, filePath: string, mediaType?: string): string {
+  const base = basename(filePath);
+  // The ArtifactStore blob path has no extension. GitHub rejects an extensionless asset, so append
+  // the extension implied by the mediaType when the base name doesn't already carry one.
+  const hasExtension = /\.[a-z0-9]+$/i.test(base);
+  const ext = mediaType ? EXTENSION_BY_MEDIA_TYPE[mediaType] : undefined;
+  const name = hasExtension || !ext ? base : `${base}${ext}`;
+  return `${prNumber}-${name}`;
+}
+
 export function createReleaseAssetUploader(octokit: Octokit): GitHubMediaUploader {
   const releaseIdByTag = new Map<string, { releaseId: number; uploadUrl: string }>();
 
@@ -45,22 +65,66 @@ export function createReleaseAssetUploader(octokit: Octokit): GitHubMediaUploade
 
   return {
     async uploadToPullRequest(input: UploadToPullRequestInput): Promise<UploadToPullRequestResult> {
-      const { releaseId } = await ensureRelease(input.owner, input.repository, input.pullRequestNumber);
+      const { releaseId, uploadUrl } = await ensureRelease(input.owner, input.repository, input.pullRequestNumber);
       const data = await readFile(input.filePath);
-      const name = `${input.pullRequestNumber}-${basename(input.filePath)}`;
+      const name = assetName(input.pullRequestNumber, input.filePath, input.mediaType);
 
-      const uploaded = await octokit.repos.uploadReleaseAsset({
-        owner: input.owner,
-        repo: input.repository,
-        release_id: releaseId,
+      // Idempotency: a release can be reused across attempts (the tag is per-PR, not per-attempt),
+      // and this Activity can be re-run by Temporal after a partial success. GitHub rejects a SECOND
+      // upload of an already-present asset name by returning no download URL (no throw) — the exact
+      // "asset was not stored" failure that blocked release on a retry. Delete any prior asset with
+      // this name first so the re-upload lands cleanly.
+      try {
+        const existing = await octokit.repos.listReleaseAssets({
+          owner: input.owner,
+          repo: input.repository,
+          release_id: releaseId,
+          per_page: 100,
+        });
+        for (const asset of existing.data) {
+          if (asset.name === name) {
+            await octokit.repos.deleteReleaseAsset({
+              owner: input.owner,
+              repo: input.repository,
+              asset_id: asset.id,
+            });
+          }
+        }
+      } catch {
+        // A listing/delete failure shouldn't abort the upload; fall through and let the POST decide.
+      }
+
+      // Post to the release's own `upload_url` (on uploads.github.com), not
+      // `repos.uploadReleaseAsset({owner,repo,release_id})`. The convenience method routes through
+      // api.github.com, which 307-redirects when the repo has been renamed on GitHub (observed on
+      // wip-browser-games → browser-games__ai); Octokit follows the redirect but does not re-send the
+      // body, so GitHub accepts nothing and returns an undefined download URL. The release's
+      // upload_url already carries the canonical repo, so it lands directly with a 201.
+      const uploaded = await octokit.request({
+        method: 'POST',
+        url: uploadUrl,
         name,
-        // Octokit accepts a Buffer/string body for binary asset upload.
+        headers: {
+          'content-length': data.length,
+          ...(input.mediaType ? { 'content-type': input.mediaType } : {}),
+        },
+        // Octokit accepts a Buffer body for binary asset upload.
         data: data as unknown as string,
       });
 
+      const attachmentUrl = uploaded.data.browser_download_url as string | undefined;
+      if (!attachmentUrl) {
+        // GitHub can silently accept the call and attach nothing (observed on PR #2: release created,
+        // 0 assets, undefined download URL, no throw). Surface it as an error so callers don't post a
+        // broken `undefined` link.
+        throw new Error(
+          `GitHub accepted the release-asset upload for "${name}" but returned no download URL (asset was not stored).`,
+        );
+      }
+
       return {
         commentId: String(releaseId),
-        attachmentUrl: uploaded.data.browser_download_url,
+        attachmentUrl,
       };
     },
   };
