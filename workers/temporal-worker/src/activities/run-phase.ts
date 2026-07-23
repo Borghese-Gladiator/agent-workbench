@@ -55,7 +55,8 @@ import {
   reviewerExaminedAllRequiredInputs,
   type ReviewInputs,
 } from '@awb/review';
-import { deliverToGitHub, renderQaMediaBrief } from '@awb/github';
+import { deliverToGitHub } from '@awb/github';
+import { postQaMediaBriefs } from './qa-media-support.js';
 import { FakeGitHubClient, FakeGitPushRunner } from '@awb/github/test-fakes';
 
 /**
@@ -1014,38 +1015,22 @@ async function runRelease(state: TaskWorkflowState): Promise<PhaseAttemptResult>
   // requiredVideosUploaded reflects real success; vacuously satisfied when there is no media.
   let requiredVideosUploaded = true;
   if (realDelivery && mediaUploader) {
-    // Summaries from the QA evidence describe what was exercised, for the media brief.
-    const qaSummary = runState.qaEvidence.map((e) => e.summary).find((s) => s && s.length > 0);
-    const mediaArtifactIds = runState.qaEvidence.flatMap((e) => e.artifactIds);
-    const mediaFiles = mediaArtifactIds
+    const mediaFiles = runState.qaEvidence
+      .flatMap((e) => e.artifactIds)
       .map((id) => runState.artifactStore.get(id))
       .filter((a): a is { record: import('@awb/domain').ArtifactRecord; path: string } => a !== undefined)
       .filter((a) => a.record.kind === 'qa-video' || a.record.kind === 'browser-trace');
-
-    for (const media of mediaFiles) {
-      try {
-        const uploaded = await mediaUploader.uploadToPullRequest({
-          owner: ref.owner,
-          repository: ref.repo,
-          pullRequestNumber: deliverResult.pr.number,
-          filePath: media.path,
-          caption: media.record.kind,
-        });
-        if (!uploaded.attachmentUrl) {
-          // Upload returned no usable download URL — treat as a failed upload; don't post a broken link.
-          requiredVideosUploaded = false;
-          continue;
-        }
-        await client.postComment({
-          owner: ref.owner,
-          repo: ref.repo,
-          pullNumber: deliverResult.pr.number,
-          body: renderQaMediaBrief({ kind: media.record.kind, qaSummary, mediaUrl: uploaded.attachmentUrl }),
-        });
-      } catch {
-        requiredVideosUploaded = false;
-      }
-    }
+    const result = await postQaMediaBriefs({
+      owner: ref.owner,
+      repo: ref.repo,
+      pullRequestNumber: deliverResult.pr.number,
+      mediaFiles,
+      // Summaries from the QA evidence describe what was exercised, for the media brief.
+      qaSummary: runState.qaEvidence.map((e) => e.summary).find((s) => s && s.length > 0),
+      uploader: mediaUploader,
+      client,
+    });
+    requiredVideosUploaded = result.requiredVideosUploaded;
   }
 
   const completionContext: CompletionContext = {
