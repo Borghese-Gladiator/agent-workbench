@@ -135,7 +135,7 @@ CONFIRMED live after the fix (task 48cb12c4, PR #4): release reached `awaiting-h
 
 ---
 
-## P1 — Durability & observability (spec-deviation gaps)
+## P1 — Durability & observability (spec-deviation gaps) — DONE (2026-07-23)
 
 These are architectural deviations from the original spec (§3 durable
 orchestration, §8 SQLite schema, §18 capability enforcement, §27 observability,
