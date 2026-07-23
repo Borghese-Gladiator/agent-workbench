@@ -47,7 +47,7 @@ describe('createWorktree / removeWorktree', () => {
     });
 
     expect(lease.state).toBe('ready');
-    expect(lease.branchName).toBe('awb/task-1-add-login-flow');
+    expect(lease.branchName).toBe('awb/add-login-flow-task1');
     expect(lease.worktreePath).toBe(join(layout.worktreesDir, 'repo-1', 'task-1'));
     expect(lease.allocatedPorts.dev).toBeGreaterThan(0);
     expect(lease.baseSha).toMatch(/^[0-9a-f]{40}$/);

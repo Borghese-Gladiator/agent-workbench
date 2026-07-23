@@ -490,7 +490,12 @@ async function runPrepare(state: TaskWorkflowState): Promise<PhaseAttemptResult>
   const realPrepare = resolveAgentRuntime() === 'claude';
   if (realPrepare && !runState.lease) {
     // Real path: materialize an actual git worktree + branch off the repo's default branch.
-    const lease = await materializeWorktree({ repositoryId: state.repositoryId, taskId: state.taskId });
+    const lease = await materializeWorktree({
+      repositoryId: state.repositoryId,
+      taskId: state.taskId,
+      // Slug the branch from the human request (contract objective / prompt), not the taskId.
+      slugSource: runState.contract?.objective ?? state.prompt ?? state.taskId,
+    });
     runState.lease = lease;
     runState.baseSha = lease.baseSha;
     runState.worktreePath = lease.worktreePath;

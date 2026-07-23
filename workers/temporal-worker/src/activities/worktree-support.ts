@@ -13,6 +13,9 @@ import type { WorkspaceLease } from '@awb/domain';
 export async function materializeWorktree(input: {
   repositoryId: string;
   taskId: string;
+  /** Human-readable source (the task prompt/objective) for the branch slug — NOT the taskId, which
+   *  would make the branch `awb/<uuid>-<uuid>`. Falls back to the taskId when absent. */
+  slugSource?: string;
 }): Promise<WorkspaceLease> {
   const { layout } = initDataDir();
   const database = createDatabase(layout.workbenchSqlite);
@@ -27,7 +30,7 @@ export async function materializeWorktree(input: {
       repositoryPath: repository.canonicalPath,
       taskId: input.taskId,
       baseRef: repository.defaultBranch,
-      slugSource: input.taskId,
+      slugSource: input.slugSource ?? input.taskId,
       executionProfile: 'native-trusted',
     });
     return lease;

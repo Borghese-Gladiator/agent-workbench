@@ -21,21 +21,29 @@ const TITLE_MAX = 72;
 
 /**
  * Derives a SHORT, brief PR title from the objective — NOT the whole request sentence, and with no
- * `[AWB]` prefix. Takes the first clause (before the first sentence break / em-dash / "e.g."),
- * strips a leading imperative-y preamble, and caps the length. Falls back to a change-area phrase
- * built from the changed paths when the objective yields nothing usable.
+ * `[AWB]` prefix. Keeps the SCOPE and the ACTION: when the objective opens with an "In <scope>,
+ * <action>" preamble (common), it becomes "<Scope>: <action>" (e.g. "Portal header subtitle: show
+ * the number of available games") rather than dropping the scope. Otherwise takes the first clause.
+ * Falls back to a change-area phrase from the changed paths when the objective yields nothing.
  */
 export function derivePrTitle(objective: string, changedPaths: string[] = []): string {
-  const firstClause = objective
-    .split(/(?:\.\s|—|-\s|,\s*e\.g\.|:\s|\se\.g\.)/i)[0]
+  const firstSentence = objective
+    .split(/(?:\.\s|—|-\s|,\s*e\.g\.|\se\.g\.)/i)[0]
     ?.trim()
     .replace(/\s+/g, ' ');
 
-  let title = firstClause ?? '';
-  // Drop a leading "In <file/area>, " scoping preamble the planner/objective often carries.
-  title = title.replace(/^in\s+[^,]+,\s*/i, '');
-  // Sentence-case the first letter without lowercasing acronyms.
-  if (title.length > 0) title = title[0]!.toUpperCase() + title.slice(1);
+  let title = firstSentence ?? '';
+
+  // Preserve an "In <scope>, <action>" preamble as a "Scope: action" title, rather than deleting
+  // the scope (which loses the crucial "where" context).
+  const scoped = /^in\s+(?:the\s+)?([^,]+?),\s*(.+)$/i.exec(title);
+  if (scoped) {
+    const scope = titleCase(scoped[1]!.trim());
+    const action = scoped[2]!.trim();
+    title = `${scope}: ${action}`;
+  } else if (title.length > 0) {
+    title = title[0]!.toUpperCase() + title.slice(1);
+  }
 
   if (title.length === 0) {
     const area = changeAreaLabel(changedPaths);
@@ -46,6 +54,11 @@ export function derivePrTitle(objective: string, changedPaths: string[] = []): s
     title = `${title.slice(0, TITLE_MAX - 1).trimEnd()}…`;
   }
   return title;
+}
+
+/** Capitalizes the first letter of each word (for the scope segment of a title). */
+function titleCase(text: string): string {
+  return text.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /** A short human label for the area the diff touched (e.g. "portal", "packages/engines/president"). */

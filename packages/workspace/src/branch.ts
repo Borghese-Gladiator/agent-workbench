@@ -11,11 +11,12 @@ function slugify(source: string): string {
 }
 
 /**
- * Derives the branch name for a task's workspace: `awb/<taskId>-<slug>`. The taskId already
- * guarantees uniqueness across tasks; the slug is a short human-readable hint derived from the
- * task's prompt/objective (kebab-case, alphanumeric-only, truncated) and is not itself relied on
- * for uniqueness.
+ * Derives the branch name for a task's workspace: `awb/<slug>-<shortId>`. The slug is a
+ * human-readable hint from the task's prompt/objective (kebab-case, truncated) and comes FIRST so
+ * the branch reads sanely (e.g. `awb/portal-header-subtitle-game-count-ecabb015`); a short
+ * taskId suffix preserves uniqueness without dumping the full UUID (twice) into the name.
  */
 export function resolveTaskBranchName(taskId: string, slugSource: string): string {
-  return `awb/${taskId}-${slugify(slugSource)}`;
+  const shortId = taskId.replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'task';
+  return `awb/${slugify(slugSource)}-${shortId}`;
 }

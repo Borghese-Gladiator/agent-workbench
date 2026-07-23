@@ -13,15 +13,19 @@ function ev(overrides: Partial<Evidence> = {}): Evidence {
 }
 
 describe('derivePrTitle', () => {
-  it('shortens the long objective and drops the "In <file>," preamble', () => {
+  it('keeps the scope AND action from an "In <scope>, <action>" objective', () => {
     const objective =
       "In the portal header, show the number of available games in the subtitle — e.g. 'Pick a game to play. · 5 games available' — derived from the enabled games in the registry.";
     const title = derivePrTitle(objective, ['portal/src/Portal.jsx']);
     expect(title).not.toContain('[AWB]');
     expect(title).not.toContain('e.g.');
-    expect(title).not.toMatch(/^In /);
+    // Scope preserved as a "Scope: action" prefix, not deleted.
+    expect(title).toBe('Portal Header: show the number of available games in the subtitle');
     expect(title.length).toBeLessThanOrEqual(72);
-    expect(title.toLowerCase()).toContain('number of available games');
+  });
+
+  it('sentence-cases a non-scoped objective', () => {
+    expect(derivePrTitle('add a dark-mode toggle to settings')).toBe('Add a dark-mode toggle to settings');
   });
 
   it('caps very long single-clause objectives with an ellipsis', () => {
