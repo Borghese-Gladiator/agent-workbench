@@ -15,6 +15,9 @@ function collectingClient(events: SemanticEvent[], opts: { throwOnPost?: boolean
       events.push(event);
     },
     async postObservability() {},
+    async refreshRepository() {
+      return { snapshotId: 'snap-test' };
+    },
   };
 }
 

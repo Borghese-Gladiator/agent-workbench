@@ -40,7 +40,7 @@ import {
   type SliceAssignment,
 } from '@awb/planning';
 import { runVerificationMatrix, allRequiredCommandsPass, type VerificationRunContext } from '@awb/verification';
-import { runCliQa, runBrowserQa, type QaEvidenceContext } from '@awb/qa';
+import { runCliQa, runBrowserQa, runHttpApiQa, runLibraryQa, type QaEvidenceContext } from '@awb/qa';
 import {
   runAdversarialReview,
   reviewerSessionDiffersFromBuilder,
@@ -709,12 +709,20 @@ const exerciseHandler: PhaseHandler = {
     // start command, start it and run runBrowserQa (real chromium → real .webm video + .zip trace)
     // against it. Otherwise fall back to the CLI QA executor. `ranBrowserQa` tracks which path ran so
     // `browserScenariosHaveTraces` reflects a real trace artifact rather than a hardcoded true.
-    let qaResult: Awaited<ReturnType<typeof runCliQa>> | Awaited<ReturnType<typeof runBrowserQa>>;
+    // QA executor selection by repo surface (TASK-25). AWB_QA_MODE picks the executor: `browser`
+    // (real dev-server + chromium), `http-api` (scripted real HTTP against a running API), `library`
+    // (a real consumer script exercising the built library), or the default CLI executor. The
+    // http-api/library modes were fully-implemented but had no runtime caller before this.
+    type QaResult =
+      | Awaited<ReturnType<typeof runCliQa>>
+      | Awaited<ReturnType<typeof runBrowserQa>>
+      | Awaited<ReturnType<typeof runHttpApiQa>>
+      | Awaited<ReturnType<typeof runLibraryQa>>;
+    let qaResult: QaResult;
     let ranBrowserQa = false;
+    const qaMode = ctx.strategy === 'claude' ? process.env.AWB_QA_MODE : undefined;
     const startCommand =
-      ctx.strategy === 'claude' && process.env.AWB_QA_MODE === 'browser'
-        ? await resolveStartCommand(state.repositoryId)
-        : undefined;
+      qaMode === 'browser' ? await resolveStartCommand(state.repositoryId) : undefined;
 
     if (startCommand && runState.worktreePath) {
       ranBrowserQa = true;
@@ -730,6 +738,29 @@ const exerciseHandler: PhaseHandler = {
           context,
           artifactStore: runState.artifactStore,
         }),
+      );
+    } else if (qaMode === 'http-api') {
+      const baseUrl = process.env.AWB_QA_BASE_URL ?? 'http://localhost:3000';
+      qaResult = await ctx.observability.time('qaExecutionMs', () =>
+        runHttpApiQa(
+          {
+            baseUrl,
+            requests: [{ method: 'GET', path: '/', expectations: [{ kind: 'status', equals: 200 }] }],
+          },
+          context,
+          runState.artifactStore,
+        ),
+      );
+    } else if (qaMode === 'library') {
+      qaResult = await ctx.observability.time('qaExecutionMs', () =>
+        runLibraryQa(
+          {
+            consumerScriptSource:
+              process.env.AWB_QA_LIBRARY_SCRIPT ?? 'console.log("ASSERT:library-importable=true");',
+          },
+          context,
+          runState.artifactStore,
+        ),
       );
     } else {
       qaResult = await ctx.observability.time('qaExecutionMs', () =>

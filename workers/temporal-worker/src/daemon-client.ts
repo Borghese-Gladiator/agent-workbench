@@ -11,7 +11,7 @@ export function daemonBaseUrl(): string {
   return process.env.AWB_DAEMON_URL ?? 'http://127.0.0.1:4417';
 }
 
-async function postOrPut(method: 'POST' | 'PUT', path: string, body: unknown): Promise<void> {
+async function requestJson<T = unknown>(method: 'POST' | 'PUT', path: string, body: unknown): Promise<T> {
   const url = `${daemonBaseUrl()}${path}`;
   let response: Response;
   try {
@@ -27,6 +27,11 @@ async function postOrPut(method: 'POST' | 'PUT', path: string, body: unknown): P
     const text = await response.text().catch(() => '');
     throw new Error(`daemon ${method} ${path} returned ${response.status}: ${text}`);
   }
+  return (await response.json().catch(() => ({}))) as T;
+}
+
+async function postOrPut(method: 'POST' | 'PUT', path: string, body: unknown): Promise<void> {
+  await requestJson(method, path, body);
 }
 
 export interface DaemonClient {
@@ -41,6 +46,8 @@ export interface DaemonClient {
   saveRunState(snapshot: RunStateSnapshot): Promise<void>;
   postEvent(event: SemanticEvent): Promise<void>;
   postObservability(payload: PhaseObservability): Promise<void>;
+  /** Trigger repository discovery through the daemon (single writer) and return the snapshot id. */
+  refreshRepository(repositoryId: string): Promise<{ snapshotId: string }>;
 }
 
 export function createDaemonClient(): DaemonClient {
@@ -57,6 +64,16 @@ export function createDaemonClient(): DaemonClient {
     },
     async postObservability(payload) {
       await postOrPut('POST', `/internal/observability`, payload);
+    },
+    async refreshRepository(repositoryId) {
+      // The INTERNAL discover route runs the real snapshot write; the public /refresh route starts
+      // the discovery workflow (whose activity calls this), so calling it here would recurse.
+      const snapshot = await requestJson<{ snapshotId: string }>(
+        'POST',
+        `/internal/repositories/${encodeURIComponent(repositoryId)}/discover`,
+        {},
+      );
+      return { snapshotId: snapshot.snapshotId };
     },
   };
 }

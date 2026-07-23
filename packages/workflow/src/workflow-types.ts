@@ -27,6 +27,12 @@ export interface TaskWorkflowInput {
   taskId: string;
   repositoryId: string;
   prompt?: string;
+  /**
+   * Present only on a continue-as-new re-seed (spec §34): the full coordination state carried over
+   * from the previous run so the new execution resumes exactly where the old one left off, with a
+   * fresh (empty) event history. Absent on the initial start.
+   */
+  resumeState?: TaskWorkflowState;
 }
 
 /** The activity signature the Workflow calls once per phase attempt. Implemented for real in workers/temporal-worker. */

@@ -12,6 +12,7 @@ import {
   getCurrentStateQuery,
 } from './task-workflow.js';
 import { createScriptedActivities } from './test-activities.js';
+import type { TaskWorkflowInput } from './workflow-types.js';
 
 let testEnv: TestWorkflowEnvironment;
 
@@ -79,6 +80,7 @@ function replan(target: 'plan' | 'specify'): PhaseAttemptResult {
 async function runWithActivities(
   script: Partial<Record<TaskPhase, PhaseAttemptResult[]>>,
   driveWorkflow: (handle: import('@temporalio/client').WorkflowHandle) => Promise<void>,
+  args: TaskWorkflowInput = { taskId: 'task-1', repositoryId: 'repo-1' },
 ) {
   // Each test gets its own task queue — Temporal's native runtime refuses two concurrent Worker
   // registrations on the same (namespace, task queue), and this suite creates workers per-test.
@@ -98,7 +100,7 @@ async function runWithActivities(
     handle = await testEnv.client.workflow.start(TaskWorkflow, {
       taskQueue,
       workflowId: `test-${Date.now()}-${Math.random()}`,
-      args: [{ taskId: 'task-1', repositoryId: 'repo-1' }],
+      args: [args],
     });
     // The worker only polls for the duration of this callback — await the workflow's own
     // completion here (racing with driveWorkflow, which issues signals/updates while it runs),
@@ -122,6 +124,35 @@ describe('TaskWorkflow', () => {
     );
     expect(result.phase).toBe('assimilate');
     expect(result.condition).toBe('completed');
+  }, 30_000);
+
+  it('resumes from a continue-as-new resumeState instead of starting fresh (TASK-26)', async () => {
+    // Seed a state already at `release`. If resumeState is honored, only release+assimilate run;
+    // specify/plan/etc. are never scripted, so a fresh-start workflow would stall on the missing
+    // specify script. Reaching assimilate/completed proves the re-seed path.
+    const resumeState = {
+      taskId: 'task-1',
+      repositoryId: 'repo-1',
+      prompt: 'resumed',
+      phase: 'release' as const,
+      condition: 'running' as const,
+      deliveryState: 'not-started' as const,
+      attemptNumber: 0,
+      latestCandidateEvidenceIds: [],
+      openFindingIds: [],
+      tokenUsageTotal: { inputTokens: 42, outputTokens: 7 },
+      runtimeMsByPhase: { plan: 1234 },
+    };
+    const { result } = await runWithActivities(
+      { release: [candidate('release')] },
+      async () => {},
+      { taskId: 'task-1', repositoryId: 'repo-1', prompt: 'resumed', resumeState },
+    );
+    expect(result.phase).toBe('assimilate');
+    expect(result.condition).toBe('completed');
+    // Accumulated usage carried over from the prior run is preserved across the re-seed.
+    expect(result.tokenUsageTotal.inputTokens).toBe(42);
+    expect(result.runtimeMsByPhase.plan).toBe(1234);
   }, 30_000);
 
   it('aggregates token usage across phases and runtime per phase (TASK-11)', async () => {

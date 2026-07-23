@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { classifyFeedback, feedbackRequiresHumanGate, canAutoLoop, type FeedbackRoutingSignal } from './feedback-classification.js';
+import {
+  classifyFeedback,
+  feedbackRequiresHumanGate,
+  canAutoLoop,
+  routeFeedback,
+  type FeedbackRoutingSignal,
+} from './feedback-classification.js';
 
 const noSignals: FeedbackRoutingSignal = {
   expandsScope: false,
@@ -100,5 +106,32 @@ describe('canAutoLoop', () => {
 
   it('does not auto-loop a plan defect', () => {
     expect(canAutoLoop('plan-defect', noSignals)).toBe(false);
+  });
+});
+
+describe('routeFeedback (§29 ingest decision)', () => {
+  it('auto-loops a clear implementation defect', () => {
+    expect(routeFeedback('This is broken — the button crashes on click.')).toEqual({
+      category: 'implementation-defect',
+      action: 'auto-loop',
+    });
+  });
+
+  it('gates a question', () => {
+    expect(routeFeedback('Why did you choose this approach?')).toEqual({
+      category: 'question',
+      action: 'human-gate',
+    });
+  });
+
+  it('gates an implementation defect when an escalating routing signal is supplied', () => {
+    expect(routeFeedback('This fails on empty input.', { ...noSignals, expandsScope: true })).toEqual({
+      category: 'implementation-defect',
+      action: 'human-gate',
+    });
+  });
+
+  it('gates an out-of-scope comment', () => {
+    expect(routeFeedback('This is out of scope for this PR.').action).toBe('human-gate');
   });
 });

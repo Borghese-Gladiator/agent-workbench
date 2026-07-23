@@ -80,6 +80,28 @@ describe('task PR-lifecycle signal routes', () => {
     expect(recorded[0]).toMatchObject({ signal: 'pullRequestFeedbackReceived', args: [{ feedbackId: 'fb-9' }] });
   });
 
+  it('POST /pr-feedback-ingest auto-loops a clear defect (classifies + signals)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/tasks/repo-1/task-1/pr-feedback-ingest`,
+      payload: { feedbackId: 'fb-1', body: 'This is broken — it crashes on empty input.' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ category: 'implementation-defect', action: 'auto-loop' });
+    expect(recorded[0]).toMatchObject({ signal: 'pullRequestFeedbackReceived', args: [{ feedbackId: 'fb-1' }] });
+  });
+
+  it('POST /pr-feedback-ingest gates a question (classifies, no signal)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/tasks/repo-1/task-1/pr-feedback-ingest`,
+      payload: { feedbackId: 'fb-2', body: 'Why did you use a map here?' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ category: 'question', action: 'human-gate' });
+    expect(recorded).toHaveLength(0); // gated — no auto-loop signal fired
+  });
+
   it('returns 404 when the target workflow signal fails', async () => {
     setTemporalClientForTesting(makeStubClient(recorded, { failWith: new Error('workflow not found') }));
     const res = await app.inject({

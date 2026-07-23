@@ -4,10 +4,12 @@ import {
   approveRepository,
   getRepository,
   listRepositories,
-  refreshRepositorySnapshot,
   getLatestSnapshot,
 } from '@awb/repository';
 import type { WorkbenchDatabase } from '@awb/database';
+import { RepositoryDiscoveryWorkflow, discoveryWorkflowIdFor } from '@awb/workflow';
+import { getTemporalClient } from '../temporal-client.js';
+import { TASK_QUEUE } from '../temporal-worker-constants.js';
 
 export function registerRepositoryRoutes(app: FastifyInstance, database: WorkbenchDatabase): void {
   app.post<{ Body: { canonicalPath: string; name?: string } }>('/api/repositories', async (request, reply) => {
@@ -44,8 +46,15 @@ export function registerRepositoryRoutes(app: FastifyInstance, database: Workben
       reply.code(404);
       return { error: `No repository with id ${request.params.id}` };
     }
-    const snapshot = await refreshRepositorySnapshot(database.db, repository);
-    return snapshot;
+    // Discovery is a first-class Temporal workflow (spec §9/§15, TASK-26). Run it to completion and
+    // return its result; the actual snapshot write happens in the workflow's activity, daemon-side.
+    const client = await getTemporalClient();
+    const handle = await client.workflow.start(RepositoryDiscoveryWorkflow, {
+      taskQueue: TASK_QUEUE,
+      workflowId: discoveryWorkflowIdFor(request.params.id),
+      args: [{ repositoryId: request.params.id }],
+    });
+    return handle.result();
   });
 
   app.post<{ Params: { id: string } }>('/api/repositories/:id/approve', async (request, reply) => {

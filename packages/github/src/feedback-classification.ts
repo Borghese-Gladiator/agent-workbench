@@ -89,3 +89,36 @@ export function canAutoLoop(category: FeedbackCategory, signal: FeedbackRoutingS
   if (feedbackRequiresHumanGate(signal)) return false;
   return category === 'implementation-defect';
 }
+
+/** No routing-signal escalations — the default when the caller has no extra signal to add. */
+export const NO_ROUTING_SIGNAL: FeedbackRoutingSignal = {
+  expandsScope: false,
+  conflictsWithContract: false,
+  requiresArchitecturalDecision: false,
+  addsDependency: false,
+  changesAcceptanceCriteria: false,
+  isAmbiguous: false,
+  conflictsWithOtherFeedback: false,
+};
+
+export type FeedbackRouteAction = 'auto-loop' | 'human-gate';
+
+export interface FeedbackRouteDecision {
+  category: FeedbackCategory;
+  action: FeedbackRouteAction;
+}
+
+/**
+ * The single §29 routing decision for one piece of PR feedback: classify it, then decide whether it
+ * can be auto-looped (drive a repair without a human) or must open a human gate. This is the pure
+ * core the daemon's feedback ingest calls per comment — `implementation-defect` with no escalating
+ * signal auto-loops; everything else (questions, plan/contract/scope concerns, ambiguity, or any
+ * routing-signal flag) gates. `signal` defaults to no escalations when the ingest has nothing to add.
+ */
+export function routeFeedback(
+  body: string,
+  signal: FeedbackRoutingSignal = NO_ROUTING_SIGNAL,
+): FeedbackRouteDecision {
+  const category = classifyFeedback(body);
+  return { category, action: canAutoLoop(category, signal) ? 'auto-loop' : 'human-gate' };
+}

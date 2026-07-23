@@ -15,6 +15,7 @@
     "@awb/database": "workspace:*",
     "@awb/domain": "workspace:*",
     "@awb/evidence": "workspace:*",
+    "@awb/github": "workspace:*",
     "@awb/repository": "workspace:*",
     "@awb/workflow": "workspace:*",
     "@temporalio/client": "^1.11.7",

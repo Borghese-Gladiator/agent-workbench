@@ -16,6 +16,7 @@ import {
 } from '@awb/workflow';
 import type { WorkbenchDatabase } from '@awb/database';
 import { upsertTask, listTasks, getTokenBreakdown, getRuntimeAttribution } from '@awb/database';
+import { routeFeedback, NO_ROUTING_SIGNAL, type FeedbackRoutingSignal } from '@awb/github';
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
 import { TASK_QUEUE } from '../temporal-worker-constants.js';
 
@@ -199,4 +200,32 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
       }
     },
   );
+
+  // §29 PR-feedback ingest (TASK-25): classify one comment and route it — auto-loop clear
+  // implementation defects (signal the workflow to re-enter the review loop) or return a
+  // human-gate decision for anything ambiguous/scope/plan/contract-related. This is the runtime
+  // caller for classifyFeedback/canAutoLoop/routeFeedback (previously unwired). A background
+  // poller (getPrStatus + comment fetch) can drive this per new comment; the manual endpoint is
+  // also the ingest point when feedback is pushed in.
+  app.post<{
+    Params: { repositoryId: string; taskId: string };
+    Body: { feedbackId: string; body: string; signal?: Partial<FeedbackRoutingSignal> };
+  }>('/api/tasks/:repositoryId/:taskId/pr-feedback-ingest', async (request, reply) => {
+    const decision = routeFeedback(request.body.body, {
+      ...NO_ROUTING_SIGNAL,
+      ...(request.body.signal ?? {}),
+    });
+    if (decision.action === 'auto-loop') {
+      const client = await getTemporalClient();
+      const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
+      try {
+        await handle.signal(pullRequestFeedbackReceivedSignal, { feedbackId: request.body.feedbackId });
+      } catch (err) {
+        reply.code(404);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+    // human-gate: the caller (UI/poller) surfaces a gate for a human to resolve; no auto signal.
+    return { category: decision.category, action: decision.action };
+  });
 }

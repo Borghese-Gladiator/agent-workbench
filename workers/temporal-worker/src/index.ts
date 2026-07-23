@@ -16,7 +16,7 @@ export async function startWorker(): Promise<Worker> {
     // spurious ENOENT even though the file itself is written correctly. This exact absolute path
     // (repo-root-relative, matching pnpm's monorepo layout) is the same one already proven to
     // work in workers/temporal-worker's own Temporal integration test.
-    workflowsPath: join(__dirname, '..', '..', '..', 'packages', 'workflow', 'dist', 'task-workflow.js'),
+    workflowsPath: join(__dirname, '..', '..', '..', 'packages', 'workflow', 'dist', 'workflows.js'),
     activities,
   });
   await worker.run();

@@ -42,6 +42,9 @@ function fakeDaemonClient(database: WorkbenchDatabase): DaemonClient {
     async postObservability() {
       /* not exercised here */
     },
+    async refreshRepository() {
+      return { snapshotId: 'snap-test' };
+    },
   };
 }
 

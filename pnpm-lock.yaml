@@ -75,6 +75,9 @@ importers:
       '@awb/evidence':
         specifier: workspace:*
         version: link:../../packages/evidence
+      '@awb/github':
+        specifier: workspace:*
+        version: link:../../packages/github
       '@awb/repository':
         specifier: workspace:*
         version: link:../../packages/repository

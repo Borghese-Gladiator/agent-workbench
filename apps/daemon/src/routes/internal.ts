@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WorkbenchDatabase } from '@awb/database';
 import { upsertTask, persistRunStateSnapshot, insertSemanticEvent, persistPhaseObservability } from '@awb/database';
 import { RunStateSnapshotSchema, SemanticEventSchema, PhaseObservabilitySchema } from '@awb/domain';
+import { getRepository, refreshRepositorySnapshot } from '@awb/repository';
 import type { SemanticEventBus } from '../event-bus.js';
 
 /**
@@ -55,6 +56,24 @@ export function registerInternalRoutes(
       });
       persistRunStateSnapshot(database.db, parsed.data);
       return { ok: true };
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // The real discovery write (spec §9/§15, TASK-26), invoked by the RepositoryDiscoveryWorkflow's
+  // discoverRepository activity. The write stays daemon-side (single writer); the public
+  // /api/repositories/:id/refresh route starts the workflow rather than writing inline.
+  app.post<{ Params: { id: string } }>('/internal/repositories/:id/discover', async (request, reply) => {
+    const repository = await getRepository(database.db, request.params.id);
+    if (!repository) {
+      reply.code(404);
+      return { error: `No repository with id ${request.params.id}` };
+    }
+    try {
+      const snapshot = await refreshRepositorySnapshot(database.db, repository);
+      return { snapshotId: snapshot.id };
     } catch (err) {
       reply.code(500);
       return { error: err instanceof Error ? err.message : String(err) };

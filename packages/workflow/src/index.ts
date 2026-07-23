@@ -6,3 +6,4 @@ export * from './invalidation.js';
 export * from './phase-order.js';
 export * from './workflow-types.js';
 export * from './task-workflow.js';
+export * from './discovery-workflow.js';

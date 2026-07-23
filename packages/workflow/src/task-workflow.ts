@@ -6,6 +6,8 @@ import {
   defineUpdate,
   defineQuery,
   ApplicationFailure,
+  continueAsNew,
+  workflowInfo,
 } from '@temporalio/workflow';
 import type { TaskPhase, HumanGateReason, PhaseAttemptResult } from '@awb/domain';
 import { TASK_PHASE_ORDER } from './phase-order.js';
@@ -65,7 +67,17 @@ export const getPendingHumanGateQuery = defineQuery<TaskWorkflowState['pendingHu
 
 const NO_PROGRESS_THRESHOLD = 3;
 
+/**
+ * History-length threshold for continue-as-new (spec §34). A long task — especially one that loops
+ * many times through repair/replan, or waits a long time on PR feedback — grows Temporal workflow
+ * history unbounded. Past this many events we continue-as-new: re-seed a fresh execution from the
+ * current coordination state so history resets while the task proceeds seamlessly.
+ */
+const CONTINUE_AS_NEW_HISTORY_THRESHOLD = 10_000;
+
 function initialState(input: TaskWorkflowInput): TaskWorkflowState {
+  // A continue-as-new re-seed carries the full prior state; the initial start builds a fresh one.
+  if (input.resumeState) return input.resumeState;
   return {
     taskId: input.taskId,
     repositoryId: input.repositoryId,
@@ -169,6 +181,22 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
     if (state.condition === 'awaiting-human' || state.condition === 'blocked') {
       await condition(() => state.condition === 'running' || cancelled);
       if (cancelled) break;
+    }
+
+    // Continue-as-new before history grows unbounded (spec §34). Do this at the top of the loop —
+    // never mid-phase — and only while running with no pending gate, so the re-seeded execution
+    // starts from a clean, resumable coordination state. `state` carries everything the next run needs.
+    if (
+      state.condition === 'running' &&
+      !state.pendingHumanGate &&
+      workflowInfo().historyLength >= CONTINUE_AS_NEW_HISTORY_THRESHOLD
+    ) {
+      await continueAsNew<typeof TaskWorkflow>({
+        taskId: state.taskId,
+        repositoryId: state.repositoryId,
+        prompt: state.prompt,
+        resumeState: state,
+      });
     }
 
     state = { ...state, attemptNumber: state.attemptNumber + 1 };
