@@ -96,7 +96,18 @@ export interface ClaudeSdkQueryHandle extends AsyncGenerator<ClaudeSdkMessage, v
 
 export interface ClaudeSdkQueryOptions {
   cwd?: string;
-  tools?: string[];
+  /**
+   * Tools to auto-approve without a permission prompt (the SDK's `allowedTools`). This does NOT
+   * restrict the session to only these — the SDK treats `allowedTools` as an auto-approve list, not
+   * an allowlist. Restriction is done via `disallowedTools`.
+   */
+  allowedTools?: string[];
+  /**
+   * Tools to DENY (the SDK's `disallowedTools`). A bare tool name removes the tool from the session
+   * entirely, in every permission mode INCLUDING `bypassPermissions` — this is what actually enforces
+   * a read-only role's capability scope (TASK-24, §18/§33).
+   */
+  disallowedTools?: string[];
   maxTurns?: number;
   resume?: string;
   abortController?: AbortController;
@@ -123,6 +134,8 @@ const realQuery: ClaudeQueryFn = (params) => query(params) as unknown as ClaudeS
 interface ClaudeSessionState {
   cwd: string;
   allowedTools: string[];
+  /** Tools denied for this session; enforced via the SDK's `disallowedTools` (TASK-24). */
+  disallowedTools: string[];
   /** The caller's context payload (contract/plan/diff/evidence), serialized into the first prompt. */
   contextPayload: unknown;
   resumeSessionId?: string;
@@ -207,6 +220,7 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
     this.state.set(session.id, {
       cwd: input.cwd,
       allowedTools: input.allowedTools,
+      disallowedTools: input.disallowedTools ?? [],
       contextPayload: input.contextPayload,
     });
     return session;
@@ -242,7 +256,11 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
       prompt,
       options: {
         cwd: state.cwd,
-        tools: state.allowedTools,
+        // allowedTools auto-approves the granted tools (no prompt in the headless worker);
+        // disallowedTools hard-removes everything else, enforced even under bypassPermissions —
+        // this is what makes a read-only role provably unable to Write/Edit/Bash (TASK-24, §18/§33).
+        allowedTools: state.allowedTools,
+        disallowedTools: state.disallowedTools,
         maxTurns: assignment.stopConditions?.maxTurns,
         resume: state.resumeSessionId,
         abortController,

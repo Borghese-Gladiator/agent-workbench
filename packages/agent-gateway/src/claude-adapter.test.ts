@@ -48,13 +48,16 @@ function fakeQuery(
   return { queryFn, calls };
 }
 
-function makeSessionInput(overrides: Partial<{ cwd: string; allowedTools: string[] }> = {}) {
+function makeSessionInput(
+  overrides: Partial<{ cwd: string; allowedTools: string[]; disallowedTools: string[] }> = {},
+) {
   return {
     role: 'builder' as const,
     taskId: 'task-1',
     cwd: overrides.cwd ?? '/tmp/worktree',
     contextPayload: {},
     allowedTools: overrides.allowedTools ?? ['Read', 'Edit'],
+    ...(overrides.disallowedTools ? { disallowedTools: overrides.disallowedTools } : {}),
   };
 }
 
@@ -151,10 +154,12 @@ describe('ClaudeAgentAdapter', () => {
     expect(result.findings).toEqual([]);
   });
 
-  it('forwards cwd, allowedTools, and maxTurns into the query options exactly', async () => {
+  it('forwards cwd, allowed/disallowed tools, and maxTurns into the query options exactly', async () => {
     const { queryFn, calls } = fakeQuery([]);
     const adapter = new ClaudeAgentAdapter(queryFn);
-    const session = await adapter.createSession(makeSessionInput({ cwd: '/tmp/my-worktree', allowedTools: ['Read', 'Bash'] }));
+    const session = await adapter.createSession(
+      makeSessionInput({ cwd: '/tmp/my-worktree', allowedTools: ['Read', 'Bash'], disallowedTools: ['Write', 'Edit'] }),
+    );
     await adapter.execute(
       session,
       { instruction: 'do it', stopConditions: { maxTurns: 7 } },
@@ -165,7 +170,9 @@ describe('ClaudeAgentAdapter', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.prompt).toBe('do it');
     expect(calls[0]?.options?.cwd).toBe('/tmp/my-worktree');
-    expect(calls[0]?.options?.tools).toEqual(['Read', 'Bash']);
+    // allowedTools auto-approves; disallowedTools is what actually enforces the scope (TASK-24).
+    expect(calls[0]?.options?.allowedTools).toEqual(['Read', 'Bash']);
+    expect(calls[0]?.options?.disallowedTools).toEqual(['Write', 'Edit']);
     expect(calls[0]?.options?.maxTurns).toBe(7);
     // Headless worker runs need auto-approved tools (TASK-13).
     expect(calls[0]?.options?.permissionMode).toBe('bypassPermissions');

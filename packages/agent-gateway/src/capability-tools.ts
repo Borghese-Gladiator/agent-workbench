@@ -72,3 +72,28 @@ export function capabilitiesToSdkTools(capabilities: readonly string[]): SdkTool
   }
   return [...tools];
 }
+
+/** The full universe of core SDK tools the workbench grants — the domain of the allow/deny split. */
+export const ALL_SDK_TOOLS: readonly SdkToolName[] = [
+  'Read',
+  'Write',
+  'Edit',
+  'Grep',
+  'Glob',
+  'Bash',
+  'WebFetch',
+  'WebSearch',
+];
+
+/**
+ * The complement of a role's granted SDK tools — the tools it must be DENIED (TASK-24, §18/§33).
+ * The SDK's `allowedTools` only auto-approves; it does not restrict — unlisted tools still fall
+ * through to the permission mode, and `bypassPermissions` (required for the headless worker) would
+ * then let them run. Passing this list as `disallowedTools` with bare tool names removes those tools
+ * from the session entirely, in every mode including bypass, so a read-only role provably cannot
+ * `Write`/`Edit`/`Bash`.
+ */
+export function disallowedSdkTools(capabilities: readonly string[]): SdkToolName[] {
+  const allowed = new Set(capabilitiesToSdkTools(capabilities));
+  return ALL_SDK_TOOLS.filter((tool) => !allowed.has(tool));
+}

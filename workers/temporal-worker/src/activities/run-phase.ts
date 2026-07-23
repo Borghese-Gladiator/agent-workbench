@@ -24,7 +24,7 @@ import { draftContractInputFromPrompt } from './contract-support.js';
 import { resolveRepoRef, createRealDelivery } from './delivery-support.js';
 import { createPhaseEventSink } from './durable-event-sink.js';
 import { createCapabilityBroker } from '@awb/capability-broker';
-import { capabilitiesToSdkTools } from '@awb/agent-gateway';
+import { capabilitiesToSdkTools, disallowedSdkTools } from '@awb/agent-gateway';
 import {
   draftContract,
   markAwaitingApproval,
@@ -104,6 +104,21 @@ function allowedToolsForBrokerRole(
     return capabilitiesToSdkTools(capabilities);
   }
   return capabilities;
+}
+
+/**
+ * The SDK tools this role must be DENIED (TASK-24, §18/§33). The SDK's `allowedTools` only
+ * auto-approves — it does not restrict — so a read-only role would still be able to Write/Edit/Bash
+ * under `bypassPermissions` without this. `disallowedSdkTools` returns the complement of the role's
+ * grant over the core tool universe; passed as the adapter's `disallowedTools` it removes those tools
+ * entirely. Claude runtime only — the mock adapter ignores it, so deterministic tests are unchanged.
+ */
+function deniedToolsForBrokerRole(
+  role: 'planner' | 'plan-critic' | 'builder' | 'verifier' | 'qa-executor' | 'adversarial-reviewer',
+  strategy: AgentRuntime,
+): string[] {
+  if (strategy !== 'claude') return [];
+  return disallowedSdkTools([...createCapabilityBroker(role).listGranted()]);
 }
 
 /**
@@ -247,6 +262,7 @@ const planHandler: PhaseHandler = {
           cwd: planCwd,
           contextPayload: { contract, priorFindings },
           allowedTools: allowedToolsForBrokerRole('planner', ctx.strategy),
+          disallowedTools: deniedToolsForBrokerRole('planner', ctx.strategy),
         });
         const { sink, flush } = createPhaseEventSink({
           artifactsDir: runState.artifactsDir as string,
@@ -314,6 +330,7 @@ const planHandler: PhaseHandler = {
           cwd: planCwd,
           contextPayload: { plan },
           allowedTools: allowedToolsForBrokerRole('plan-critic', ctx.strategy),
+          disallowedTools: deniedToolsForBrokerRole('plan-critic', ctx.strategy),
         });
         const { sink, flush } = createPhaseEventSink({
           artifactsDir: runState.artifactsDir as string,
@@ -539,6 +556,7 @@ const implementHandler: PhaseHandler = {
             worktreePath: runState.worktreePath,
             slice,
             allowedTools: allowedToolsForBrokerRole('builder', ctx.strategy),
+            disallowedTools: deniedToolsForBrokerRole('builder', ctx.strategy),
             tokenBudget: assignment.tokenBudget,
             runtimeBudgetMs: assignment.runtimeBudgetMs,
             eventSink: sink,
@@ -806,6 +824,7 @@ const challengeHandler: PhaseHandler = {
           cwd: runState.worktreePath ?? process.cwd(),
           contextPayload: { inputs },
           allowedTools: allowedToolsForBrokerRole('adversarial-reviewer', ctx.strategy),
+          disallowedTools: deniedToolsForBrokerRole('adversarial-reviewer', ctx.strategy),
         });
         const { sink, flush } = createPhaseEventSink({
           artifactsDir: runState.artifactsDir as string,

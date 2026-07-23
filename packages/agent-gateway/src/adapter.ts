@@ -18,6 +18,13 @@ export interface CreateAgentSessionInput {
   contextPayload: unknown;
   /** Allowed tool names for this session, derived from the capability broker for this role. */
   allowedTools: string[];
+  /**
+   * Tool names this session must be DENIED (the complement of `allowedTools` over the core tool
+   * universe). Enforced by the adapter as the SDK's `disallowedTools` so a read-only role provably
+   * cannot use them, even under `bypassPermissions` (TASK-24, §18/§33). Optional — the mock adapter
+   * ignores it, and a caller that omits it gets no deny-list (allow-only, pre-TASK-24 behavior).
+   */
+  disallowedTools?: string[];
 }
 
 export interface AgentSession {

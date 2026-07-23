@@ -9,6 +9,8 @@ export interface RealBuilderAttemptInput {
   worktreePath: string;
   slice: PlanSlice;
   allowedTools: string[];
+  /** Tools denied for the builder session; enforced via the adapter's `disallowedTools` (TASK-24). */
+  disallowedTools?: string[];
   tokenBudget: number;
   runtimeBudgetMs: number;
   eventSink: AgentEventSink;
@@ -37,6 +39,7 @@ export async function runRealBuilderAttempt(input: RealBuilderAttemptInput): Pro
     cwd: input.worktreePath,
     contextPayload: { slice: input.slice },
     allowedTools: input.allowedTools,
+    disallowedTools: input.disallowedTools,
   });
 
   try {
