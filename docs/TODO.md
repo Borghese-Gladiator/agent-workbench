@@ -6,7 +6,57 @@ Status legend: `[ ]` open · `[~]` in progress · `[x]` done
 
 ---
 
+## Live shakeout run — game-count UI feature (2026-07-22)
+
+Drove a trivial UI feature ("show N games available in the portal header") on
+`wip-browser-games`, claude runtime + `AWB_QA_MODE=browser`. **The full pipeline
+ran end-to-end, first try, in ~7.5 min** (plan→implement→verify→exercise→
+challenge→release; implement only ~100s — TASK-19's fewer-slices bias landed):
+- Builder wrote a correct, clean, **test-backed** change (reused `enabledGames`,
+  added `Portal.test.jsx` + wired vitest). candidate `7cde5fa`.
+- **Browser QA fired inside the live pipeline** and produced real PNG + WebM
+  video + Playwright trace zip (first live proof — TASK-4 confirmed e2e).
+- **Adversarial reviewer reviewed the real diff** (ran Bash to inspect files)
+  and converged with no blocking findings — TASK-14 confirmed live.
+- Evidence-matrix PR comment correct: build/unit-test/qa-video all `passed`.
+
+Two problems the run exposed (both open, below): **TASK-20** ("stop before
+release" isn't enforceable — release pushed a real draft PR #2 before the
+external watch could stop it) and **TASK-7 regression** (the qa-video/trace
+upload comments say `undefined` instead of a real download URL).
+
+---
+
 ## P0 — Blocking the first real end-to-end run
+
+### [ ] TASK-20: "stop before release" is not enforceable; release pushes instantly
+**Finding (2026-07-22):** asked to stop before release (no push), but `runRelease`
+pushes the branch + opens the draft PR the instant the phase begins — there is no
+gate/pause before the outward action, so an external poll only sees
+`phase=release` *after* the PR already exists (draft PR #2 was created in ~5s,
+before `down` landed).
+**Do:** add a real pre-release hold — e.g. an `await-human` `pr-readiness` gate
+BEFORE the push (not after), or an `AWB_NO_PUSH`/dry-run env the release phase
+honors (resolve owner/repo, build the evidence, but skip push+PR and report what
+it *would* do). The latter is the safer default for dogfooding.
+**Done when:** a run can be driven through challenge and stop with NO branch
+pushed and NO PR opened, verifiably.
+
+### [ ] TASK-7 (regression): QA media comments link `undefined`, not a real URL
+**Finding (2026-07-22):** on PR #2 the release phase posted
+`QA artifact (browser-trace): undefined` and `QA artifact (qa-video): undefined`
+— the media upload returned an undefined `attachmentUrl` even though the real
+`.webm`/trace `.zip` exist on disk. The evidence *matrix* comment was correct;
+only the media *upload* link is broken.
+**Suspected cause:** `media.path` from the ArtifactStore is a content-hash blob
+(no extension/content-type), so `octokit.repos.uploadReleaseAsset` returns no
+`browser_download_url`; run-phase still posts the comment with the undefined URL.
+**Do:** upload with the real filename + correct content-type (name the asset
+`<kind>.webm`/`.zip`), and treat an undefined `browser_download_url` as a failed
+upload (set `requiredVideosUploaded=false`, don't post an `undefined` comment).
+**Done when:** the PR comment links a `releases/download/...` URL that actually
+downloads the `.webm`.
+
 
 ### [x] TASK-1: Plan phase stalls on the live claude runtime (`repeated-failure-no-progress`)
 **Root cause (diagnosed 2026-07-21, no model needed):** `buildClaimCoverage`
