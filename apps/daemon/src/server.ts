@@ -26,7 +26,7 @@ export async function buildServer(): Promise<DaemonServer> {
 
   registerRepositoryRoutes(app, database);
   registerTaskRoutes(app, database);
-  registerWebSocketRoute(app, eventBus);
+  registerWebSocketRoute(app, eventBus, database);
   registerInternalRoutes(app, database, eventBus);
 
   return {

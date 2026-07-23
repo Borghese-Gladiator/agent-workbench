@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { tasksApi, type TaskWorkflowState } from '../api/tasks.js';
+import { useEventStream } from '../hooks/useEventStream.js';
 import { GatePanel } from './GatePanel.js';
 
 const POLL_INTERVAL_MS = 2000;
@@ -12,6 +13,8 @@ export function TaskDetailPage() {
   const [state, setState] = useState<TaskWorkflowState | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
+  // Live semantic-event timeline over the WebSocket, with reconnect catch-up (TASK-23).
+  const { events, connected } = useEventStream(taskId);
 
   async function refresh(): Promise<void> {
     if (!repositoryId || !taskId) return;
@@ -24,7 +27,8 @@ export function TaskDetailPage() {
     }
   }
 
-  // Polling, not the WebSocket event stream: simpler for MVP and sufficient at a 2s interval.
+  // Workflow state (phase/gate) is polled; the semantic-event timeline streams over the WebSocket
+  // (useEventStream) with reconnect catch-up — so the timeline is live, not on the 2s poll.
   useEffect(() => {
     void refresh();
     const interval = setInterval(() => void refresh(), POLL_INTERVAL_MS);
@@ -78,6 +82,20 @@ export function TaskDetailPage() {
             </li>
           ))}
         </ul>
+      )}
+
+      <h3>Live event timeline {connected ? '(live)' : '(reconnecting…)'}</h3>
+      {events.length === 0 ? (
+        <p>No events yet.</p>
+      ) : (
+        <ol className="event-timeline">
+          {events.map((e) => (
+            <li key={e.id}>
+              <span className="event-seq">#{e.sequence}</span> <strong>{e.producer}</strong> · {e.phase} ·{' '}
+              {e.type}: {e.summary}
+            </li>
+          ))}
+        </ol>
       )}
 
       <h3>Open findings</h3>
