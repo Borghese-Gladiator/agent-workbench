@@ -23,7 +23,7 @@ run — `persistRunStateSnapshot` inserting artifacts before their `runs`/
 `phase_attempts` parents — was fixed this session and proven by this run getting
 past `plan` for the first time.)
 
-### [ ] TASK-31: A cold builder session can drift into the workbench repo
+### [x] TASK-31: A cold builder session can drift into the workbench repo
 
 **What's wrong.** Try 3's builder logged *"This is an 'agentic workbench'
 project"* — it was exploring the **workbench repo itself**, not the target
@@ -62,7 +62,7 @@ L483/L620), the adapter in `packages/agent-gateway`.
 
 ---
 
-### [ ] TASK-32: Agent sessions cannot resume after a transient failure
+### [x] TASK-32: Agent sessions cannot resume after a transient failure
 
 **What's wrong.** The real builder has **no resume path at all**.
 `runRealBuilderAttempt` always calls `adapter.createSession(...)` fresh
@@ -112,7 +112,7 @@ session token is durable, `packages/workflow/src/task-workflow.ts` (retry policy
 
 ---
 
-### [ ] TASK-34: Observability — control-plane events + OpenTelemetry traces/metrics/logs
+### [x] TASK-34: Observability — control-plane events + OpenTelemetry traces/metrics/logs
 
 **Decision recorded in ADR-008** (`docs/decisions/008-observability-split.md`):
 keep `semantic_events` as the durable domain/evidence record; add OpenTelemetry as
@@ -187,7 +187,7 @@ republishes — no change), `apps/web` (render new event types on the timeline),
 
 ---
 
-### [ ] TASK-35: Write `docs/observability.md` — the observability model, end to end
+### [x] TASK-35: Write `docs/observability.md` — the observability model, end to end
 
 **What's wrong.** There is no single doc describing how a run is observed. The
 knowledge is scattered across code comments (`durable-event-sink.ts`,

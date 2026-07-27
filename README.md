@@ -18,6 +18,8 @@ makes in response.
 - **Humans**: `docs/design.md` (why this is built the way it is),
   `docs/domain-model.md` (entity model), `docs/temporal-workflows.md`
   (lifecycle mechanics), `docs/storage.md`, `docs/security.md`,
+  `docs/observability.md` (how a run is observed — the three channels +
+  a debugging runbook; see `docs/decisions/008-observability-split.md`),
   `docs/testing.md`, `docs/dependencies.md` (package graph).
 
 ## Status
