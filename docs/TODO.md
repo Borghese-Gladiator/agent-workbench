@@ -6,6 +6,90 @@ Status legend: `[ ]` open · `[~]` in progress · `[x]` done
 
 ---
 
+## P1 — Observability follow-ups (from live run f47a0d8e, 2026-07-27)
+
+First full-lifecycle claude run under the new OTel layer (TASK-34) succeeded end
+to end (draft PR `browser-games__ai#7`) and proved control-plane events +
+per-phase traces + metrics land. But looking at the traces in Tempo surfaced a
+structural bug the unit tests couldn't (they assert a span exists + carries
+`run_id`, never the trace *shape*).
+
+### [ ] TASK-36: One trace per run, not one trace per phase (nested span tree)
+
+**What's wrong.** Each phase renders as its OWN trace with a single span — a run
+is 9 separate one-span traces (`phase.specify`, `phase.plan`, … each a distinct
+trace id), not one trace with the phases nested under it. The Tempo waterfall for
+any phase shows "1 span" and no structure, so the trace view is not actually
+useful for "why did this run take so long / where did time go". Two root causes:
+1. **No shared trace id across phases.** Every phase is a separate Temporal
+   activity execution (`runPhase` invoked once per phase, often a different
+   event-loop turn / worker), and `withSpan` (`packages/telemetry/src/spans.ts`)
+   calls `tracer.startActiveSpan` with **no parent context**, so OTel mints a
+   fresh random trace id per phase. In-process context propagation can't link them
+   because there is no shared process context between activities.
+2. **The phase span is a leaf.** The agent session + tool calls are emitted only
+   as `semantic_events` rows; no OTel **child spans** are opened under the phase
+   span (`run-phase.ts:1275` wraps only `drivePhase`). So even within a phase
+   there is nothing to nest.
+
+**What to do.**
+1. Derive a **deterministic 16-byte trace id from `run_id`** (hash) so every phase
+   of the same task lands in the same trace. Add a `withSpan` variant (or an
+   option) to `@awb/telemetry` that takes `runId` and attaches a reconstructed,
+   non-recording run-level `SpanContext` as the parent (build it with
+   `trace.setSpanContext` on a fresh context; pass that context to
+   `startActiveSpan`).
+2. Optionally emit a stable per-run **root span** (`run`) once, or just parent all
+   phase spans to the derived run context so they nest as siblings under one trace.
+3. Open **child spans** under each phase span for the agent session
+   (`session.<role>`) and, where cheap, tool calls — the builder path
+   (`builder-support.ts` / `run-phase.ts` implement loop) and the QA/review paths.
+   This gives the real tree: `run → phase.plan → session.planner → tool.Read …`.
+
+**Where.** `packages/telemetry/src/spans.ts` (the parent-context variant),
+`workers/temporal-worker/src/activities/run-phase.ts:1275` (parent the phase span
+to the run context; open session child spans), `builder-support.ts` (tool/session
+spans). Bridge ids already present (`run_id`/`task_id` on every span).
+
+**How we'll know it's done.**
+- *Unit:* a telemetry test asserting two `withSpan` calls with the same `runId`
+  share a trace id (and differ across run ids), and that a child span's parent is
+  the phase span.
+- *Manual (live):* re-drive a task; in Tempo a single trace id covers the whole
+  run, its waterfall shows `phase.*` spans nested under one root with real
+  durations, and at least the builder phase has a nested `session.*` child.
+
+### [ ] TASK-37: `awb task remove` + cascade (no CLI way to delete a task today)
+
+**What's wrong.** There is no CLI command to delete a task — cleaning up old/failed
+tasks (2026-07-27) required hand-writing DELETEs across ~15 FK-linked tables
+(`tasks`, `runs`, `phase_attempts`, `agent_sessions` + its `model_invocations`/
+`tool_invocations`/`context_composition`/`command_executions`, `semantic_events`,
+`runtime_attribution`, `evidence` + claims/deps, `findings`, `plans` + slices/
+coverage, `task_contracts` + claims, `pull_requests` + feedback, `workspace_leases`,
+`waivers`, `human_decisions`, `artifacts`, `memory_sources`). `repo remove`
+(`packages/repository/src/persist.ts:99`) deletes only the repo + discovery rows,
+so removing a repo **orphans** its tasks rather than cascading.
+
+**What to do.**
+1. Add a daemon data-access `deleteTask(db, taskId)` that removes a task and all
+   descendant rows in FK-safe order, in one transaction (mirror the cleanup script
+   used on 2026-07-27).
+2. Expose `awb task remove [taskId] --yes` in the CLI.
+3. Make `repo remove` optionally cascade its tasks (a `--with-tasks` flag) so it no
+   longer orphans them, or at least warn + list the tasks it would orphan.
+
+**Where.** `packages/database/src/data-access/` (new `deleteTask`), the daemon
+internal route + `apps/daemon` handler, `apps/cli/src/commands/` (task remove),
+`packages/repository/src/persist.ts` (cascade option).
+
+**How we'll know it's done.** *Unit:* a data-access test that `deleteTask` removes
+the task + every descendant and leaves a sibling task's rows intact, with
+`PRAGMA foreign_key_check` clean afterward. *Manual:* `awb task remove <id> --yes`
+drops it from `task list` and the web UI with no orphaned rows.
+
+---
+
 ## P1 — Retry resilience (from live run 5a513429, 2026-07-24)
 
 Drove the 6-blocker deployment-hardening task on `wip-browser-games` (claude
