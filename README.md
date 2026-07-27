@@ -84,7 +84,7 @@ awb task list                                       # tasks created this session
 
 Repo and task ids are remembered between commands, so you only pass them when
 you want to target something other than the most recent. To drive a full task
-from Claude Code, see `.claude/skills/drive-task`.
+from Claude Code, see `.claude/skills/run-workbench-task`.
 
 `apps/cli/package.json` declares a `bin: awb` entry for when this is
 installed as a real package; `pnpm link` the CLI package yourself if you
