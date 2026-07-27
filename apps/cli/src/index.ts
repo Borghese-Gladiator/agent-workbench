@@ -4,23 +4,49 @@ import { registerInit } from './commands/init.js';
 import { registerRepoCommands } from './commands/repo.js';
 import { registerDaemonCommands } from './commands/daemon.js';
 import { registerTaskCommands } from './commands/task.js';
-import { registerUpDown } from './commands/up.js';
-import { registerStub } from './commands/not-implemented.js';
+import { registerLifecycleCommands } from './commands/lifecycle.js';
+import { registerDoctorCommand } from './commands/doctor.js';
+import { registerUiCommands } from './commands/ui.js';
+import { registerConfigCommands } from './commands/config.js';
+import { registerCompletionCommand } from './commands/completion.js';
+import { registerResetCommands } from './commands/reset.js';
+import { configureOutput } from './output.js';
 
 const program = new Command();
-program.name('awb').description('Agentic Workbench CLI').version('0.1.0');
+program
+  .name('awb')
+  .description('Agent Workbench CLI')
+  .version('0.1.0')
+  // Global output contract. `--no-color` / `--no-input` are commander negations of on-by-default
+  // booleans, so they surface as `color`/`input` = false.
+  .option('-q, --quiet', 'Suppress successful informational output')
+  .option('--json', 'Emit stable machine-readable output')
+  .option('-v, --verbose', 'Include diagnostic information')
+  .option('--no-color', 'Disable ANSI formatting')
+  .option('--no-input', 'Never prompt for input');
+
+// Resolve the effective output options once, before any subcommand action runs.
+program.hook('preAction', (thisCommand) => {
+  const opts = thisCommand.opts<{
+    quiet?: boolean;
+    json?: boolean;
+    verbose?: boolean;
+    color?: boolean;
+    input?: boolean;
+  }>();
+  configureOutput(opts);
+});
 
 registerInit(program);
-registerUpDown(program);
+registerLifecycleCommands(program);
+registerDoctorCommand(program);
+registerUiCommands(program);
 registerDaemonCommands(program);
 registerRepoCommands(program);
 registerTaskCommands(program);
-
-// "resume" has no daemon-side meaning beyond the Workflow's own `resume` Signal, which isn't
-// exposed as a route yet — kept an explicit stub rather than a fake command.
-registerStub(program, 'task resume', 'Resume a paused task', 'Milestone 10 follow-up');
-
-registerStub(program, 'open', 'Open the local UI', 'Milestone 10 (web UI)');
+registerConfigCommands(program);
+registerCompletionCommand(program);
+registerResetCommands(program);
 
 // `pnpm --filter @awb/cli cli -- <args>` forwards a leading `--` into our argv. Commander treats
 // `--` as the options terminator, so it would swallow subcommand options like `--prompt`
@@ -33,6 +59,6 @@ if (argv[firstNonNodeArg] === '--') {
 }
 
 program.parseAsync(argv).catch((err: unknown) => {
-  console.error(err);
+  console.error(err instanceof Error ? err.message : err);
   process.exitCode = 1;
 });

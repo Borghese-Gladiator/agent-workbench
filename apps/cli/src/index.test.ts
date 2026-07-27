@@ -29,14 +29,29 @@ describe('awb CLI', () => {
     expect(existsSync(join(freshDir, 'config.yaml'))).toBe(true);
   });
 
-  it('unimplemented stub commands exit non-zero with a clear message', () => {
-    expect(() =>
-      execFileSync('node', [cliEntry, 'repo', 'add'], {
+  // `status --json` is the agent-facing health check. Its contract (stable JSON on stdout with the
+  // documented keys, exit code tracking runtime readiness) must hold regardless of whether a daemon
+  // happens to be listening on the shared port, so assert the contract rather than a fixed verdict.
+  it('status --json emits machine-readable health with the documented shape', () => {
+    let stdout = '';
+    let code = 0;
+    try {
+      stdout = execFileSync('node', [cliEntry, 'status', '--json'], {
         env: { ...process.env, AWB_DATA_DIR: dataDir },
         encoding: 'utf8',
         stdio: 'pipe',
-      }),
-    ).toThrow();
+      });
+    } catch (err) {
+      const e = err as { stdout?: string; status?: number };
+      stdout = e.stdout ?? '';
+      code = e.status ?? 1;
+    }
+    const parsed = JSON.parse(stdout) as { ok: boolean; runtime: string; services: Record<string, string> };
+    expect(typeof parsed.ok).toBe('boolean');
+    expect(parsed.services).toHaveProperty('daemon');
+    expect(parsed.services).toHaveProperty('temporal');
+    // Exit code and ok must agree: nonzero exactly when not ok.
+    expect(code === 0).toBe(parsed.ok);
   });
 
   // TASK-9: the contract/plan approval version options must NOT collide with commander's global

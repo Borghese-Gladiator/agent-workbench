@@ -97,6 +97,39 @@ Every package under `packages/` has its own `README.md` covering purpose,
 responsibilities, and explicit non-responsibilities — read that first before
 reading the source.
 
+## Agent Workbench commands
+
+The CLI separates **runtime** (Temporal + worker + daemon) from the **optional
+UI** (Vite frontend). `up` starts only the runtime — never the UI or a browser —
+so agents and CI can boot the minimum they need cheaply.
+
+- Start only the required backend runtime with `awb up --quiet`.
+- Check health with `awb status --json` (exits nonzero when the runtime is not
+  ready, so it doubles as a health check).
+- Do NOT run `awb open` or `awb ui up` unless the task explicitly involves the
+  frontend — those are the only commands that start the UI or a browser.
+- Do NOT follow logs continuously. Use bounded logs: `awb logs daemon --tail 50`.
+- For noninteractive task execution use `awb task wait`, not `awb task watch`.
+  Create with `--quiet` to get just the id: `id=$(awb task create "…" --repo . --quiet)`.
+
+Normal agent sequence:
+
+```bash
+awb up --quiet
+awb status --json
+```
+
+On failure:
+
+```bash
+awb doctor --json
+awb logs daemon --tail 50
+```
+
+Global output contract (all commands): `-q/--quiet` (results only), `--json`
+(stable machine output; implies no color/prompts), `-v/--verbose`, `--no-color`,
+`--no-input`. Errors go to stderr; requested data to stdout.
+
 ## Things NOT to do
 
 - Don't put I/O (filesystem, git, process, network, agent calls) in

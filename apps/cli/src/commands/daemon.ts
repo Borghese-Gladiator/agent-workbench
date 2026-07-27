@@ -1,68 +1,62 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { resolve } from 'node:path';
 import type { Command } from 'commander';
-import { resolveLayout } from '@awb/config';
+import { DAEMON_PORT } from '../services.js';
+import { stopService, startService, waitForDaemonHealth } from '../process-control.js';
+import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
 
-const DAEMON_PORT = 4417;
+const DAEMON_HEALTH_URL = `http://127.0.0.1:${DAEMON_PORT}/api/health`;
 
-function pidFilePath(): string {
-  const layout = resolveLayout();
-  mkdirSync(layout.runtimePidsDir, { recursive: true });
-  return join(layout.runtimePidsDir, 'daemon.pid');
+function repoRoot(): string {
+  return resolve(new URL('../../../..', import.meta.url).pathname);
 }
 
+/**
+ * Daemon-specific operations only. Generic process management (start/stop/status) lives on the
+ * shared lifecycle commands: `awb status daemon`, `awb logs daemon`, `awb restart daemon`.
+ */
 export function registerDaemonCommands(program: Command): void {
-  const daemon = program.command('daemon').description('Manage the local daemon process');
+  const daemon = program.command('daemon').description('Daemon-specific operations');
 
   daemon
-    .command('start')
-    .description('Start the local daemon in the background')
+    .command('run')
+    .description('Run the daemon in the foreground (does not detach)')
     .action(() => {
-      const pidPath = pidFilePath();
-      if (existsSync(pidPath)) {
-        const existingPid = Number(readFileSync(pidPath, 'utf8').trim());
-        try {
-          process.kill(existingPid, 0);
-          console.log(`Daemon already running (pid ${existingPid}).`);
-          return;
-        } catch {
-          unlinkSync(pidPath);
-        }
-      }
-
-      const daemonEntry = new URL('../../../daemon/dist/index.js', import.meta.url).pathname;
-      const child = spawn(process.execPath, [daemonEntry], {
-        detached: true,
-        stdio: 'ignore',
+      const child = spawn('pnpm', ['--filter', '@awb/daemon', 'start'], {
+        cwd: repoRoot(),
+        stdio: 'inherit',
       });
-      child.unref();
-      if (child.pid !== undefined) {
-        writeFileSync(pidPath, String(child.pid), 'utf8');
-        console.log(`Daemon started (pid ${child.pid}) on http://127.0.0.1:${DAEMON_PORT}`);
-      } else {
-        console.error('Failed to start daemon: no pid assigned.');
+      child.on('exit', (code) => {
+        process.exitCode = code ?? 0;
+      });
+    });
+
+  daemon
+    .command('ping')
+    .description('Check whether the daemon is answering on its health endpoint')
+    .action(async () => {
+      try {
+        const res = await fetch(DAEMON_HEALTH_URL);
+        const ok = res.ok;
+        if (outputOptions().json) emitJson({ ok, status: res.status });
+        else printResult(ok ? 'pong' : `daemon responded ${res.status}`);
+        if (!ok) process.exitCode = 1;
+      } catch {
+        if (outputOptions().json) emitJson({ ok: false });
+        else printError('daemon not reachable');
         process.exitCode = 1;
       }
     });
 
   daemon
-    .command('stop')
-    .description('Stop the running local daemon')
-    .action(() => {
-      const pidPath = pidFilePath();
-      if (!existsSync(pidPath)) {
-        console.log('No daemon pid file found — is the daemon running?');
-        return;
-      }
-      const pid = Number(readFileSync(pidPath, 'utf8').trim());
-      try {
-        process.kill(pid, 'SIGTERM');
-        console.log(`Sent SIGTERM to daemon (pid ${pid}).`);
-      } catch (err) {
-        console.error(`Could not stop daemon: ${err instanceof Error ? err.message : String(err)}`);
-      } finally {
-        unlinkSync(pidPath);
-      }
+    .command('reload')
+    .description('Restart the daemon process in place')
+    .action(async () => {
+      stopService('daemon');
+      startService('daemon');
+      const ready = await waitForDaemonHealth();
+      if (outputOptions().json) emitJson({ ok: ready });
+      else printInfo(ready ? 'daemon reloaded' : 'daemon reloaded (not yet healthy)');
+      if (!ready) process.exitCode = 1;
     });
 }

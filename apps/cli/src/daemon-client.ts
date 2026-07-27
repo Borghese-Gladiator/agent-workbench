@@ -1,5 +1,9 @@
 const DAEMON_BASE_URL = 'http://127.0.0.1:4417';
 
+export function daemonBaseUrl(): string {
+  return DAEMON_BASE_URL;
+}
+
 export class DaemonRequestError extends Error {
   constructor(
     public readonly status: number,
@@ -19,7 +23,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
-    throw new DaemonRequestError(0, 'Could not reach the daemon — is it running? Try `awb daemon start`.');
+    throw new DaemonRequestError(0, 'Could not reach the daemon — is it running? Try `awb up`.');
   }
 
   const json = (await response.json().catch(() => ({}))) as Record<string, unknown> & { error?: string };

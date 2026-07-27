@@ -45,35 +45,50 @@ describe('awb repo CLI', () => {
     rmSync(fixtureRepo, { recursive: true, force: true });
   });
 
-  it('drives add -> refresh -> approve -> list -> inspect end to end', () => {
+  it('drives add -> sync -> approve -> list -> show -> remove end to end', () => {
+    // `add` prints the id as its primary result (first line), then informational lines.
     const addOutput = runCli(['repo', 'add', fixtureRepo], dataDir);
-    expect(addOutput).toContain('Registered repository');
+    expect(addOutput).toContain('Registered');
     expect(existsSync(join(dataDir, 'database', 'workbench.sqlite'))).toBe(true);
 
-    const idMatch = /Registered repository (\S+)/.exec(addOutput);
-    const repositoryId = idMatch?.[1];
-    expect(repositoryId).toBeDefined();
+    const repositoryId = addOutput.split('\n')[0]?.trim();
+    expect(repositoryId).toBeTruthy();
 
     const listOutput = runCli(['repo', 'list'], dataDir);
     expect(listOutput).toContain('[untrusted]');
     expect(listOutput).toContain(repositoryId as string);
 
-    const refreshOutput = runCli(['repo', 'refresh', repositoryId as string], dataDir);
-    expect(refreshOutput).toContain('Recorded snapshot');
+    // `sync` is canonical; `refresh` is the retained alias — exercise the canonical name here.
+    const syncOutput = runCli(['repo', 'sync', repositoryId as string], dataDir);
+    expect(syncOutput).toContain('Recorded snapshot');
 
     const approveOutput = runCli(['repo', 'approve', repositoryId as string], dataDir);
     expect(approveOutput).toContain('is now trusted');
 
-    const listAfterApprove = runCli(['repo', 'list'], dataDir);
-    expect(listAfterApprove).toContain('[trusted]');
+    const listAfterApprove = runCli(['repo', 'list', '--json'], dataDir);
+    const parsed = JSON.parse(listAfterApprove) as { id: string; trusted: boolean }[];
+    expect(parsed.find((r) => r.id === repositoryId)?.trusted).toBe(true);
 
+    const showOutput = runCli(['repo', 'show', repositoryId as string], dataDir);
+    const shown = JSON.parse(showOutput) as { repository: { trusted: boolean }; latestSnapshot: { headSha: string } };
+    expect(shown.repository.trusted).toBe(true);
+    expect(shown.latestSnapshot.headSha).toHaveLength(40);
+
+    const removeOutput = runCli(['repo', 'remove', repositoryId as string, '--yes'], dataDir);
+    expect(removeOutput).toContain('Unregistered');
+    const listAfterRemove = runCli(['repo', 'list', '--json'], dataDir);
+    expect(JSON.parse(listAfterRemove)).toHaveLength(0);
+  });
+
+  it('inspect is retained as an alias of show', () => {
+    const addOutput = runCli(['repo', 'add', fixtureRepo], dataDir);
+    const repositoryId = addOutput.split('\n')[0]?.trim();
     const inspectOutput = runCli(['repo', 'inspect', repositoryId as string], dataDir);
-    const inspected = JSON.parse(inspectOutput) as { repository: { trusted: boolean }; latestSnapshot: { headSha: string } };
-    expect(inspected.repository.trusted).toBe(true);
-    expect(inspected.latestSnapshot.headSha).toHaveLength(40);
+    const inspected = JSON.parse(inspectOutput) as { repository: { id: string } };
+    expect(inspected.repository.id).toBe(repositoryId);
   });
 
   it('reports a clear error for an unregistered repository id', () => {
-    expect(() => runCli(['repo', 'inspect', 'not-a-real-id'], dataDir)).toThrow();
+    expect(() => runCli(['repo', 'show', 'not-a-real-id'], dataDir)).toThrow();
   });
 });

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
+import { inArray } from 'drizzle-orm';
 import {
   repositories,
   repositorySnapshots,
@@ -7,6 +8,10 @@ import {
   repositoryCommands,
   repositoryServices,
   repositoryQaSurfaces,
+  repositoryFacts,
+  repositoryFactSources,
+  repositorySymbols,
+  repositoryDependencies,
   type DrizzleDb,
   type Repository as RepositoryRow,
 } from '@awb/database';
@@ -75,6 +80,45 @@ export async function getRepository(db: DrizzleDb, repositoryId: string): Promis
 export async function listRepositories(db: DrizzleDb): Promise<Repository[]> {
   const rows = await db.select().from(repositories);
   return rows.map(rowToRepository);
+}
+
+export async function findRepositoryByCanonicalPath(
+  db: DrizzleDb,
+  canonicalPath: string,
+): Promise<Repository | undefined> {
+  const rows = await db.select().from(repositories).where(eq(repositories.canonicalPath, canonicalPath));
+  const row = rows[0];
+  return row ? rowToRepository(row) : undefined;
+}
+
+/**
+ * Unregisters a repository: removes its registry row and all discovery-derived rows (snapshots,
+ * units, commands, services, QA surfaces). Does NOT touch the repository's files on disk — this
+ * only detaches it from the workbench. Returns whether a row was removed.
+ */
+export async function unregisterRepository(db: DrizzleDb, repositoryId: string): Promise<boolean> {
+  const existing = await getRepository(db, repositoryId);
+  if (!existing) return false;
+
+  // fact_sources references facts (not the repo directly), so clear it via the repo's fact ids first.
+  const factIds = (
+    await db.select({ id: repositoryFacts.id }).from(repositoryFacts).where(eq(repositoryFacts.repositoryId, repositoryId))
+  ).map((r) => r.id);
+  if (factIds.length > 0) {
+    await db.delete(repositoryFactSources).where(inArray(repositoryFactSources.factId, factIds));
+  }
+
+  // Delete children before parents to respect FK constraints when enforcement is on.
+  await db.delete(repositoryDependencies).where(eq(repositoryDependencies.repositoryId, repositoryId));
+  await db.delete(repositorySymbols).where(eq(repositorySymbols.repositoryId, repositoryId));
+  await db.delete(repositoryFacts).where(eq(repositoryFacts.repositoryId, repositoryId));
+  await db.delete(repositoryQaSurfaces).where(eq(repositoryQaSurfaces.repositoryId, repositoryId));
+  await db.delete(repositoryServices).where(eq(repositoryServices.repositoryId, repositoryId));
+  await db.delete(repositoryCommands).where(eq(repositoryCommands.repositoryId, repositoryId));
+  await db.delete(repositoryUnits).where(eq(repositoryUnits.repositoryId, repositoryId));
+  await db.delete(repositorySnapshots).where(eq(repositorySnapshots.repositoryId, repositoryId));
+  await db.delete(repositories).where(eq(repositories.id, repositoryId));
+  return true;
 }
 
 export async function approveRepository(db: DrizzleDb, repositoryId: string): Promise<void> {
