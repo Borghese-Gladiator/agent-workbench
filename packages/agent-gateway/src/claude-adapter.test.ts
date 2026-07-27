@@ -285,6 +285,41 @@ describe('ClaudeAgentAdapter', () => {
     );
   });
 
+  it.each([['relative/worktree'], [''], ['./worktree']])(
+    'createSession rejects a non-absolute cwd %j (TASK-31)',
+    async (cwd) => {
+      const { queryFn } = fakeQuery([]);
+      const adapter = new ClaudeAgentAdapter(queryFn);
+      await expect(adapter.createSession(makeSessionInput({ cwd }))).rejects.toThrow('cwd must be an absolute path');
+    },
+  );
+
+  it('seeds the resume id from createSession input and skips the context preamble (TASK-32)', async () => {
+    const { queryFn, calls } = fakeQuery([]);
+    const adapter = new ClaudeAgentAdapter(queryFn);
+    const session = await adapter.createSession({
+      role: 'builder',
+      taskId: 'task-1',
+      cwd: '/tmp/worktree',
+      contextPayload: { plan: 'PAYLOAD_MARKER' },
+      allowedTools: ['Read'],
+      resumeSessionId: 'prior-session-xyz',
+    });
+    await adapter.execute(session, { instruction: 'continue' }, () => {}, new AbortController().signal);
+    // A resumed first turn passes the seed resume id and does NOT re-send the context preamble.
+    expect(calls[0]?.options?.resume).toBe('prior-session-xyz');
+    expect(calls[0]?.prompt).toBe('continue');
+    expect(calls[0]?.prompt).not.toContain('PAYLOAD_MARKER');
+  });
+
+  it('surfaces the SDK session_id on the AgentExecutionResult (TASK-32)', async () => {
+    const { queryFn } = fakeQuery([{ type: 'system', subtype: 'init', session_id: 'sess-surfaced' }]);
+    const adapter = new ClaudeAgentAdapter(queryFn);
+    const session = await adapter.createSession(makeSessionInput());
+    const result = await adapter.execute(session, { instruction: 'go' }, () => {}, new AbortController().signal);
+    expect(result.sessionId).toBe('sess-surfaced');
+  });
+
   describe.skipIf(!process.env.ANTHROPIC_API_KEY)('live integration', () => {
     it('runs a real query against the Claude API', async () => {
       const adapter = new ClaudeAgentAdapter();

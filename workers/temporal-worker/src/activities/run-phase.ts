@@ -122,6 +122,30 @@ function deniedToolsForBrokerRole(
 }
 
 /**
+ * Resolves the working directory for a real (claude) phase. On the claude runtime the pinned worktree
+ * is the ONLY acceptable cwd — falling back to `process.cwd()` (the worker's own dir, the workbench
+ * repo) lets path-less agent discovery and command execution drift into the wrong repository (TASK-31,
+ * live run 5a513429 "This is an 'agentic workbench' project"). So on claude a missing worktreePath is a
+ * loud failure; only the mock/fixture path may fall back to `process.cwd()`.
+ */
+export function requireWorktreeCwd(
+  strategy: AgentRuntime,
+  worktreePath: string | undefined,
+  phase: TaskPhase,
+  taskId: string,
+): string {
+  if (strategy === 'claude') {
+    if (!worktreePath) {
+      throw new Error(
+        `${phase}: claude runtime requires runState.worktreePath but it is unset for task ${taskId} — refusing the process.cwd() fallback (TASK-31)`,
+      );
+    }
+    return worktreePath;
+  }
+  return worktreePath ?? process.cwd();
+}
+
+/**
  * The worker's own environment, filtered to defined string values. Commands run by the verification
  * runner / QA executor are spawned WITHOUT a shell and inherit exactly the env they are handed, so
  * they need a real PATH (and the rest of the ambient env) to resolve `npm`/`pnpm`/`node`/`vite`.
@@ -239,11 +263,17 @@ const planHandler: PhaseHandler = {
     // The planner must inspect the TARGET repo, not the workbench's own tree. Plan runs before
     // prepare creates the worktree, so resolve the registered repo's canonical path on the claude
     // runtime; without this the planner ran in process.cwd() (the workbench) and planned against the
-    // wrong repository. Falls back to worktreePath (if a prior phase set it) then process.cwd().
-    const planCwd =
+    // wrong repository. On claude a missing worktree AND unresolvable repo path is a loud failure
+    // (TASK-31) — never drift to the workbench cwd; only the mock path falls back to process.cwd().
+    const resolvedRepoPath =
       runState.worktreePath ??
-      (ctx.strategy === 'claude' ? await resolveRepositoryPath(state.repositoryId) : undefined) ??
-      process.cwd();
+      (ctx.strategy === 'claude' ? await resolveRepositoryPath(state.repositoryId) : undefined);
+    if (ctx.strategy === 'claude' && !resolvedRepoPath) {
+      throw new Error(
+        `plan: claude runtime could not resolve a target-repo path for task ${state.taskId} (no worktree, no registered repo path) — refusing the process.cwd() fallback (TASK-31)`,
+      );
+    }
+    const planCwd = resolvedRepoPath ?? process.cwd();
 
     const adapter = createAgentAdapter();
     scriptMockTurns(adapter, state.taskId, 'planner', { summary: 'Single-slice plan covering the task objective' });
@@ -537,6 +567,15 @@ const implementHandler: PhaseHandler = {
       const result = await runSliceLoop({
         assignment,
         runAttempt: async () => {
+          if (ctx.strategy === 'claude' && (!adapter || !runState.worktreePath)) {
+            // Real path with no worktree is never a legitimate success (TASK-31): the builder would
+            // otherwise run path-less discovery against the worker's process.cwd() (the workbench repo)
+            // and the phase would rubber-stamp a fake candidate SHA. Fail loudly instead of taking the
+            // mock success path so a lost/never-set worktree surfaces as a phase failure, not silent drift.
+            throw new Error(
+              `implement: claude runtime requires a worktree but runState.worktreePath is unset for task ${state.taskId} — refusing the mock success path (TASK-31)`,
+            );
+          }
           if (!realBuilder || !adapter || !runState.worktreePath) {
             // Mock path: scripted first-pass success, proving the Activity -> @awb/planning call path.
             return { success: true };
@@ -550,6 +589,10 @@ const implementHandler: PhaseHandler = {
             attemptNumber: state.attemptNumber,
             durable: ctx.strategy === 'claude',
           });
+          // Resume this slice's prior session if one was persisted (TASK-32): a Temporal retry after a
+          // transport drop continues the transcript instead of cold-restarting. Keyed by slice.id, which
+          // is stable across attempts (unlike attemptNumber), so the key survives retries + restarts.
+          const priorSessionId = runState.builderResumeSessions?.[slice.id];
           const attempt = await runRealBuilderAttempt({
             adapter,
             taskId: state.taskId,
@@ -560,7 +603,15 @@ const implementHandler: PhaseHandler = {
             tokenBudget: assignment.tokenBudget,
             runtimeBudgetMs: assignment.runtimeBudgetMs,
             eventSink: sink,
+            resumeSessionId: priorSessionId,
           });
+          // Capture the provider session token so a later attempt resumes rather than cold-starts.
+          if (attempt.sessionId) {
+            runState.builderResumeSessions = {
+              ...(runState.builderResumeSessions ?? {}),
+              [slice.id]: attempt.sessionId,
+            };
+          }
           ctx.usage.record(attempt.usage, attempt.runtimeMs);
           ctx.observability.recordSession({
             sessionId: `${state.taskId}-implement-${state.attemptNumber}-${slice.id}`,
@@ -573,6 +624,7 @@ const implementHandler: PhaseHandler = {
             usage: attempt.usage,
             runtimeMs: attempt.runtimeMs,
             contextComposition: estimateContextComposition({ plan: slice }, ''),
+            resumeSessionId: attempt.sessionId,
           });
           await flush();
           candidateSha = attempt.headSha;
@@ -617,7 +669,7 @@ const verifyHandler: PhaseHandler = {
   phase: 'verify',
   async run(ctx): Promise<PhaseOutcome> {
     const { state, runState } = ctx;
-    const cwd = runState.worktreePath ?? process.cwd();
+    const cwd = requireWorktreeCwd(ctx.strategy, runState.worktreePath, 'verify', state.taskId);
 
     const placeholderCommand: ValidatedCommand = {
       id: `${state.taskId}-verify-cmd`,
@@ -690,7 +742,7 @@ const exerciseHandler: PhaseHandler = {
   phase: 'exercise',
   async run(ctx): Promise<PhaseOutcome> {
     const { state, runState } = ctx;
-    const cwd = runState.worktreePath ?? process.cwd();
+    const cwd = requireWorktreeCwd(ctx.strategy, runState.worktreePath, 'exercise', state.taskId);
 
     const context: QaEvidenceContext = {
       taskId: state.taskId,
@@ -818,6 +870,7 @@ const challengeHandler: PhaseHandler = {
 
     const adapter = createAgentAdapter();
     scriptMockTurns(adapter, state.taskId, 'adversarial-reviewer', { findings: [] });
+    const reviewCwd = requireWorktreeCwd(ctx.strategy, runState.worktreePath, 'challenge', state.taskId);
 
     // Real path: hand the reviewer the actual candidate diff + changed paths from the worktree, not
     // a placeholder string. Mock path keeps the synthetic diff (no real commit exists there).
@@ -846,13 +899,13 @@ const challengeHandler: PhaseHandler = {
 
     const review = await runAdversarialReview({
       taskId: state.taskId,
-      cwd: runState.worktreePath ?? process.cwd(),
+      cwd: reviewCwd,
       reviewInputs,
       runReviewer: async (inputs) => {
         const session = await adapter.createSession({
           role: 'adversarial-reviewer',
           taskId: state.taskId,
-          cwd: runState.worktreePath ?? process.cwd(),
+          cwd: reviewCwd,
           contextPayload: { inputs },
           allowedTools: allowedToolsForBrokerRole('adversarial-reviewer', ctx.strategy),
           disallowedTools: deniedToolsForBrokerRole('adversarial-reviewer', ctx.strategy),
@@ -952,7 +1005,7 @@ const releaseHandler: PhaseHandler = {
     const { state, runState } = ctx;
     const evidence = [...runState.verificationEvidence, ...runState.qaEvidence];
     const candidateSha = resolveCandidateSha(runState);
-    const worktreePath = runState.worktreePath ?? process.cwd();
+    const worktreePath = requireWorktreeCwd(ctx.strategy, runState.worktreePath, 'release', state.taskId);
 
     // Real delivery (Fix 6): on the claude runtime, open a real draft PR on the repo's actual remote
     // via the Octokit client (authed with the ambient `gh` token) + git-CLI push. The mock runtime

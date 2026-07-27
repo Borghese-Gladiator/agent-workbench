@@ -26,5 +26,12 @@ export const RunStateSnapshotSchema = z.object({
   reviewFindings: z.array(FindingSchema),
   artifacts: z.array(ArtifactRecordSchema),
   dependenciesInstalled: z.boolean().optional(),
+  /**
+   * Builder resume tokens keyed by plan-slice id (TASK-32). Populated on load from the persisted
+   * `agent_sessions.resume_session_id` rows so a worker restart resumes each slice's transcript. The
+   * durable source of truth is the agent_sessions table (written via the observability path); this
+   * field carries the reconstructed map back onto the worker's `TaskRunState`.
+   */
+  builderResumeSessions: z.record(z.string(), z.string()).optional(),
 });
 export type RunStateSnapshot = z.infer<typeof RunStateSnapshotSchema>;

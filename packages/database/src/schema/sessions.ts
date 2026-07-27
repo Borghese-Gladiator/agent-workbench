@@ -16,6 +16,12 @@ export const agentSessions = sqliteTable('agent_sessions', {
   phase: text('phase').notNull().$type<TaskPhase>(),
   runtime: text('runtime').notNull(),
   model: text('model'),
+  /**
+   * The provider's resumable session token for this agent session (TASK-32). Persisted so a Temporal
+   * retry — even after a worker restart — can resume the transcript rather than cold-start. Null for
+   * sessions whose provider exposes no resume handle (e.g. the mock runtime historically).
+   */
+  resumeSessionId: text('resume_session_id'),
   startedAt: text('started_at').notNull(),
   endedAt: text('ended_at'),
 });

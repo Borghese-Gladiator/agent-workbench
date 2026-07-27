@@ -26,10 +26,17 @@ const execFileAsync = promisify(execFile);
 class FakeBuilderAdapter implements CodingAgentAdapter {
   readonly id = 'fake-builder';
   private cwd = '';
-  constructor(private readonly onExecute: (cwd: string) => Promise<void>, private readonly completed = true) {}
+  /** Captures the createSession input so tests can assert the resume id was threaded (TASK-32). */
+  lastCreateInput?: CreateAgentSessionInput;
+  constructor(
+    private readonly onExecute: (cwd: string) => Promise<void>,
+    private readonly completed = true,
+    private readonly executeSessionId?: string,
+  ) {}
 
   async createSession(input: CreateAgentSessionInput): Promise<AgentSession> {
     this.cwd = input.cwd;
+    this.lastCreateInput = input;
     return { id: 'sess-1', role: input.role, taskId: input.taskId, providerId: this.id, createdAt: '' };
   }
   async execute(_s: AgentSession, _a: AgentAssignment, _sink: AgentEventSink): Promise<AgentExecutionResult> {
@@ -39,6 +46,7 @@ class FakeBuilderAdapter implements CodingAgentAdapter {
       findings: [],
       summary: 'fake builder ran',
       usage: { provider: 'fake', model: 'fake', inputTokens: 42, outputTokens: 7 },
+      ...(this.executeSessionId ? { sessionId: this.executeSessionId } : {}),
     };
   }
   async interrupt(): Promise<void> {}
@@ -149,5 +157,32 @@ describe('runRealBuilderAttempt (Stage 2 real builder)', () => {
     expect(result.outcome.success).toBe(true);
     expect(result.outcome.noMeaningfulDiff).toBeUndefined();
     expect(result.headSha).toBe(baseSha);
+  });
+
+  // TASK-32: a resume token supplied to the attempt is threaded into createSession, and the provider's
+  // session token from execute is surfaced back so a caller can persist it for the next retry.
+  it('threads resumeSessionId into the session and returns the provider sessionId', async () => {
+    const adapter = new FakeBuilderAdapter(
+      async (cwd) => {
+        await writeFile(join(cwd, 'greeting.txt'), 'hello\n');
+      },
+      /* completed */ true,
+      /* executeSessionId */ 'provider-session-99',
+    );
+
+    const result = await runRealBuilderAttempt({
+      adapter,
+      taskId: 'task-1',
+      worktreePath: worktree,
+      slice,
+      allowedTools: [],
+      tokenBudget: 1000,
+      runtimeBudgetMs: 1000,
+      eventSink: () => {},
+      resumeSessionId: 'prior-session-42',
+    });
+
+    expect(adapter.lastCreateInput?.resumeSessionId).toBe('prior-session-42');
+    expect(result.sessionId).toBe('provider-session-99');
   });
 });

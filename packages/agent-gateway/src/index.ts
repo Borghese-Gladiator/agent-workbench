@@ -4,3 +4,4 @@ export * from './usage-aggregator.js';
 export * from './event-normalization.js';
 export * from './claude-adapter.js';
 export * from './capability-tools.js';
+export * from './transport-errors.js';

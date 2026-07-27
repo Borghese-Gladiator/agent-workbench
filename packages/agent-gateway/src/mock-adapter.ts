@@ -99,6 +99,8 @@ export class MockAgentAdapter implements CodingAgentAdapter {
       findings: turn.findings ?? [],
       usage: turn.usage,
       summary: turn.summary ?? `mock turn ${cursor + 1} for ${session.role}`,
+      // Deterministic resume token so the resume round-trip (TASK-32) is testable on the mock runtime.
+      sessionId: `mock-session-${session.taskId}-${session.role}`,
     };
   }
 

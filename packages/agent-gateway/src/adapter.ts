@@ -25,6 +25,14 @@ export interface CreateAgentSessionInput {
    * ignores it, and a caller that omits it gets no deny-list (allow-only, pre-TASK-24 behavior).
    */
   disallowedTools?: string[];
+  /**
+   * A provider session/resume token from a PRIOR execution of the same logical session (TASK-32). When
+   * present, the adapter resumes that transcript instead of cold-starting — the retry after a transient
+   * transport drop (`Connection closed mid-response`) continues rather than re-exploring from zero. The
+   * key MUST be stable across Temporal attempts (derive it from taskId+phase+slice, not attemptNumber).
+   * The mock adapter accepts and ignores it.
+   */
+  resumeSessionId?: string;
 }
 
 export interface AgentSession {
@@ -57,6 +65,12 @@ export interface AgentExecutionResult {
   usage?: ModelUsage;
   /** A short human-readable summary of what happened, for semantic-event logging. */
   summary: string;
+  /**
+   * The provider's real session/resume token captured during this execution (TASK-32), if the provider
+   * exposes one (the Claude SDK's `session_id`). Callers persist it durably and pass it back as
+   * `CreateAgentSessionInput.resumeSessionId` on a later attempt to resume rather than cold-start.
+   */
+  sessionId?: string;
 }
 
 /**

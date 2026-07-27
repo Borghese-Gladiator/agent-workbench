@@ -14,6 +14,12 @@ export interface RealBuilderAttemptInput {
   tokenBudget: number;
   runtimeBudgetMs: number;
   eventSink: AgentEventSink;
+  /**
+   * A prior provider session token for this slice (TASK-32). When set, the builder resumes that
+   * transcript instead of cold-starting — a Temporal retry after a transient transport drop continues
+   * rather than re-exploring from zero. Stable across attempts (keyed by slice, not attempt number).
+   */
+  resumeSessionId?: string;
 }
 
 export interface RealBuilderAttemptResult {
@@ -24,6 +30,8 @@ export interface RealBuilderAttemptResult {
   usage?: ModelUsage;
   /** Wall-clock the builder session took, for per-phase runtime aggregation (TASK-11). */
   runtimeMs: number;
+  /** The provider session token this attempt ran under (TASK-32); persist it to resume on a retry. */
+  sessionId?: string;
 }
 
 /**
@@ -40,6 +48,7 @@ export async function runRealBuilderAttempt(input: RealBuilderAttemptInput): Pro
     contextPayload: { slice: input.slice },
     allowedTools: input.allowedTools,
     disallowedTools: input.disallowedTools,
+    resumeSessionId: input.resumeSessionId,
   });
 
   try {
@@ -65,9 +74,15 @@ export async function runRealBuilderAttempt(input: RealBuilderAttemptInput): Pro
       // simply over-decomposed. Only an *incomplete* session with no diff is the edit/revert /
       // stuck signal `noMeaningfulDiff` is meant to catch.
       if (execution.completed) {
-        return { outcome: { success: true }, headSha, usage: execution.usage, runtimeMs };
+        return { outcome: { success: true }, headSha, usage: execution.usage, runtimeMs, sessionId: execution.sessionId };
       }
-      return { outcome: { success: false, noMeaningfulDiff: true }, headSha, usage: execution.usage, runtimeMs };
+      return {
+        outcome: { success: false, noMeaningfulDiff: true },
+        headSha,
+        usage: execution.usage,
+        runtimeMs,
+        sessionId: execution.sessionId,
+      };
     }
 
     await runGit(input.worktreePath, ['add', '-A']);
@@ -92,6 +107,7 @@ export async function runRealBuilderAttempt(input: RealBuilderAttemptInput): Pro
       headSha,
       usage: execution.usage,
       runtimeMs,
+      sessionId: execution.sessionId,
     };
   } finally {
     await input.adapter.dispose(session);

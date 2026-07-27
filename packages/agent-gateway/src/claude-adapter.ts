@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { isAbsolute } from 'node:path';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { ModelUsage } from '@awb/domain';
 import type {
@@ -210,6 +211,12 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
   }
 
   async createSession(input: CreateAgentSessionInput): Promise<AgentSession> {
+    // The cwd MUST be absolute (TASK-31): a relative or empty cwd would resolve against the SDK
+    // subprocess's own working directory (the worker/workbench repo), letting path-less agent
+    // discovery drift out of the pinned task worktree. Fail loudly rather than silently drift.
+    if (!input.cwd || !isAbsolute(input.cwd)) {
+      throw new Error(`ClaudeAgentAdapter.createSession: cwd must be an absolute path, got ${JSON.stringify(input.cwd)}`);
+    }
     const session: AgentSession = {
       id: randomUUID(),
       role: input.role,
@@ -222,6 +229,9 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
       allowedTools: input.allowedTools,
       disallowedTools: input.disallowedTools ?? [],
       contextPayload: input.contextPayload,
+      // TASK-32: seed the resume token if the caller is resuming a prior (possibly cross-process)
+      // session. When set, `execute` skips the context preamble and passes `resume` to the SDK.
+      resumeSessionId: input.resumeSessionId,
     });
     return session;
   }
@@ -346,6 +356,9 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
       findings: [],
       usage,
       summary: summary || (completed ? 'execution completed' : 'interrupted during execution'),
+      // Surface the SDK's resumable session_id (captured into state above) so callers can persist it
+      // durably and resume this transcript on a later attempt (TASK-32).
+      sessionId: state.resumeSessionId,
     };
   }
 

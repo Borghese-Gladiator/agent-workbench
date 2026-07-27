@@ -49,6 +49,7 @@ export function persistPhaseObservability(db: DrizzleDb, payload: PhaseObservabi
         phase: session.phase,
         runtime: session.runtime,
         model: session.model ?? null,
+        resumeSessionId: session.resumeSessionId ?? null,
         startedAt: session.startedAt,
         endedAt: session.endedAt ?? null,
       };
@@ -124,4 +125,43 @@ export function getTokenBreakdown(db: DrizzleDb, taskId: string): TokenBreakdown
 
 export function getRuntimeAttribution(db: DrizzleDb, taskId: string) {
   return db.select().from(runtimeAttribution).where(eq(runtimeAttribution.taskId, taskId)).all();
+}
+
+/**
+ * Reconstructs the builder's per-slice resume tokens for a task from the persisted `agent_sessions`
+ * rows (TASK-32). The implement phase writes one session per slice with id
+ * `${taskId}-implement-${attempt}-${sliceId}` and its `resume_session_id`; this parses the slice id
+ * back out (the id is opaque otherwise) and keeps the latest non-null token per slice, so a worker
+ * restart resumes each slice's transcript. Returns undefined when no resume tokens are persisted.
+ */
+export function getBuilderResumeSessions(db: DrizzleDb, taskId: string): Record<string, string> | undefined {
+  const rows = db
+    .select({
+      id: agentSessions.id,
+      resumeSessionId: agentSessions.resumeSessionId,
+    })
+    .from(agentSessions)
+    .where(eq(agentSessions.taskId, taskId))
+    .all();
+
+  const implementPrefix = `${taskId}-implement-`;
+  const bySlice: Record<string, string> = {};
+  const bestAttempt: Record<string, number> = {};
+  for (const row of rows) {
+    if (!row.resumeSessionId || !row.id.startsWith(implementPrefix)) continue;
+    // id === `${taskId}-implement-${attempt}-${sliceId}` — the attempt is the first segment, the
+    // sliceId is everything after it. Keep the highest-attempt token per slice so the most recent
+    // resume wins (row order from the DB is unspecified; compare attempt numbers, not string order).
+    const suffix = row.id.slice(implementPrefix.length);
+    const firstDash = suffix.indexOf('-');
+    if (firstDash < 0) continue;
+    const attempt = Number.parseInt(suffix.slice(0, firstDash), 10);
+    const sliceId = suffix.slice(firstDash + 1);
+    if (!sliceId || !Number.isFinite(attempt)) continue;
+    if (bestAttempt[sliceId] === undefined || attempt >= bestAttempt[sliceId]) {
+      bestAttempt[sliceId] = attempt;
+      bySlice[sliceId] = row.resumeSessionId;
+    }
+  }
+  return Object.keys(bySlice).length > 0 ? bySlice : undefined;
 }

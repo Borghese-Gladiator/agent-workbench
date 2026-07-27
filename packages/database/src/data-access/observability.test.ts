@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { PhaseObservability } from '@awb/domain';
 import { createDatabase, repositories, upsertTask, type WorkbenchDatabase } from '../index.js';
-import { persistPhaseObservability, getTokenBreakdown, getRuntimeAttribution } from './observability.js';
+import {
+  persistPhaseObservability,
+  getTokenBreakdown,
+  getRuntimeAttribution,
+  getBuilderResumeSessions,
+} from './observability.js';
 
 const REPO_ID = 'repo-1';
 const TASK_ID = 'task-1';
@@ -159,5 +164,39 @@ describe('phase observability persistence (§27)', () => {
     expect(b.totals.inputTokens).toBe(800);
     expect(Object.keys(b.byModel).sort()).toEqual(['claude-haiku', 'claude-opus']);
     expect(b.byModel['claude-haiku']?.outputTokens).toBe(60);
+  });
+
+  // TASK-32: the durable resume round-trip. An implement-phase session persists its resume token; the
+  // builder resume map is reconstructed keyed by slice id, and the latest attempt's token wins.
+  it('reconstructs builder resume sessions keyed by slice id from persisted agent_sessions', () => {
+    const implementSession = (attempt: number, sliceId: string, resumeSessionId: string) =>
+      payload({
+        phaseAttemptId: `${TASK_ID}-implement-${attempt}`,
+        phase: 'implement',
+        sessions: [
+          {
+            id: `${TASK_ID}-implement-${attempt}-${sliceId}`,
+            taskId: TASK_ID,
+            runId: `${TASK_ID}-run`,
+            phaseAttemptId: `${TASK_ID}-implement-${attempt}`,
+            phase: 'implement',
+            role: 'builder',
+            runtime: 'claude',
+            resumeSessionId,
+            startedAt: new Date().toISOString(),
+            modelInvocations: [],
+          },
+        ],
+      });
+
+    expect(getBuilderResumeSessions(database.db, TASK_ID)).toBeUndefined();
+
+    persistPhaseObservability(database.db, implementSession(1, 'slice-a', 'sdk-session-a1'));
+    persistPhaseObservability(database.db, implementSession(1, 'slice-b', 'sdk-session-b1'));
+    // A retry of slice-a persists a new token under a new attempt-scoped session id.
+    persistPhaseObservability(database.db, implementSession(2, 'slice-a', 'sdk-session-a2'));
+
+    const resume = getBuilderResumeSessions(database.db, TASK_ID);
+    expect(resume).toEqual({ 'slice-a': 'sdk-session-a2', 'slice-b': 'sdk-session-b1' });
   });
 });

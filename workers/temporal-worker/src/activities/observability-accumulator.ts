@@ -67,6 +67,8 @@ export class ObservabilityAccumulator {
     usage?: ModelUsage;
     runtimeMs: number;
     contextComposition?: ContextComposition;
+    /** Provider resume token for this session (TASK-32); persisted so a retry resumes the transcript. */
+    resumeSessionId?: string;
   }): void {
     const now = new Date().toISOString();
     this.add('modelGenerationMs', input.runtimeMs);
@@ -79,6 +81,7 @@ export class ObservabilityAccumulator {
       role: input.role,
       runtime: input.runtime,
       ...(input.usage?.model ? { model: input.usage.model } : {}),
+      ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
       startedAt: now,
       endedAt: now,
       modelInvocations: input.usage

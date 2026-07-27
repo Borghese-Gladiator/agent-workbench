@@ -51,6 +51,8 @@ export const AgentSessionRecordSchema = z.object({
   role: AgentSessionRoleSchema,
   runtime: z.string(),
   model: z.string().optional(),
+  /** The provider's resumable session token for this session (TASK-32); persisted for retry resume. */
+  resumeSessionId: z.string().optional(),
   startedAt: z.string(),
   endedAt: z.string().optional(),
   modelInvocations: z.array(

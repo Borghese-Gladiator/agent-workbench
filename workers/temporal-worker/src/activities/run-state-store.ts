@@ -15,6 +15,12 @@ export interface TaskRunState {
   contract?: TaskContract;
   plan?: ImplementationPlan;
   builderSessionId?: string;
+  /**
+   * Provider resume tokens for the builder, keyed by plan-slice id (TASK-32). Persisted durably so a
+   * Temporal retry — even after a worker restart — resumes the slice's prior transcript instead of
+   * cold-starting. Keyed by slice (stable across attempts), NOT by attempt number.
+   */
+  builderResumeSessions?: Record<string, string>;
   baseSha?: string;
   /** Real candidate SHA produced by the builder (Stage 2); downstream phases key evidence off it. */
   candidateSha?: string;

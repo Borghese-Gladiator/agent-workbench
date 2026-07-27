@@ -9,6 +9,7 @@ import type {
   RunStateSnapshot,
 } from '@awb/domain';
 import { ensureRun, ensurePhaseAttempt } from './tasks.js';
+import { getBuilderResumeSessions } from './observability.js';
 import {
   taskContracts,
   acceptanceClaims,
@@ -280,6 +281,10 @@ export function loadRunStateSnapshot(
   // evidence for a task shares the same candidate SHA once the builder has committed).
   const candidateSha = allEvidence.find((e) => e.candidateSha)?.candidateSha;
 
+  // Builder resume tokens (TASK-32), reconstructed from the persisted agent_sessions rows so a worker
+  // restart resumes each slice's transcript instead of cold-starting.
+  const builderResumeSessions = getBuilderResumeSessions(db, task.taskId);
+
   return {
     taskId: task.taskId,
     repositoryId: task.repositoryId,
@@ -288,6 +293,7 @@ export function loadRunStateSnapshot(
     ...(plan ? { plan } : {}),
     ...(lease ? { lease, worktreePath: lease.worktreePath, baseSha: lease.baseSha } : {}),
     ...(candidateSha ? { candidateSha } : {}),
+    ...(builderResumeSessions ? { builderResumeSessions } : {}),
     verificationEvidence,
     qaEvidence,
     reviewFindings: listFindingsByTask(db, task.taskId),
