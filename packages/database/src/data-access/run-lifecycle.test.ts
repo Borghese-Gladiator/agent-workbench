@@ -336,6 +336,40 @@ describe('run-lifecycle data-access', () => {
     expect(reloaded.artifacts).toEqual(snapshot.artifacts);
   });
 
+  it('persists a plan-phase snapshot whose artifact has run/attempt ids but no evidence', () => {
+    // Regression: the plan phase writes an artifact carrying runId + phaseAttemptId, but no
+    // verification/QA evidence exists yet. Artifacts FK to runs/phase_attempts, and the parents were
+    // previously ensured only in the evidence loop — so this snapshot failed with a FOREIGN KEY error.
+    const snapshot: RunStateSnapshot = {
+      taskId: TASK_ID,
+      repositoryId: REPO_ID,
+      prompt: 'do the thing',
+      contract: sampleContract(),
+      plan: samplePlan(),
+      verificationEvidence: [],
+      qaEvidence: [],
+      reviewFindings: [],
+      artifacts: [
+        {
+          id: 'plan-art-1',
+          sha256: 'd'.repeat(64),
+          mediaType: 'text/markdown',
+          byteSize: 512,
+          relativePath: 'sha256/dd/' + 'd'.repeat(64),
+          taskId: TASK_ID,
+          runId: `${TASK_ID}-run`,
+          phaseAttemptId: `${TASK_ID}-plan-1`,
+          kind: 'agent-output',
+          retention: 'task',
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    };
+
+    expect(() => persistRunStateSnapshot(database.db, snapshot)).not.toThrow();
+    expect(listArtifactsByTask(database.db, TASK_ID)).toHaveLength(1);
+  });
+
   it('upsertTask persists phase/condition/delivery updates', () => {
     expect(getTask(database.db, TASK_ID)?.phase).toBe('specify');
     upsertTask(database.db, {

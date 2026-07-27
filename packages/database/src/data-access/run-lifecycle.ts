@@ -206,6 +206,16 @@ export function persistRunStateSnapshot(db: DrizzleDb, snapshot: RunStateSnapsho
     if (snapshot.lease) upsertWorkspaceLease(tx as unknown as DrizzleDb, snapshot.lease);
 
     for (const record of snapshot.artifacts) {
+      // Artifacts FK to runs/phase_attempts (schema evidence.ts). Unlike evidence, an artifact can
+      // be persisted before any evidence exists for its attempt (e.g. the plan phase writes a plan
+      // artifact with no verification/QA evidence yet), so ensure its parents from its own ids here
+      // rather than relying on the evidence loop below.
+      if (record.taskId) {
+        ensureRun(tx as unknown as DrizzleDb, record.taskId);
+        if (record.phaseAttemptId) {
+          ensurePhaseAttemptFromId(tx as unknown as DrizzleDb, record.taskId, record.phaseAttemptId);
+        }
+      }
       insertArtifact(tx as unknown as DrizzleDb, record);
     }
 
