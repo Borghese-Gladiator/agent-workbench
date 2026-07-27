@@ -1,6 +1,9 @@
+import { initTelemetry, shutdownTelemetry } from '@awb/telemetry';
 import { startServer } from './server.js';
 
 async function main(): Promise<void> {
+  // Boot OpenTelemetry (TASK-34) — a no-op unless `awb up` set an OTLP endpoint.
+  initTelemetry('awb-daemon');
   const server = await startServer();
   console.log(`Agentic Workbench daemon listening on http://127.0.0.1:${(server.app.server.address() as { port: number }).port}`);
 
@@ -11,6 +14,7 @@ async function main(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     await server.close();
+    await shutdownTelemetry();
     process.exit(0);
   };
   process.on('SIGINT', () => void shutdown());

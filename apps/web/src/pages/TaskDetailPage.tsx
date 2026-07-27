@@ -8,6 +8,20 @@ const POLL_INTERVAL_MS = 2000;
 
 const TERMINAL_CONDITIONS = new Set(['failed', 'cancelled', 'completed']);
 
+/**
+ * Control-plane lifecycle event types (TASK-34), rendered distinctly from agent-produced events so a
+ * phase failing / retrying / a transport drop stands out on the timeline. The value is a CSS modifier
+ * class; anything not listed renders with the default agent-event style.
+ */
+const CONTROL_PLANE_EVENT_CLASS: Record<string, string> = {
+  'phase-started': 'event--phase-started',
+  'phase-failed': 'event--phase-failed',
+  'attempt-retry-scheduled': 'event--retry',
+  'transport-error': 'event--transport-error',
+  'session-started': 'event--session',
+  'session-resumed': 'event--session',
+};
+
 export function TaskDetailPage() {
   const { repositoryId, taskId } = useParams<{ repositoryId: string; taskId: string }>();
   const [state, setState] = useState<TaskWorkflowState | undefined>();
@@ -89,12 +103,15 @@ export function TaskDetailPage() {
         <p>No events yet.</p>
       ) : (
         <ol className="event-timeline">
-          {events.map((e) => (
-            <li key={e.id}>
-              <span className="event-seq">#{e.sequence}</span> <strong>{e.producer}</strong> · {e.phase} ·{' '}
-              {e.type}: {e.summary}
-            </li>
-          ))}
+          {events.map((e) => {
+            const controlPlaneClass = CONTROL_PLANE_EVENT_CLASS[e.type];
+            return (
+              <li key={e.id} className={controlPlaneClass}>
+                <span className="event-seq">#{e.sequence}</span> <strong>{e.producer}</strong> · {e.phase} ·{' '}
+                {e.type}: {e.summary}
+              </li>
+            );
+          })}
         </ol>
       )}
 

@@ -1,6 +1,7 @@
 import { Worker } from '@temporalio/worker';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { initTelemetry } from '@awb/telemetry';
 import * as activities from './activities/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -8,6 +9,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export const TASK_QUEUE = 'awb-task-queue';
 
 export async function startWorker(): Promise<Worker> {
+  // Boot OpenTelemetry (TASK-34) before any activity runs. A no-op unless `awb up` set an OTLP
+  // endpoint, so a plain test/dev run starts no exporter.
+  initTelemetry('awb-worker');
   const worker = await Worker.create({
     taskQueue: TASK_QUEUE,
     // Resolve straight to the real package path, not through the node_modules/@awb symlink —

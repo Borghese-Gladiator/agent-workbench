@@ -6,7 +6,7 @@ import { startService, stopService, waitForDaemonHealth } from '../process-contr
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
 import { parseDuration } from '../duration.js';
 
-const ALL_SERVICES: ServiceKey[] = ['temporal', 'worker', 'daemon', 'ui'];
+const ALL_SERVICES: ServiceKey[] = ['otel', 'temporal', 'worker', 'daemon', 'ui'];
 
 function isServiceKey(value: string): value is ServiceKey {
   return (ALL_SERVICES as string[]).includes(value);
@@ -39,7 +39,7 @@ async function ensureRuntime(): Promise<{ ready: boolean; alreadyReady: boolean;
 export function registerLifecycleCommands(program: Command): void {
   program
     .command('up')
-    .description('Start the core runtime (Temporal, worker, daemon) and wait until healthy')
+    .description('Start the core runtime (OTel collector, Temporal, worker, daemon) and wait until healthy')
     .action(async () => {
       const { ready, alreadyReady, elapsedMs } = await ensureRuntime();
       if (outputOptions().json) {
@@ -64,8 +64,9 @@ export function registerLifecycleCommands(program: Command): void {
     .command('down')
     .description('Stop all AWB-managed local services')
     .action(() => {
-      // Stop UI first, then runtime in reverse start order, so dependents die before their deps.
-      const order: ServiceKey[] = ['ui', 'daemon', 'worker', 'temporal'];
+      // Stop UI first, then runtime in reverse start order, so dependents die before their deps. The
+      // OTel collector started first (so worker/daemon saw its endpoint), so it stops last.
+      const order: ServiceKey[] = ['ui', 'daemon', 'worker', 'temporal', 'otel'];
       const stopped = order.filter((key) => stopService(key));
       if (outputOptions().json) {
         emitJson({ stopped });

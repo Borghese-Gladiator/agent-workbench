@@ -17,6 +17,7 @@
     "@awb/evidence": "workspace:*",
     "@awb/github": "workspace:*",
     "@awb/repository": "workspace:*",
+    "@awb/telemetry": "workspace:*",
     "@awb/workflow": "workspace:*",
     "@temporalio/client": "^1.11.7",
     "@fastify/websocket": "^11.0.2",

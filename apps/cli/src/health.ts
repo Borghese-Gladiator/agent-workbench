@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { createConnection } from 'node:net';
-import { DAEMON_PORT, UI_PORT, pidPathFor, serviceDefinitions, type ServiceKey } from './services.js';
+import { DAEMON_PORT, UI_PORT, OTEL_OTLP_PORT, pidPathFor, serviceDefinitions, type ServiceKey } from './services.js';
 
 export type ServiceState = 'stopped' | 'starting' | 'ready' | 'unhealthy' | 'external' | 'unknown';
 
@@ -107,6 +107,22 @@ async function uiHealth(): Promise<ServiceHealth> {
 }
 
 /**
+ * The OTel collector's health, derived CLI-side like the UI: ready when its OTLP port answers under an
+ * AWB-tracked pid. The collector is diagnostics-only (ADR-008), so it is NOT part of the runtime-ready
+ * gate — a run proceeds whether or not it is up.
+ */
+async function otelHealth(): Promise<ServiceHealth> {
+  const pidInfo = readPid('otel');
+  const listening = await portOpen(OTEL_OTLP_PORT);
+  const port = OTEL_OTLP_PORT;
+  if (pidInfo && isAlive(pidInfo.pid)) {
+    return { key: 'otel', state: listening ? 'ready' : 'starting', pid: pidInfo.pid, port, uptimeMs: pidInfo.uptimeMs };
+  }
+  if (listening) return { key: 'otel', state: 'external', port };
+  return { key: 'otel', state: 'stopped', port };
+}
+
+/**
  * Aggregates the health of every managed service. The daemon's /api/status is authoritative for the
  * three runtime services when it is reachable; otherwise we fall back to PID files. The UI is always
  * derived CLI-side from its port + pid file.
@@ -141,7 +157,10 @@ export async function probeHealth(): Promise<RuntimeHealth> {
   }
 
   const ui = await uiHealth();
+  const otel = await otelHealth();
 
+  // The OTel collector is diagnostics-only (ADR-008) and deliberately excluded from the runtime-ready
+  // gate — telemetry being down must never block a run.
   const runtimeReady = temporal.state === 'ready' && worker.state === 'ready' && daemon.state === 'ready';
   const anyStarting = [temporal, worker, daemon].some((s) => s.state === 'starting');
   const allStopped = [temporal, worker, daemon].every((s) => s.state === 'stopped');
@@ -153,5 +172,5 @@ export async function probeHealth(): Promise<RuntimeHealth> {
         ? 'starting'
         : 'unhealthy';
 
-  return { runtime, services: { temporal, worker, daemon, ui } };
+  return { runtime, services: { temporal, worker, daemon, ui, otel } };
 }

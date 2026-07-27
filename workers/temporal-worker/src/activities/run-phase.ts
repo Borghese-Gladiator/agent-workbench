@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { activityInfo } from '@temporalio/activity';
 import type {
   TaskPhase,
   PhaseAttemptResult,
@@ -60,6 +61,10 @@ import {
 import { SqliteRunStateStore } from './sqlite-run-state-store.js';
 import { ObservabilityAccumulator, estimateContextComposition } from './observability-accumulator.js';
 import { createDaemonClient } from '../daemon-client.js';
+import { createControlPlaneEmitter } from './control-plane-events.js';
+import { isResumableTransportError } from '@awb/agent-gateway';
+import { withSpan } from '@awb/telemetry';
+import { runIdForTask } from '@awb/database';
 import {
   drivePhase,
   blockedResult,
@@ -593,6 +598,22 @@ const implementHandler: PhaseHandler = {
           // transport drop continues the transcript instead of cold-restarting. Keyed by slice.id, which
           // is stable across attempts (unlike attemptNumber), so the key survives retries + restarts.
           const priorSessionId = runState.builderResumeSessions?.[slice.id];
+          // Record which cwd + resume key this session ran under (TASK-34): the runtime-decision context
+          // missing from the 5a513429 write-up. session-resumed vs session-started distinguishes a warm
+          // continuation from a cold start.
+          if (priorSessionId) {
+            await ctx.controlPlane?.sessionResumed({
+              role: 'builder',
+              cwd: runState.worktreePath,
+              resumeKey: slice.id,
+            });
+          } else {
+            await ctx.controlPlane?.sessionStarted({
+              role: 'builder',
+              cwd: runState.worktreePath,
+              resumeKey: slice.id,
+            });
+          }
           const attempt = await runRealBuilderAttempt({
             adapter,
             taskId: state.taskId,
@@ -1224,6 +1245,18 @@ export async function runPhase(input: {
   // durable store can key persisted rows (the mock in-memory store ignores it).
   runState.repositoryId = input.state.repositoryId;
   const durable = strategy === 'claude';
+  const daemon = durable ? createDaemonClient() : undefined;
+
+  // Control-plane observability (TASK-34): emit lifecycle events + open a phase span so a phase
+  // failing/retrying + a transport drop are first-class in the durable stream and the trace, not an
+  // undifferentiated 'message' or a stderr-only [WARN]. Best-effort — never fails the phase.
+  const emitter = createControlPlaneEmitter({
+    taskId: input.state.taskId,
+    phase: input.phase,
+    attemptNumber: input.state.attemptNumber,
+    daemon,
+  });
+
   const ctx: PhaseContext = {
     state: input.state,
     runState,
@@ -1232,15 +1265,70 @@ export async function runPhase(input: {
     usage: new UsageAccumulator(),
     emit: NOOP_PHASE_EVENT_EMITTER,
     observability: new ObservabilityAccumulator(),
-    daemon: durable ? createDaemonClient() : undefined,
+    daemon,
+    controlPlane: emitter,
   };
+  const startedAt = Date.now();
+  await emitter.phaseStarted({ cwd: runState.worktreePath });
 
-  const result = await drivePhase(HANDLERS[input.phase], ctx);
+  try {
+    const result = await withSpan(
+      `phase.${input.phase}`,
+      {
+        run_id: runIdForTask(input.state.taskId),
+        task_id: input.state.taskId,
+        phase: input.phase,
+        attempt_number: input.state.attemptNumber,
+      },
+      () => drivePhase(HANDLERS[input.phase], ctx),
+    );
 
-  // Assimilate completing successfully ends the task; drop its accumulated state (matches the prior
-  // `taskRunStates.delete` on the assimilate candidate path).
-  if (input.phase === 'assimilate' && result.outcome === 'candidate') {
-    await store.remove(input.state.taskId);
+    emitter.phaseDuration(Date.now() - startedAt, result.outcome);
+
+    // Assimilate completing successfully ends the task; drop its accumulated state (matches the prior
+    // `taskRunStates.delete` on the assimilate candidate path).
+    if (input.phase === 'assimilate' && result.outcome === 'candidate') {
+      await store.remove(input.state.taskId);
+    }
+    return result;
+  } catch (err) {
+    // A throw here propagates to Temporal, which retries the runPhase Activity up to maximumAttempts.
+    // Record why + whether a retry is coming, so the retry decision lives in the durable store + metrics
+    // instead of only Temporal's stderr logger (the exact 5a513429 gap).
+    const message = err instanceof Error ? err.message : String(err);
+    const resumable = isResumableTransportError(err);
+    const retryScheduled = currentActivityAttempt() < MAX_ACTIVITY_ATTEMPTS;
+    emitter.phaseDuration(Date.now() - startedAt, 'error');
+    if (resumable) {
+      await emitter.transportError({ message });
+    }
+    await emitter.phaseFailed({
+      errorClass: resumable ? 'transport-drop' : classifyErrorClass(err),
+      message,
+      resumable,
+      retryScheduled,
+    });
+    throw err;
   }
-  return result;
+}
+
+/**
+ * The Activity's Temporal retry attempt (1-based), read defensively — `activityInfo()` throws when
+ * runPhase is called outside a Worker (the direct e2e test path), so fall back to 1 there.
+ */
+function currentActivityAttempt(): number {
+  try {
+    return activityInfo().attempt;
+  } catch {
+    return 1;
+  }
+}
+
+/** Mirrors the workflow's retry policy (`maximumAttempts: 3`, task-workflow.ts) for the retry decision. */
+const MAX_ACTIVITY_ATTEMPTS = 3;
+
+/** A coarse error class for a control-plane failure event when it isn't a known transport drop. */
+function classifyErrorClass(err: unknown): string {
+  const name = err instanceof Error ? err.name : 'Error';
+  return name === 'Error' ? 'phase-error' : name;
 }

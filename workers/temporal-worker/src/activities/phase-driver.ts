@@ -11,6 +11,7 @@ import type { AgentRuntime } from './agent-factory.js';
 import type { RunStateStore, TaskRunState } from './run-state-store.js';
 import type { ObservabilityAccumulator } from './observability-accumulator.js';
 import type { DaemonClient } from '../daemon-client.js';
+import type { ControlPlaneEmitter } from './control-plane-events.js';
 import { runIdForTask } from '@awb/database';
 
 /**
@@ -79,6 +80,11 @@ export interface PhaseContext {
   observability: ObservabilityAccumulator;
   /** Daemon client for persisting observability; undefined on the mock path (nothing to persist). */
   daemon?: DaemonClient;
+  /**
+   * Control-plane lifecycle emitter (TASK-34) so a handler can emit session-started/session-resumed
+   * with the cwd + resume key each session ran under. Undefined on the mock path (no daemon to post to).
+   */
+  controlPlane?: ControlPlaneEmitter;
 }
 
 /**

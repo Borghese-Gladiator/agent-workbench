@@ -37,6 +37,8 @@ export function startService(key: ServiceKey): { started: boolean; pid?: number 
     cwd: def.cwd,
     detached: true,
     stdio: ['ignore', logFd, logFd],
+    // Merge any service-specific env (e.g. the OTLP endpoint for worker/daemon) over the inherited env.
+    env: def.env ? { ...process.env, ...def.env } : process.env,
   });
   child.unref();
   if (child.pid === undefined) {

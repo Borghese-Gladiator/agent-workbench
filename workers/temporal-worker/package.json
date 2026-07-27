@@ -24,6 +24,7 @@
     "@awb/qa": "workspace:*",
     "@awb/repository": "workspace:*",
     "@awb/review": "workspace:*",
+    "@awb/telemetry": "workspace:*",
     "@awb/verification": "workspace:*",
     "@awb/workspace": "workspace:*",
     "@awb/workflow": "workspace:*",

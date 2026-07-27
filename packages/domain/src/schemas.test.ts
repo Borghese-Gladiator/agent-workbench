@@ -206,6 +206,30 @@ describe('domain schemas', () => {
     expect(event.phase).toBe('implement');
   });
 
+  it.each([
+    'phase-started',
+    'phase-failed',
+    'attempt-retry-scheduled',
+    'transport-error',
+    'session-started',
+    'session-resumed',
+  ] as const)('parses the control-plane SemanticEvent type %s from the workbench producer (TASK-34)', (type) => {
+    const event = SemanticEventSchema.parse({
+      id: 'event-cp',
+      runId: 'run-1',
+      sequence: 0,
+      occurredAt: new Date().toISOString(),
+      phase: 'implement',
+      phaseAttemptId: 'pa-1',
+      producer: 'workbench',
+      type,
+      summary: `control-plane ${type}`,
+      payloadJson: { attemptNumber: 2, errorClass: 'transport-drop' },
+    });
+    expect(event.producer).toBe('workbench');
+    expect(event.type).toBe(type);
+  });
+
   it('discriminates PhaseAttemptResult by outcome', () => {
     const candidateResult = PhaseAttemptResultSchema.parse({
       outcome: 'candidate',

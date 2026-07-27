@@ -152,3 +152,22 @@ body {
   padding: 0.75rem 1rem;
   margin: 1rem 0;
 }
+
+/* Control-plane lifecycle events (TASK-34) stand out from the agent-produced stream. */
+.event-timeline .event--phase-started {
+  color: #4a6da7;
+}
+
+.event-timeline .event--phase-failed,
+.event-timeline .event--transport-error {
+  color: #b3261e;
+  font-weight: 600;
+}
+
+.event-timeline .event--retry {
+  color: #a35b00;
+}
+
+.event-timeline .event--session {
+  color: #2e7d32;
+}
