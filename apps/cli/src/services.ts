@@ -47,10 +47,12 @@ export function serviceDefinitions(): Record<ServiceKey, ServiceDefinition> {
     otel: {
       key: 'otel',
       label: 'OTel collector (grafana/otel-lgtm)',
-      // All-in-one collector: OTLP receiver (4317 gRPC / 4318 HTTP) + Tempo (traces) + Prometheus
-      // (metrics) + Loki (logs) + a Grafana explorer on 3000. Run under Docker so `awb up` needs no
-      // separate binary install; --rm keeps it disposable (traces/metrics are diagnostics, not durable
-      // product data — ADR-008). Named so `down`/restart can target it and a stale container is reused.
+      // All-in-one collector: OTLP receiver + Tempo (traces) + Prometheus (metrics) + Loki (logs) + a
+      // Grafana explorer on 3000. Run under Docker so `awb up` needs no separate binary install; --rm
+      // keeps it disposable (traces/metrics are diagnostics, not durable product data — ADR-008). Named
+      // so `down`/restart can target it. We publish only OTLP/HTTP (4318, what @awb/telemetry exports to)
+      // and Grafana (3000); the gRPC receiver (4317) is left unpublished so this never collides with an
+      // unrelated collector already holding 4317 on the host.
       command: 'docker',
       args: [
         'run',
@@ -59,8 +61,6 @@ export function serviceDefinitions(): Record<ServiceKey, ServiceDefinition> {
         'awb-otel-lgtm',
         '-p',
         `${OTEL_OTLP_PORT}:4318`,
-        '-p',
-        '4317:4317',
         '-p',
         `${OTEL_UI_PORT}:3000`,
         'grafana/otel-lgtm:latest',
