@@ -287,6 +287,28 @@ export function registerTaskCommands(program: Command): void {
     });
 
   task
+    .command('remove [repositoryId] [taskId]')
+    .alias('rm')
+    .description('Delete a task and all of its rows (terminates the workflow first)')
+    .option('--yes', 'Skip the confirmation prompt')
+    .action(async (repositoryId: string | undefined, taskId: string | undefined, opts: { yes?: boolean }) => {
+      try {
+        const repoId = resolveRepositoryId(repositoryId);
+        const tId = resolveTaskId(taskId);
+        if (opts.yes !== true && !outputOptions().input) {
+          printError(`Refusing to remove ${tId} without --yes (no interactive input available).`);
+          process.exitCode = 1;
+          return;
+        }
+        await daemonClient.del(`/api/tasks/${repoId}/${tId}`);
+        if (outputOptions().json) emitJson({ removed: tId });
+        else printInfo(`Removed task ${tId} and its rows.`);
+      } catch (err) {
+        handleError(err);
+      }
+    });
+
+  task
     .command('open [repositoryId] [taskId]')
     .description('Open the task in the web UI')
     .action((repositoryId: string | undefined, taskId: string | undefined) => {

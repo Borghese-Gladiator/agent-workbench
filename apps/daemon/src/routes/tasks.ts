@@ -15,7 +15,7 @@ import {
   getPendingHumanGateQuery,
 } from '@awb/workflow';
 import type { WorkbenchDatabase } from '@awb/database';
-import { upsertTask, listTasks, getTokenBreakdown, getRuntimeAttribution } from '@awb/database';
+import { upsertTask, listTasks, deleteTask, getTokenBreakdown, getRuntimeAttribution } from '@awb/database';
 import { routeFeedback, NO_ROUTING_SIGNAL, type FeedbackRoutingSignal } from '@awb/github';
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
 import { TASK_QUEUE } from '../temporal-worker-constants.js';
@@ -138,6 +138,27 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
         reply.code(409);
         return { error: err instanceof Error ? err.message : String(err) };
       }
+    },
+  );
+
+  app.delete<{ Params: { repositoryId: string; taskId: string } }>(
+    '/api/tasks/:repositoryId/:taskId',
+    async (request, reply) => {
+      // Terminate the workflow first (best-effort) so a still-running run can't re-persist rows after
+      // the cascade deletes them; then drop the task + every FK-descendant row (TASK-37).
+      const client = await getTemporalClient();
+      const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
+      try {
+        await handle.terminate('task removed');
+      } catch {
+        // No running workflow (completed/failed/never-started) — nothing to terminate.
+      }
+      const removed = deleteTask(database.db, request.params.taskId);
+      if (!removed) {
+        reply.code(404);
+        return { error: `No task ${request.params.taskId}` };
+      }
+      return { removed: request.params.taskId };
     },
   );
 

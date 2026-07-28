@@ -143,4 +143,40 @@ describe('daemon routes drive a task to completion', () => {
     expect(result.state.condition).toBe('completed');
     expect(result.state.deliveryState).toBe('merged');
   }, 90_000);
+
+  it('DELETE removes a task (terminating its workflow) and drops it from the list (TASK-37)', async () => {
+    const worker = await Worker.create({
+      connection: testEnv.nativeConnection,
+      taskQueue: TASK_QUEUE,
+      workflowsPath: new URL('../../../../packages/workflow/dist/task-workflow.js', import.meta.url).pathname,
+      activities: { runPhase },
+    });
+
+    await worker.runUntil(async () => {
+      const repositoryId = 'daemon-e2e-repo';
+      const createRes = await server.app.inject({
+        method: 'POST',
+        url: '/api/tasks',
+        payload: { repositoryId, prompt: 'delete me' },
+      });
+      const { taskId } = createRes.json();
+
+      // Let the workflow persist at least the task row before we delete (it's created synchronously).
+      await poll(async () => {
+        const list = await server.app.inject({ method: 'GET', url: '/api/tasks' });
+        return list.json().some((t: { taskId: string }) => t.taskId === taskId);
+      });
+
+      const del = await server.app.inject({ method: 'DELETE', url: `/api/tasks/${repositoryId}/${taskId}` });
+      expect(del.statusCode).toBe(200);
+      expect(del.json()).toEqual({ removed: taskId });
+
+      const list = await server.app.inject({ method: 'GET', url: '/api/tasks' });
+      expect(list.json().some((t: { taskId: string }) => t.taskId === taskId)).toBe(false);
+
+      // Deleting again is a 404 — the row is gone.
+      const again = await server.app.inject({ method: 'DELETE', url: `/api/tasks/${repositoryId}/${taskId}` });
+      expect(again.statusCode).toBe(404);
+    });
+  }, 60_000);
 });

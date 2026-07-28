@@ -1,6 +1,32 @@
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import type { TaskPhase, RunCondition, DeliveryState } from '@awb/domain';
-import { tasks, runs, phaseAttempts } from '../schema/index.js';
+import {
+  tasks,
+  runs,
+  phaseAttempts,
+  agentSessions,
+  modelInvocations,
+  toolInvocations,
+  commandExecutions,
+  semanticEvents,
+  runtimeAttribution,
+  contextComposition,
+  findings,
+  evidence,
+  evidenceClaims,
+  evidenceDependencies,
+  artifacts,
+  humanDecisions,
+  waivers,
+  plans,
+  planSlices,
+  planClaimCoverage,
+  taskContracts,
+  acceptanceClaims,
+  pullRequests,
+  pullRequestFeedback,
+  workspaceLeases,
+} from '../schema/index.js';
 import type { DrizzleDb } from '../connection.js';
 import type { TaskRow } from '../row-types.js';
 
@@ -139,4 +165,120 @@ export function ensurePhaseAttempt(
       .run();
   }
   return id;
+}
+
+/**
+ * Deletes a task and every descendant row across the ~24 FK-linked tables, in one transaction and in
+ * FK-safe order (children before parents), so `foreign_keys=ON` never rejects a delete and no orphaned
+ * rows survive (TASK-37). Returns false when the task row was absent (nothing deleted).
+ *
+ * Rows carrying `task_id` directly are deleted by that column; join/detail tables that only FK to an
+ * intermediate parent (agent sessions, evidence, plans, contracts, pull requests) are deleted via an
+ * `inArray` over the parent ids resolved for this task.
+ *
+ * NOTE: `memory_sources` is deliberately NOT touched. Despite carrying a `task_id` text column it has
+ * no FK to `tasks` (it FKs `memory_entries`, which is repo-scoped), so it never blocks this delete and
+ * removing it would orphan repository-scoped memory.
+ */
+export function deleteTask(db: DrizzleDb, taskId: string): boolean {
+  const existing = db.select().from(tasks).where(eq(tasks.id, taskId)).all()[0];
+  if (!existing) return false;
+
+  db.transaction((tx) => {
+    const sessionIds = tx
+      .select({ id: agentSessions.id })
+      .from(agentSessions)
+      .where(eq(agentSessions.taskId, taskId))
+      .all()
+      .map((r) => r.id);
+    const evidenceIds = tx
+      .select({ id: evidence.id })
+      .from(evidence)
+      .where(eq(evidence.taskId, taskId))
+      .all()
+      .map((r) => r.id);
+    const planIds = tx
+      .select({ id: plans.id })
+      .from(plans)
+      .where(eq(plans.taskId, taskId))
+      .all()
+      .map((r) => r.id);
+    const contractIds = tx
+      .select({ id: taskContracts.id })
+      .from(taskContracts)
+      .where(eq(taskContracts.taskId, taskId))
+      .all()
+      .map((r) => r.id);
+    const prIds = tx
+      .select({ id: pullRequests.id })
+      .from(pullRequests)
+      .where(eq(pullRequests.taskId, taskId))
+      .all()
+      .map((r) => r.id);
+    const runIds = tx
+      .select({ id: runs.id })
+      .from(runs)
+      .where(eq(runs.taskId, taskId))
+      .all()
+      .map((r) => r.id);
+
+    // 1. agent-session detail tables (FK → agent_sessions)
+    if (sessionIds.length > 0) {
+      tx.delete(modelInvocations).where(inArray(modelInvocations.agentSessionId, sessionIds)).run();
+      tx.delete(toolInvocations).where(inArray(toolInvocations.agentSessionId, sessionIds)).run();
+    }
+    // 2-3. context + command executions carry task_id / phase_attempt_id, but delete by session too
+    tx.delete(contextComposition).where(eq(contextComposition.taskId, taskId)).run();
+    if (sessionIds.length > 0) {
+      tx.delete(commandExecutions).where(inArray(commandExecutions.agentSessionId, sessionIds)).run();
+    }
+    // 4. agent sessions
+    tx.delete(agentSessions).where(eq(agentSessions.taskId, taskId)).run();
+
+    // 5. evidence join tables (FK → evidence)
+    if (evidenceIds.length > 0) {
+      tx.delete(evidenceClaims).where(inArray(evidenceClaims.evidenceId, evidenceIds)).run();
+      tx.delete(evidenceDependencies).where(inArray(evidenceDependencies.evidenceId, evidenceIds)).run();
+    }
+    // 6. evidence
+    tx.delete(evidence).where(eq(evidence.taskId, taskId)).run();
+    // 7-8. waivers (FK → findings) before findings
+    tx.delete(waivers).where(eq(waivers.taskId, taskId)).run();
+    tx.delete(findings).where(eq(findings.taskId, taskId)).run();
+
+    // 9-10. plan children (FK → plans) before plans
+    if (planIds.length > 0) {
+      tx.delete(planClaimCoverage).where(inArray(planClaimCoverage.planId, planIds)).run();
+      tx.delete(planSlices).where(inArray(planSlices.planId, planIds)).run();
+    }
+    tx.delete(plans).where(eq(plans.taskId, taskId)).run();
+
+    // 11-12. contract claims (FK → task_contracts) before contracts
+    if (contractIds.length > 0) {
+      tx.delete(acceptanceClaims).where(inArray(acceptanceClaims.taskContractId, contractIds)).run();
+    }
+    tx.delete(taskContracts).where(eq(taskContracts.taskId, taskId)).run();
+
+    // 13-14. PR feedback (FK → pull_requests) before pull requests
+    if (prIds.length > 0) {
+      tx.delete(pullRequestFeedback).where(inArray(pullRequestFeedback.pullRequestId, prIds)).run();
+    }
+    tx.delete(pullRequests).where(eq(pullRequests.taskId, taskId)).run();
+
+    // 15-19. remaining task/run/phase-attempt children
+    tx.delete(runtimeAttribution).where(eq(runtimeAttribution.taskId, taskId)).run();
+    if (runIds.length > 0) {
+      tx.delete(semanticEvents).where(inArray(semanticEvents.runId, runIds)).run();
+    }
+    tx.delete(artifacts).where(eq(artifacts.taskId, taskId)).run();
+    tx.delete(workspaceLeases).where(eq(workspaceLeases.taskId, taskId)).run();
+    tx.delete(humanDecisions).where(eq(humanDecisions.taskId, taskId)).run();
+
+    // 20-22. scaffolding parents last
+    tx.delete(phaseAttempts).where(eq(phaseAttempts.taskId, taskId)).run();
+    tx.delete(runs).where(eq(runs.taskId, taskId)).run();
+    tx.delete(tasks).where(eq(tasks.id, taskId)).run();
+  });
+
+  return true;
 }

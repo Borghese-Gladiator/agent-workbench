@@ -12,6 +12,7 @@ import {
   unregisterRepository,
 } from '@awb/repository';
 import type { Repository } from '@awb/domain';
+import { listTasks, deleteTask } from '@awb/database';
 import { openWorkbenchDatabase } from '../db.js';
 import { rememberRepositoryId, resolveRepositoryId } from '../remembered.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
@@ -166,7 +167,8 @@ export function registerRepoCommands(program: Command): void {
     .alias('rm')
     .description('Unregister a repository (does not delete its files)')
     .option('--yes', 'Skip the confirmation prompt')
-    .action(async (ref: string | undefined, opts: { yes?: boolean }) => {
+    .option('--with-tasks', "Also delete the repository's tasks (otherwise they would be orphaned)")
+    .action(async (ref: string | undefined, opts: { yes?: boolean; withTasks?: boolean }) => {
       const db = openWorkbenchDatabase().db;
       const id = await resolveRepoRef(ref);
       const repository = await getRepository(db, id);
@@ -180,8 +182,20 @@ export function registerRepoCommands(program: Command): void {
         process.exitCode = 1;
         return;
       }
+      const repoTasks = listTasks(db).filter((t) => t.repositoryId === id);
+      if (opts.withTasks) {
+        for (const t of repoTasks) deleteTask(db, t.id);
+      } else if (repoTasks.length > 0) {
+        // Don't silently orphan tasks — warn and name them so the user can re-run with --with-tasks.
+        printError(
+          `${repoTasks.length} task(s) reference ${id} and would be orphaned: ${repoTasks.map((t) => t.id).join(', ')}. ` +
+            `Re-run with --with-tasks to delete them too.`,
+        );
+        process.exitCode = 1;
+        return;
+      }
       await unregisterRepository(db, id);
-      if (outputOptions().json) emitJson({ removed: id });
+      if (outputOptions().json) emitJson({ removed: id, tasksDeleted: opts.withTasks ? repoTasks.length : 0 });
       else printInfo(`Unregistered ${repository.name} (${id}). Files left untouched.`);
     });
 

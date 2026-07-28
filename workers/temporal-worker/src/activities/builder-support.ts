@@ -1,4 +1,6 @@
 import { runGit, getHeadSha, getStatus } from '@awb/repository';
+import { runIdForTask } from '@awb/database';
+import { withSpan } from '@awb/telemetry';
 import type { CodingAgentAdapter, AgentEventSink } from '@awb/agent-gateway';
 import type { PlanSlice, ModelUsage } from '@awb/domain';
 import type { SliceAttemptOutcome } from '@awb/planning';
@@ -41,6 +43,17 @@ export interface RealBuilderAttemptResult {
  * this only executes a single attempt and reports its outcome.
  */
 export async function runRealBuilderAttempt(input: RealBuilderAttemptInput): Promise<RealBuilderAttemptResult> {
+  // Open a `session.builder` child span under the active phase span (TASK-36). No explicit parent — it
+  // runs inside `phase.implement`'s `withSpan` callback, so it auto-nests under that phase's trace,
+  // giving the real tree `run → phase.implement → session.builder`.
+  return withSpan(
+    'session.builder',
+    { run_id: runIdForTask(input.taskId), task_id: input.taskId, phase: 'implement' },
+    () => runBuilderSession(input),
+  );
+}
+
+async function runBuilderSession(input: RealBuilderAttemptInput): Promise<RealBuilderAttemptResult> {
   const session = await input.adapter.createSession({
     role: 'builder',
     taskId: input.taskId,

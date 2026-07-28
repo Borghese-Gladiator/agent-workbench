@@ -501,6 +501,9 @@ importers:
         specifier: ^1.28.0
         version: 1.43.0
     devDependencies:
+      '@opentelemetry/context-async-hooks':
+        specifier: ^1.30.0
+        version: 1.30.1(@opentelemetry/api@1.9.1)
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3

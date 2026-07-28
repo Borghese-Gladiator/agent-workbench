@@ -1281,6 +1281,9 @@ export async function runPhase(input: {
         attempt_number: input.state.attemptNumber,
       },
       () => drivePhase(HANDLERS[input.phase], ctx),
+      // Parent every phase to the run's deterministic trace so all phases of a task nest under ONE
+      // trace (TASK-36) instead of each phase minting its own random trace id.
+      { parentRunId: runIdForTask(input.state.taskId) },
     );
 
     emitter.phaseDuration(Date.now() - startedAt, result.outcome);
