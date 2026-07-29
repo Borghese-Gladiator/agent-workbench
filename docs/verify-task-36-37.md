@@ -5,9 +5,20 @@ proof paths: a pure function (no stack), SQLite (survives teardown), and Tempo
 (needs a live stack).
 
 Paths used below:
-- DB: `~/.agentic-workbench/database/workbench.sqlite`
-- Grafana (Tempo/Prometheus explorer): `http://127.0.0.1:3000` (only while `awb up`)
-- OTLP receiver: `http://127.0.0.1:4318` (only while `awb up`)
+- DB: `~/.agentic-workbench/database/workbench.sqlite` (survives `awb down`)
+- **Grafana UI** (open this in a browser): `http://127.0.0.1:3000` — Explore → Tempo
+- OTLP receiver: `http://127.0.0.1:4318` — this is an **ingest endpoint, not a UI**;
+  a browser hitting it returns `404 page not found` even when healthy. Do not
+  open it in a browser; spans are POSTed to it by the worker/daemon.
+
+> **Two hard prerequisites for any Tempo query to return data:**
+> 1. **Run under the claude runtime.** Boot with
+>    `AWB_AGENT_RUNTIME=claude AWB_QA_MODE=browser awb up`. The default (mock)
+>    runtime emits little/no telemetry — Tempo will look empty.
+> 2. **The trace must still exist.** The collector is `grafana/otel-lgtm --rm`
+>    with an in-memory store, so **`awb down` wipes every trace.** Query a trace
+>    from the *current* stack session, not a previous one. A trace id from a prior
+>    run will return `"traces": []` / "Not Found" — that is expected, not a bug.
 
 Fill these in from your run:
 - `TASK` = a task id (from `awb task list`)
@@ -53,16 +64,22 @@ curl -s "http://127.0.0.1:3000/api/datasources/proxy/uid/tempo/api/search?tags=t
 TRACE=$(printf '%s' "${TASK}-run" | openssl dgst -sha256 | awk '{print substr($NF,1,32)}')
 curl -s "http://127.0.0.1:3000/api/datasources/proxy/uid/tempo/api/traces/${TRACE}" \
 | python3 -c '
-import sys,json,base64
-d=json.load(sys.stdin); h=lambda x: base64.b64decode(x).hex() if x else ""
-spans=[s for b in (d.get("batches") or []) for ss in b.get("scopeSpans",[]) for s in ss.get("spans",[])]
-byid={h(s["spanId"]):s for s in spans}
-print("distinct traceIds:", {h(s["traceId"]) for s in spans}, "(expect exactly one)")
+import sys, json, base64
+d = json.load(sys.stdin)
+def hx(x):
+    return base64.b64decode(x).hex() if x else ""
+spans = [s for b in (d.get("batches") or [])
+           for ss in b.get("scopeSpans", [])
+           for s in ss.get("spans", [])]
+byid = {hx(s["spanId"]): s for s in spans}
+print("distinct traceIds:", {hx(s["traceId"]) for s in spans}, "(expect exactly one)")
 for s in spans:
-    pid=h(s.get("parentSpanId","")); par=byid.get(pid)
-    pdesc=par["name"] if par else ("DERIVED-RUN-ROOT" if pid else "NONE")
-    dur=(int(s.get("endTimeUnixNano",0))-int(s.get("startTimeUnixNano",0)))//1_000_000
-    print(f"  {s[\"name\"]:22} {dur:7}ms  parent -> {pdesc}")'
+    pid = hx(s.get("parentSpanId", ""))
+    par = byid.get(pid)
+    pdesc = par["name"] if par else ("DERIVED-RUN-ROOT" if pid else "NONE")
+    dur = (int(s.get("endTimeUnixNano", 0)) - int(s.get("startTimeUnixNano", 0))) // 1_000_000
+    name = s["name"]
+    print("  {:22} {:7}ms  parent -> {}".format(name, dur, pdesc))'
 ```
 
 Expected shape (durations vary):
