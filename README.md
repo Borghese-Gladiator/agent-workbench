@@ -72,9 +72,23 @@ pnpm --filter @awb/daemon dev
 Once the stack is up, drive it with the CLI. Run it buildless via the `cli`
 script (no `pnpm build` needed):
 
-```bash
-awb() { pnpm --filter @awb/cli cli -- "$@"; }   # or `pnpm link` the CLI package for a bare `awb`
+For a bare `awb` that works from any directory (runs the live TS source via
+`tsx`, no `pnpm build` needed), symlink the wrapper into a dir on your `PATH`
+once:
 
+```bash
+ln -sf "$PWD/apps/cli/bin/awb.sh" ~/.local/bin/awb   # ~/.local/bin must be on $PATH
+```
+
+Alternatively, a shell function works but only from inside this repo:
+
+```bash
+awb() { pnpm --filter @awb/cli cli -- "$@"; }
+```
+
+Either way:
+
+```bash
 awb repo add /path/to/some/real/git/repo --json   # prints the repo, remembers its id
 awb repo refresh                                   # id falls back to the last one used
 awb repo approve

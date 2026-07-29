@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
-    "awb": "./dist/index.js"
+    "awb": "./bin/awb.sh"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
