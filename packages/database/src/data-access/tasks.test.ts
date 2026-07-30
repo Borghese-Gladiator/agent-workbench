@@ -29,7 +29,7 @@ import {
   workspaceLeases,
   type WorkbenchDatabase,
 } from '../index.js';
-import { upsertTask, ensureRun, ensurePhaseAttempt, deleteTask } from './tasks.js';
+import { upsertTask, ensureRun, ensurePhaseAttempt, deleteTask, listTasksWithRepository } from './tasks.js';
 
 const REPO_ID = 'repo-1';
 const now = '2026-07-28T00:00:00.000Z';
@@ -166,5 +166,40 @@ describe('deleteTask (TASK-37: FK-safe cascade)', () => {
     const before = rowCountForTask(db, 'task-A');
     expect(deleteTask(db.db, 'task-missing')).toBe(false);
     expect(rowCountForTask(db, 'task-A')).toBe(before);
+  });
+});
+
+describe('listTasksWithRepository', () => {
+  let dir: string;
+  let db: WorkbenchDatabase;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'awb-listtask-'));
+    db = createDatabase(join(dir, 'wb.sqlite'));
+    db.db
+      .insert(repositories)
+      .values({ id: REPO_ID, canonicalPath: '/tmp/repo', name: 'browser-games', remoteUrl: null, defaultBranch: 'main', trusted: true, createdAt: now, updatedAt: now })
+      .run();
+  });
+
+  afterEach(async () => {
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('joins the repository name and carries lifecycle fields', () => {
+    upsertTask(db.db, { id: 'task-1', repositoryId: REPO_ID, prompt: 'do a thing', phase: 'plan', condition: 'running' });
+    const rows = listTasksWithRepository(db.db);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: 'task-1',
+      repositoryId: REPO_ID,
+      repositoryName: 'browser-games',
+      prompt: 'do a thing',
+      phase: 'plan',
+      condition: 'running',
+    });
+    expect(rows[0]?.createdAt).toBeTruthy();
+    expect(rows[0]?.updatedAt).toBeTruthy();
   });
 });

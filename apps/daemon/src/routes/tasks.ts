@@ -15,7 +15,7 @@ import {
   getPendingHumanGateQuery,
 } from '@awb/workflow';
 import type { WorkbenchDatabase } from '@awb/database';
-import { upsertTask, listTasks, deleteTask, getTokenBreakdown, getRuntimeAttribution } from '@awb/database';
+import { upsertTask, listTasksWithRepository, deleteTask, getTokenBreakdown, getRuntimeAttribution } from '@awb/database';
 import { routeFeedback, NO_ROUTING_SIGNAL, type FeedbackRoutingSignal } from '@awb/github';
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
 import { TASK_QUEUE } from '../temporal-worker-constants.js';
@@ -23,9 +23,14 @@ import { TASK_QUEUE } from '../temporal-worker-constants.js';
 export interface CreatedTaskRecord {
   taskId: string;
   repositoryId: string;
+  repositoryName: string | null;
   workflowId: string;
   prompt: string;
+  phase: string;
+  condition: string;
+  deliveryState: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchDatabase): void {
@@ -50,13 +55,18 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
   });
 
   app.get('/api/tasks', async () => {
-    return listTasks(database.db).map(
+    return listTasksWithRepository(database.db).map(
       (t): CreatedTaskRecord => ({
         taskId: t.id,
         repositoryId: t.repositoryId,
+        repositoryName: t.repositoryName,
         workflowId: workflowIdFor(t.repositoryId, t.id),
         prompt: t.prompt,
+        phase: t.phase,
+        condition: t.condition,
+        deliveryState: t.deliveryState,
         createdAt: t.createdAt,
+        updatedAt: t.updatedAt,
       }),
     );
   });

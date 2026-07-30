@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
+import { ToastProvider } from './components/Toast.js';
 import { RepositoriesPage } from './pages/RepositoriesPage.js';
 import { RepositoryDetailPage } from './pages/RepositoryDetailPage.js';
 import { TasksPage } from './pages/TasksPage.js';
@@ -10,6 +11,7 @@ import { SettingsPage } from './pages/SettingsPage.js';
 export function App() {
   return (
     <BrowserRouter>
+      <ToastProvider>
       <div className="app-shell">
         <nav className="app-nav">
           <NavLink to="/" end>
@@ -32,6 +34,7 @@ export function App() {
           </Routes>
         </main>
       </div>
+      </ToastProvider>
     </BrowserRouter>
   );
 }
