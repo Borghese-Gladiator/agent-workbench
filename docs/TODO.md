@@ -4,99 +4,18 @@ Prioritized List of Things to Fix
 Each task: what's wrong / what to do, where, and how we'll know it's done.
 Status legend: `[ ]` open · `[~]` in progress · `[x]` done
 
----
-
-## P1 — Observability follow-ups (from live run f47a0d8e, 2026-07-27)
-
-First full-lifecycle claude run under the new OTel layer (TASK-34) succeeded end
-to end (draft PR `browser-games__ai#7`) and proved control-plane events +
-per-phase traces + metrics land. But looking at the traces in Tempo surfaced a
-structural bug the unit tests couldn't (they assert a span exists + carries
-`run_id`, never the trace *shape*).
-
-### [x] TASK-36: One trace per run, not one trace per phase (nested span tree)
-
-**What's wrong.** Each phase renders as its OWN trace with a single span — a run
-is 9 separate one-span traces (`phase.specify`, `phase.plan`, … each a distinct
-trace id), not one trace with the phases nested under it. The Tempo waterfall for
-any phase shows "1 span" and no structure, so the trace view is not actually
-useful for "why did this run take so long / where did time go". Two root causes:
-1. **No shared trace id across phases.** Every phase is a separate Temporal
-   activity execution (`runPhase` invoked once per phase, often a different
-   event-loop turn / worker), and `withSpan` (`packages/telemetry/src/spans.ts`)
-   calls `tracer.startActiveSpan` with **no parent context**, so OTel mints a
-   fresh random trace id per phase. In-process context propagation can't link them
-   because there is no shared process context between activities.
-2. **The phase span is a leaf.** The agent session + tool calls are emitted only
-   as `semantic_events` rows; no OTel **child spans** are opened under the phase
-   span (`run-phase.ts:1275` wraps only `drivePhase`). So even within a phase
-   there is nothing to nest.
-
-**What to do.**
-1. Derive a **deterministic 16-byte trace id from `run_id`** (hash) so every phase
-   of the same task lands in the same trace. Add a `withSpan` variant (or an
-   option) to `@awb/telemetry` that takes `runId` and attaches a reconstructed,
-   non-recording run-level `SpanContext` as the parent (build it with
-   `trace.setSpanContext` on a fresh context; pass that context to
-   `startActiveSpan`).
-2. Optionally emit a stable per-run **root span** (`run`) once, or just parent all
-   phase spans to the derived run context so they nest as siblings under one trace.
-3. Open **child spans** under each phase span for the agent session
-   (`session.<role>`) and, where cheap, tool calls — the builder path
-   (`builder-support.ts` / `run-phase.ts` implement loop) and the QA/review paths.
-   This gives the real tree: `run → phase.plan → session.planner → tool.Read …`.
-
-**Where.** `packages/telemetry/src/spans.ts` (the parent-context variant),
-`workers/temporal-worker/src/activities/run-phase.ts:1275` (parent the phase span
-to the run context; open session child spans), `builder-support.ts` (tool/session
-spans). Bridge ids already present (`run_id`/`task_id` on every span).
-
-**How we'll know it's done.**
-- *Unit:* a telemetry test asserting two `withSpan` calls with the same `runId`
-  share a trace id (and differ across run ids), and that a child span's parent is
-  the phase span.
-- *Manual (live):* re-drive a task; in Tempo a single trace id covers the whole
-  run, its waterfall shows `phase.*` spans nested under one root with real
-  durations, and at least the builder phase has a nested `session.*` child.
-
-### [x] TASK-37: `awb task remove` + cascade (no CLI way to delete a task today)
-
-**What's wrong.** There is no CLI command to delete a task — cleaning up old/failed
-tasks (2026-07-27) required hand-writing DELETEs across ~15 FK-linked tables
-(`tasks`, `runs`, `phase_attempts`, `agent_sessions` + its `model_invocations`/
-`tool_invocations`/`context_composition`/`command_executions`, `semantic_events`,
-`runtime_attribution`, `evidence` + claims/deps, `findings`, `plans` + slices/
-coverage, `task_contracts` + claims, `pull_requests` + feedback, `workspace_leases`,
-`waivers`, `human_decisions`, `artifacts`, `memory_sources`). `repo remove`
-(`packages/repository/src/persist.ts:99`) deletes only the repo + discovery rows,
-so removing a repo **orphans** its tasks rather than cascading.
-
-**What to do.**
-1. Add a daemon data-access `deleteTask(db, taskId)` that removes a task and all
-   descendant rows in FK-safe order, in one transaction (mirror the cleanup script
-   used on 2026-07-27).
-2. Expose `awb task remove [taskId] --yes` in the CLI.
-3. Make `repo remove` optionally cascade its tasks (a `--with-tasks` flag) so it no
-   longer orphans them, or at least warn + list the tasks it would orphan.
-
-**Where.** `packages/database/src/data-access/` (new `deleteTask`), the daemon
-internal route + `apps/daemon` handler, `apps/cli/src/commands/` (task remove),
-`packages/repository/src/persist.ts` (cascade option).
-
-**How we'll know it's done.** *Unit:* a data-access test that `deleteTask` removes
-the task + every descendant and leaves a sibling task's rows intact, with
-`PRAGMA foreign_key_check` clean afterward. *Manual:* `awb task remove <id> --yes`
-drops it from `task list` and the web UI with no orphaned rows.
+Tasks are grouped by implementation theme and ordered so foundational work comes
+before what depends on it. Task IDs are stable (referenced across the code and
+notes) — the numbers are not sequential within a group. Provenance for each
+cluster (the live runs / articles that surfaced it) is noted in-line and in the
+Reference notes at the bottom.
 
 ---
 
-## P1 — Idea triage (2026-08-03)
+## Group A — Runtime & multi-adapter (foundational)
 
-Sorted a backlog of loose ideas into what actually applies to this workbench.
-Each item below was checked against the live code (and the live PR
-`browser-games__ai#7`), not just accepted at face value. Ideas that turned out
-non-applicable or already-done are listed at the bottom with the reason so we
-don't re-file them.
+The profile-driven refactor that unblocks every additional-runtime idea; land
+TASK-38 before TASK-44.
 
 ### [ ] TASK-38: Runtime gate is hard-coded to `'claude'`, not profile-driven
 
@@ -128,6 +47,202 @@ whose `usesRealAgent` is true takes the real branch (planner/builder/delivery),
 and a mock profile takes the mock branch — asserted without any `'claude'`
 literal in the activity. *Manual:* a Pi/Codex profile run reaches a real builder
 edit instead of a fake candidate.
+
+### [ ] TASK-44: Add runtime adapters — Codex, Pi, OpenCode (depends on TASK-38)
+
+**What's wrong.** Only `claude-adapter` and `mock-adapter` live in
+`packages/agent-gateway/src/`. Pi and Codex adapters were prototyped on worktree
+branches but never merged, and the phase gate (TASK-38) would ignore them anyway.
+OpenCode is a net-new integration with useful subagent semantics.
+
+**What to do.** After TASK-38 makes the real path profile-driven: land a
+`RuntimeProfile` + adapter per runtime (start with whichever is closest to
+merge-ready), each conforming to the existing `adapter.ts` contract. Keep external
+tooling model-agnostic per the standing learning (daemon-seeded env + recipe
+cards, no claude-gating). OpenCode's per-file agent loop (`opencode run --agent …`
+over a file list) is a strong fit for the builder's per-slice model and for
+en-masse mechanical fixes.
+
+**Where.** `packages/agent-gateway/src/*-adapter.ts`, RuntimeProfile registry,
+`agent-factory.ts`, per-project `runtimeConfig`.
+
+**How we'll know it's done.** *Unit:* each adapter passes the shared adapter
+conformance tests. *Manual:* a real (draft) PR produced under at least one
+non-claude runtime, as previously proven for Pi on `wip-browser-games`.
+
+---
+
+## Group B — Planning discipline & slice sizing
+
+WSFF's 80/20 core: right-size the ceremony, review structure before code, and cap
+how much unreviewed diff a run can dump. TASK-51 gates when TASK-52 runs; TASK-56
+is the deliberate counterweight to the fewest-slices bias (TASK-19).
+
+### [ ] TASK-51: Phase-sizing router (the WSFF 80/20 rule)
+
+**What's wrong.** The pipeline runs one-size-fits-all — every task gets the same
+planning weight regardless of size. WSFF's central structural claim is that ~40%
+of tasks deserve single-shot execution, medium tasks a single combined
+product+architecture doc, and only large tasks the full four-phase treatment.
+Applying full ceremony to a one-line README edit is waste; applying single-shot to
+a multi-package feature is the 2000-line-dump failure mode. We have neither the
+classification nor the branching.
+
+**What to do.** Add a task-sizing classifier at intake (S/M/L) that selects which
+planning phases run: S → single-shot (skip straight to a slice), M → one combined
+product+arch artifact, L → full plan + program-design (TASK-52) + slices. Size
+from cheap signals first (prompt length, target-file count, cross-package span
+from the discovered command/structure map) before spending a model call. Make the
+chosen size and phase set visible in the run state / UI and overridable at the
+contract gate.
+
+**Where.** intake / contract-gate path, `workers/temporal-worker/src/activities/`
+(phase selection), run-state schema (persist the size + phase set), `apps/web`
+task detail (show it). Interacts with TASK-19 (fewest-slices bias) and TASK-49
+(surface status).
+
+**How we'll know it's done.** *Unit:* a one-line-edit prompt classifies S and the
+workflow skips the heavy planning phases; a multi-package prompt classifies L and
+runs program-design. *Manual:* a trivial task finishes without the full plan
+ceremony; a large task shows all phases in the UI.
+
+### [ ] TASK-52: Program-design artifact (signatures / call-stack / file-tree diff) before code
+
+**What's wrong.** We go plan → build with nothing between. WSFF inserts an explicit
+"program design" phase — types, method signatures, projected file-tree diff, call
+stacks — decided and reviewed *before* implementation, because that review is cheap
+and catches architectural mistakes while they're still free. Today the first time a
+human sees structure is in the slice diff, which is exactly the expensive review
+WSFF warns against.
+
+**What to do.** Add a program-design artifact type produced (for L tasks per
+TASK-51) after the plan and before the first slice: projected file-tree diff (files
+added/changed), key type/interface definitions, and function signatures with a
+one-line intent each — no bodies. Route it through the same gate machinery as the
+plan so a human (or the adversarial reviewer, TASK-14) can redirect before code
+exists. Feed it into the builder as context for the slices.
+
+**Where.** artifact/phase definitions, `workers/temporal-worker/src/activities/`
+(new phase between plan and build), `packages/review/` (reviewer sees it), builder
+context payload. Depends on TASK-51 for when-to-run; complements TASK-19.
+
+**How we'll know it's done.** *Unit:* an L task emits a program-design artifact with
+a file-tree diff + signatures and no implementation bodies, and it reaches the gate
+before any slice runs. *Manual:* rejecting the program design redirects structure
+without a build ever happening.
+
+### [ ] TASK-56: "Amplify, don't automate" velocity guardrail
+
+**What's wrong.** Nothing caps how much unreviewed diff a single run can produce
+before a human sees it. WSFF's concrete anti-pattern is reviewing 2000+ lines of
+untested code in one dump; the antidote is frequent redirection on thin vertical
+slices. We bias toward fewest slices (TASK-19) for tractability, which is in tension
+with this — we need a ceiling, not just a floor.
+
+**What to do.** Add a configurable guardrail: when a slice's projected/actual diff
+exceeds a threshold (lines or files), force a human checkpoint (or auto-split the
+slice) before continuing, and prefer the WSFF slice progression (mock API + curl →
+frontend on mocks → wire services → add DB) for end-to-end features. Make the
+threshold a profile/config knob, off by default for MOCK, on for the real path.
+Explicitly the counterweight to TASK-19: fewest slices *up to* a review-sized cap.
+
+**Where.** builder / slice execution in
+`workers/temporal-worker/src/activities/`, profile/config (the threshold knob),
+contract-gate path (the forced checkpoint). Counterbalances TASK-19; feeds the
+human review WSFF requires.
+
+**How we'll know it's done.** *Unit:* a slice whose diff exceeds the threshold
+triggers a checkpoint/split instead of proceeding; under the threshold it proceeds
+untouched. *Manual:* a large feature run pauses for human review at the cap rather
+than dumping one giant diff.
+
+---
+
+## Group C — Quality gates: QA correctness, maintainability & pre-work alignment
+
+Correctness ≠ maintainability (WSFF). TASK-42 hardens the correctness gate;
+TASK-53 adds the missing maintainability axis (advisory, non-blocking); TASK-54
+moves the cheapest redirection (problem + success criteria) *before* any code.
+
+### [ ] TASK-42: QA is not thorough enough — run "succeeds" but artifact is broken
+
+**What's wrong.** Runs report success while the delivered feature is actually
+broken (observed: a Sheng Ji game that doesn't work; multiple WebSocket
+connections opened from clicking the same "Join" button). Browser QA asserts a
+couple of shallow steps and rubber-stamps, matching the standing "QA static checks
+miss runtime bugs" and "QA cold re-entry never converges" learnings. So "run
+success" ≠ "working artifact".
+
+**What to do.** Strengthen the QA rubric toward *interaction correctness*, not just
+page-load: assert on functional outcomes (a game action produces the expected
+state change), detect duplicate/leaked WebSocket connections (count sockets per
+user action), and treat unhandled console errors / repeated identical socket opens
+as failing signals. Lean on the adversarial reviewer to actually gate runtime
+correctness rather than trusting agent-reported completion.
+
+**Where.** `packages/qa/` (browser QA assertions + rubric), `packages/review/`
+(adversarial gate wiring), the QA scenario templates.
+
+**How we'll know it's done.** *Unit/fixture:* a QA scenario fails when a button
+opens N>1 sockets or when the asserted post-action state never appears. *Manual:*
+re-run the Sheng Ji case and confirm QA blocks it instead of passing.
+
+### [ ] TASK-53: Maintainability review, distinct from correctness, advisory to the human
+
+**What's wrong.** Every gate we have (verify, QA, TASK-42) answers *does it work* —
+correctness. WSFF's whole thesis is correctness ≠ maintainability, and
+maintainability has **no reliable model self-signal** ("if a model could tell good
+code from bad it would have written the good version"). So we have zero coverage on
+the exact axis the article says kills factories: duplication, coupling, dead
+abstractions, naming, layering.
+
+**What to do.** Add a maintainability-review pass over the run's diff that *surfaces
+candidates* for human attention rather than emitting a pass/fail: new duplication
+introduced, tight coupling / layering violations, abstractions with a single caller,
+inconsistent naming vs. the surrounding code. Present it as advisory annotations on
+the review artifact (explicitly "for human review", per WSFF), complementing —
+not replacing — the correctness gate (TASK-42) and the adversarial reviewer
+(TASK-14). Do not let it block; its job is to make the human review faster and
+targeted.
+
+**Where.** `packages/review/` (new advisory pass), review artifact schema (an
+advisory section), `apps/web` review display. Sits alongside TASK-14 / TASK-42.
+
+**How we'll know it's done.** *Unit:* a diff that copy-pastes an existing helper
+produces a duplication annotation flagged advisory (non-blocking) and the run still
+completes. *Manual:* a real run's review artifact lists concrete maintainability
+candidates a human can act on.
+
+### [ ] TASK-54: Reviewer-alignment gate *before* implementation
+
+**What's wrong.** Our gates are approve/reject *after* artifacts exist (plan gate,
+review gate). WSFF says to align with the person who'll review the PR on problem +
+success criteria *before* coding — the cheapest possible redirection. We have no
+pre-implementation product/success-criteria checkpoint; the earliest human signal
+is on an already-produced plan.
+
+**What to do.** Add a lightweight product-review artifact (problem statement +
+measurable success criteria; rough mockup optional for UI tasks) as the first gate,
+before planning/architecture spend. On approval it becomes the reference the plan,
+program-design, and QA rubric are all held to (success criteria → QA assertions,
+tying into TASK-42). For S tasks (TASK-51) this collapses into the single-shot path;
+it's mandatory only for M/L.
+
+**Where.** intake / first gate, artifact definitions (product-review type),
+contract-gate path, and downstream consumers (planner, QA rubric). Depends on
+TASK-51 for sizing; feeds TASK-42/TASK-52.
+
+**How we'll know it's done.** *Unit:* an M/L task cannot reach planning until the
+product-review gate is answered, and the recorded success criteria are readable by
+the QA phase. *Manual:* rejecting problem/success-criteria redirects the task before
+any plan or code is produced.
+
+---
+
+## Group D — PR output quality
+
+The live PR `browser-games__ai#7` surfaced these; all in the delivery/github
+path. TASK-41 (house style) subsumes the checkable rules from TASK-39/40.
 
 ### [ ] TASK-39: PR branch name keeps the "In <scope>," preamble (ugly slug)
 
@@ -193,83 +308,13 @@ etc.). Encode the checkable rules as assertions in `pr-content.test.ts`.
 rules (length, no prompt-echo, no `[AWB]`) are covered by tests over
 `derivePrTitle`/`buildPrBody`.
 
-### [ ] TASK-42: QA is not thorough enough — run "succeeds" but artifact is broken
+---
 
-**What's wrong.** Runs report success while the delivered feature is actually
-broken (observed: a Sheng Ji game that doesn't work; multiple WebSocket
-connections opened from clicking the same "Join" button). Browser QA asserts a
-couple of shallow steps and rubber-stamps, matching the standing "QA static checks
-miss runtime bugs" and "QA cold re-entry never converges" learnings. So "run
-success" ≠ "working artifact".
+## Group E — Token cost, memory & the graph plane
 
-**What to do.** Strengthen the QA rubric toward *interaction correctness*, not just
-page-load: assert on functional outcomes (a game action produces the expected
-state change), detect duplicate/leaked WebSocket connections (count sockets per
-user action), and treat unhandled console errors / repeated identical socket opens
-as failing signals. Lean on the adversarial reviewer to actually gate runtime
-correctness rather than trusting agent-reported completion.
-
-**Where.** `packages/qa/` (browser QA assertions + rubric), `packages/review/`
-(adversarial gate wiring), the QA scenario templates.
-
-**How we'll know it's done.** *Unit/fixture:* a QA scenario fails when a button
-opens N>1 sockets or when the asserted post-action state never appears. *Manual:*
-re-run the Sheng Ji case and confirm QA blocks it instead of passing.
-
-### [ ] TASK-43: Dogfood the workbench on this repo (agent-workbench itself)
-
-**What's wrong.** We dogfood on `browser-games`/`fender`/`app` but have never
-driven a task against *this* repo, which is the most honest test of whether the
-tool is pleasant to use on a real TS monorepo.
-
-**What to do.** Register `agent-workbench` as a repo and drive one small, real,
-self-contained task (e.g. one of the smaller fixes above) end to end, interactively,
-stopping at the PR-readiness gate. Capture friction as new TODO items.
-
-**Where.** operational — uses the `run-workbench-task` skill; no code target.
-
-**How we'll know it's done.** A branch + draft PR on this repo produced by the
-workbench, with a short writeup of what was awkward.
-
-### [ ] TASK-44: Add runtime adapters — Codex, Pi, OpenCode (depends on TASK-38)
-
-**What's wrong.** Only `claude-adapter` and `mock-adapter` live in
-`packages/agent-gateway/src/`. Pi and Codex adapters were prototyped on worktree
-branches but never merged, and the phase gate (TASK-38) would ignore them anyway.
-OpenCode is a net-new integration with useful subagent semantics.
-
-**What to do.** After TASK-38 makes the real path profile-driven: land a
-`RuntimeProfile` + adapter per runtime (start with whichever is closest to
-merge-ready), each conforming to the existing `adapter.ts` contract. Keep external
-tooling model-agnostic per the standing learning (daemon-seeded env + recipe
-cards, no claude-gating). OpenCode's per-file agent loop (`opencode run --agent …`
-over a file list) is a strong fit for the builder's per-slice model and for
-en-masse mechanical fixes.
-
-**Where.** `packages/agent-gateway/src/*-adapter.ts`, RuntimeProfile registry,
-`agent-factory.ts`, per-project `runtimeConfig`.
-
-**How we'll know it's done.** *Unit:* each adapter passes the shared adapter
-conformance tests. *Manual:* a real (draft) PR produced under at least one
-non-claude runtime, as previously proven for Pi on `wip-browser-games`.
-
-### [ ] TASK-45: Repo-structure legibility — per-directory AGENT(S).md + one global map
-
-**What's wrong.** A recurring agent-legibility gap (see the 2026-07-20 audit):
-`workers/` has no README convention and `run-phase.ts` is an 806-line hub. The
-idea list asks for "every directory explains itself" + "global understanding in
-one file" + "business logic separated from framework glue".
-
-**What to do.** Adopt a light convention: a top-level map (extend `AGENTS.md` or a
-new `docs/map.md`) that names each package's job in one line, and a short
-`AGENTS.md` (or `README.md`) in the directories that lack one, starting with
-`workers/temporal-worker/src/activities/`. Don't over-engineer — one paragraph per
-directory, not a doc framework.
-
-**Where.** `AGENTS.md`, `workers/**`, package dirs missing a readme.
-
-**How we'll know it's done.** Every top-level package + the activities dir has a
-one-line self-description reachable from a single map file.
+The Karpathy "Graph Engineering" cluster. TASK-46's measurement decides whether
+the fix is caching/subgraph-retrieval (→ TASK-47) or output compression. TASK-50
+depends on TASK-47's graph-vs-md call.
 
 ### [ ] TASK-46: Token cost — investigate high `cached_tokens` / call count
 
@@ -406,32 +451,42 @@ planted contradiction and leaves consistent facts untouched. *Manual:* run compi
 on a real dogfooded repo's accumulated memory and confirm the KB is denser and
 still traceable to sources.
 
-### [ ] TASK-48: "Implement a feature" skill
+---
 
-**What's wrong.** There's no repo skill that captures the house workflow for
-implementing a feature through the workbench (plan-first, slice sizing, gate
-answers, verify). We have `run-workbench-task` (drives the pipeline) but not an
-authoring/planning skill for feature work.
+## Group F — Observability & Web UI
 
-**What to do.** Add a `.claude/skills/` skill that encodes the feature-implementation
-workflow (plan.md first per the global CLAUDE.md, converge the contract, keep
-slices few, verify). Keep it thin and point at existing skills rather than
-duplicating them.
+TASK-55's decay metrics reuse the one-trace-per-run layer and draw on TASK-53's
+annotations; TASK-49 surfaces the already-streaming status on the list.
 
-**Where.** `.claude/skills/`.
+### [ ] TASK-55: Track WSFF decay metrics on our own runs
 
-**How we'll know it's done.** The skill exists and, invoked on a small feature,
-produces a plan + drives it without re-deriving the workflow each time.
+**What's wrong.** WSFF's point is that maintainability decay is *invisible on the
+fast loop* — it shows up weeks later as incidents. We have observability
+(one-trace-per-run) but we measure success/latency, not decay. We can't currently
+answer "is the factory degrading the codebases it works on?"
 
-### UI ideas — scope check (mostly already built)
+**What to do.** Capture per-run decay signals and expose them over time: duplication
+delta introduced by the run, diff size vs. reviewed-diff ratio, review-comment /
+maintainability-annotation density (from TASK-53), and — where we can observe it —
+regression/repair-loop rate and post-merge revert/incident signal on workbench PRs.
+Add them to the observability layer as run attributes so a dashboard can trend them.
+This is the measurement that tells us whether we're at WSFF's "2–3× safely" or
+sliding toward the +242%-incidents outcome.
 
-The live event stream the UI ideas ask for **already exists**: `useEventStream.ts`
-opens the daemon **WebSocket** and backfills via `GET /api/events?afterSequence=N`
-(TASK-23, done), so "auto-update UI as status changes (WebSocket)" and a live
-"event log" are implemented on `TaskDetailPage`. The remaining, still-applicable
-slice is narrower and folded in here rather than filed as new WebSocket work:
+**Where.** `packages/observability/` (new run attributes / metrics), review pass
+(TASK-53) as a source, `apps/web` or Grafana for the trend. Relates to TASK-46
+(token cost) and TASK-49 (surface status).
+
+**How we'll know it's done.** *Unit:* a run emits duplication-delta and
+reviewed-ratio attributes on its trace. *Manual:* the metrics trend across several
+runs in Grafana/Tempo (or the UI), visibly moving when a run introduces duplication.
 
 ### [ ] TASK-49: Propagate live status to the list/overview, not just task detail
+
+The live event stream already exists: `useEventStream.ts` opens the daemon
+**WebSocket** and backfills via `GET /api/events?afterSequence=N` (TASK-23, done),
+so "auto-update UI as status changes" and a live "event log" are implemented on
+`TaskDetailPage`. The remaining slice is narrower — surface it on the overview.
 
 **What's wrong.** The WebSocket timeline drives `TaskDetailPage`, but `TasksPage`
 (the list/status overview) does not appear to update live — you still refresh to
@@ -449,8 +504,72 @@ refresh. Don't add a second realtime mechanism — extend the one in
 **How we'll know it's done.** *Manual:* drive a task; its row on the tasks list
 advances phase/status live with no refresh.
 
+---
+
+## Group G — Legibility, DX & dogfooding
+
+Lower-risk, mostly-docs/skills work + the honest self-dogfood.
+
+### [ ] TASK-45: Repo-structure legibility — per-directory AGENT(S).md + one global map
+
+**What's wrong.** A recurring agent-legibility gap (see the 2026-07-20 audit):
+`workers/` has no README convention and `run-phase.ts` is an 806-line hub. The
+idea list asks for "every directory explains itself" + "global understanding in
+one file" + "business logic separated from framework glue".
+
+**What to do.** Adopt a light convention: a top-level map (extend `AGENTS.md` or a
+new `docs/map.md`) that names each package's job in one line, and a short
+`AGENTS.md` (or `README.md`) in the directories that lack one, starting with
+`workers/temporal-worker/src/activities/`. Don't over-engineer — one paragraph per
+directory, not a doc framework.
+
+**Where.** `AGENTS.md`, `workers/**`, package dirs missing a readme.
+
+**How we'll know it's done.** Every top-level package + the activities dir has a
+one-line self-description reachable from a single map file.
+
+### [ ] TASK-48: "Implement a feature" skill
+
+**What's wrong.** There's no repo skill that captures the house workflow for
+implementing a feature through the workbench (plan-first, slice sizing, gate
+answers, verify). We have `run-workbench-task` (drives the pipeline) but not an
+authoring/planning skill for feature work.
+
+**What to do.** Add a `.claude/skills/` skill that encodes the feature-implementation
+workflow (plan.md first per the global CLAUDE.md, converge the contract, keep
+slices few, verify). Keep it thin and point at existing skills rather than
+duplicating them.
+
+**Where.** `.claude/skills/`.
+
+**How we'll know it's done.** The skill exists and, invoked on a small feature,
+produces a plan + drives it without re-deriving the workflow each time.
+
+### [ ] TASK-43: Dogfood the workbench on this repo (agent-workbench itself)
+
+**What's wrong.** We dogfood on `browser-games`/`fender`/`app` but have never
+driven a task against *this* repo, which is the most honest test of whether the
+tool is pleasant to use on a real TS monorepo.
+
+**What to do.** Register `agent-workbench` as a repo and drive one small, real,
+self-contained task (e.g. one of the smaller fixes above) end to end, interactively,
+stopping at the PR-readiness gate. Capture friction as new TODO items.
+
+**Where.** operational — uses the `run-workbench-task` skill; no code target.
+
+**How we'll know it's done.** A branch + draft PR on this repo produced by the
+workbench, with a short writeup of what was awkward.
+
+---
+
+## Reference — triage decisions & prior runs (not tasks)
+
 ### Not applicable / already handled (not filed)
 
+- **Full President dogfood → real Draft PR** (was TASK-12). **Done** — merged PR
+  `browser-games__ai#10` implemented the President card game end to end via the
+  workbench (real engine + React client + browser-QA artifacts). The follow-ups it
+  surfaced live on in the QA/PR-quality groups above.
 - **Full UI rewrite / "rewrite with an actual architecture diagram".** Meta-
   complaint, not a discrete task; the design is already documented
   (`docs/design.md`, `docs/domain-model.md`, `docs/dependencies.md`, ADRs). The
@@ -465,7 +584,7 @@ advances phase/status live with no refresh.
   Browser-QA comment render correctly (valid tables, links, images). No markdown
   defect reproduced — the actionable problems in that PR are the *title* and
   *branch* naming, captured as TASK-40 / TASK-39.
-- **Graph Engineering** (now READ — the Karpathy-Graph-Engineering-Systems note,
+- **Graph Engineering** (READ — the Karpathy-Graph-Engineering-Systems note,
   not the paywalled X post). Promoted, not dropped: it's the framing lens for
   TASK-47 (we already are 4 of its 5 planes; the graph plane is the gap) and it
   sharpens TASK-46 (subgraph retrieval vs. history replay). No standalone "graph"
@@ -497,13 +616,11 @@ advances phase/status live with no refresh.
   let it reinforce the task-dependency-graph direction (TASK-47) + a real
   dependency-aware task board (TASK-49). No separate task; noted as input to
   those.
-- **ChatGPT conversation link (AgentMemory primer).** Now READ (pasted in full);
-  its substance is folded into TASK-47's AgentMemory assessment (opt-in
+- **ChatGPT conversation link (AgentMemory primer).** READ (pasted in full); its
+  substance is folded into TASK-47's AgentMemory assessment (opt-in
   compression/injection, security caveats, "recorder+recall not auto-learner").
 
----
-
-## Live shakeout run — game-count UI feature (2026-07-22)
+### Live shakeout run — game-count UI feature (2026-07-22)
 
 Drove a trivial UI feature ("show N games available in the portal header") on
 `wip-browser-games`, claude runtime + `AWB_QA_MODE=browser`. **The full pipeline
@@ -521,234 +638,3 @@ Two problems the run exposed: **TASK-20** ("stop before release" isn't
 enforceable — release pushed a real draft PR #2 before the external watch could
 stop it) and a **TASK-7 regression** (the qa-video/trace upload comments say
 `undefined` instead of a real download URL; since fixed and confirmed live).
-
----
-
-## P2 — The capstone
-
-### [ ] TASK-12: Full President dogfood → real Draft PR with QA artifacts
-The originally-requested end-to-end goal: use the workbench (claude runtime) to
-implement the **President** card game in `Borghese-Gladiator/wip-browser-games`,
-matching the poker/sheng-ji structure — a pure engine
-(`packages/engines/president/src/engine.js` + Vitest), a React client
-(`games/president/`, `useGameSocket("president")`), and a Playwright e2e — ending
-in a **real Draft PR** carrying the workbench's QA artifacts (engine unit-test
-run + browser-QA video/trace).
-**Prerequisites:** TASK-1 (plan converges), TASK-2–7 (each real phase proven),
-TASK-8 (real commands discovered so verify/QA are real). President also needs
-server-side `useGameSocket` wiring, so it's an interactive run (answer the
-contract gate; possibly reject a too-coarse plan).
-**Done when:** a real Draft PR for President exists on the repo with real QA
-evidence, reached via the workbench with no fake artifacts, and we stop at the
-pr-readiness gate (no auto-merge).
-
-**Assessment (2026-07-21) — would this work today? Partially; not unattended.**
-What now works, proven on the README run: the mechanical spine
-(specify→plan→implement→verify with a real worktree, real builder edits/commits,
-real candidate SHA, real discovered test/build after prepare installs deps, real
-usage aggregation). President is a bigger *code* task than a README, but the same
-machinery applies, so the spine should hold.
-The real risks are NOT in the plumbing anymore, they are:
-1. **Convergence/quality of a hard multi-file task.** President is a real engine
-   + React client + server `useGameSocket` wiring + Playwright e2e across several
-   packages. The builder runs each plan slice as an *independent, cold* session
-   (see TASK-19) with no shared memory, a 10k-token / 60s per-slice budget, and a
-   diff-based success signal. A cross-cutting feature that needs coordinated
-   edits across engine/client/server is exactly where cold per-slice sessions and
-   tight budgets tend to stall or produce a partial, non-wiring-complete change.
-   Expect iteration, not a clean first pass.
-2. **The critic + adversarial reviewer are no-ops (TASK-14).** They never see the
-   plan/diff, so nothing catches an under-wired or subtly-wrong implementation —
-   the run can "pass" challenge with a broken feature. For President's
-   correctness that matters a lot.
-3. **Browser QA (TASK-4) is unproven live** and President's "done" REQUIRES a
-   real qa-video/trace. It needs a discoverable dev-server start command
-   (`resolveStartCommand`) and the server to actually come up in the worktree;
-   that path has only been fixture-tested.
-4. **Runtime.** At ~1–2h for a README (TASK-19), a multi-slice President run is
-   plausibly many hours — needs supervision and probably a plan reject or two.
-5. **Release opens a REAL draft PR + pushes** to the target remote (no dry-run
-   guard) — must be run with a human present, never unattended.
-**Bottom line:** the pipeline will very likely *drive* President through the
-phases and produce a branch + commits, but reaching a *correct, QA-evidenced*
-Draft PR in one shot is unlikely without (a) TASK-14 so review actually guards
-quality, (b) TASK-4 proven so browser QA is real, and (c) TASK-19 so iteration is
-tractable. Best run interactively, prepared to reject a too-coarse plan and to
-repair after review.
-
-**Update (2026-07-21):** the three named prerequisites are now addressed —
-TASK-14 (critic/reviewer now receive their inputs via the contextPayload
-preamble), TASK-4 (browser QA validated end-to-end; produces real video/trace),
-TASK-19 (planner biased to fewest slices). Remaining risk is inherent difficulty:
-President is a real multi-package feature and the builder still runs each slice as
-a cold session, so cross-cutting engine/client/server wiring may need a repair
-loop or two — but the review step can now actually catch an under-wired result.
-Still: run it interactively (answer the contract gate, be ready to reject a coarse
-plan) and remember release pushes a REAL PR, so a human must be present.
-
----
-
-## P1 — "Why Software Factories Fail" follow-ups (2026-08-03)
-
-Source: Dex/HumanLayer, *"Why Software Factories Fail: or, harness engineering is
-not enough"* (`humanlayer/advanced-context-engineering-for-coding-agents/wsff.md`).
-Thesis directly relevant to this workbench (we *are* a loop-engineered software
-factory with a goal): models get instant pass/fail feedback on correctness but
-**no training signal for maintainability**, so a lights-off factory erodes the
-codebase over weeks (Faros AI: review quality −25–31%, incidents +242%). The fix
-is human-steered / AI-amplified — four planning phases (product review → system
-architecture → program design → vertical slices), sized 80/20 to task
-complexity, aiming for 2–3× *safely* rather than 10–100× recklessly. Each task
-below fills a gap WSFF exposes that TASK-38..50 do not already cover; cross-links
-noted. These were checked against the current pipeline, not filed blind.
-
-### [ ] TASK-51: Phase-sizing router (the WSFF 80/20 rule)
-
-**What's wrong.** The pipeline runs one-size-fits-all — every task gets the same
-planning weight regardless of size. WSFF's central structural claim is that ~40%
-of tasks deserve single-shot execution, medium tasks a single combined
-product+architecture doc, and only large tasks the full four-phase treatment.
-Applying full ceremony to a one-line README edit is waste; applying single-shot to
-a multi-package feature is the 2000-line-dump failure mode. We have neither the
-classification nor the branching.
-
-**What to do.** Add a task-sizing classifier at intake (S/M/L) that selects which
-planning phases run: S → single-shot (skip straight to a slice), M → one combined
-product+arch artifact, L → full plan + program-design (TASK-52) + slices. Size
-from cheap signals first (prompt length, target-file count, cross-package span
-from the discovered command/structure map) before spending a model call. Make the
-chosen size and phase set visible in the run state / UI and overridable at the
-contract gate.
-
-**Where.** intake / contract-gate path, `workers/temporal-worker/src/activities/`
-(phase selection), run-state schema (persist the size + phase set), `apps/web`
-task detail (show it). Interacts with TASK-19 (fewest-slices bias) and TASK-49
-(surface status).
-
-**How we'll know it's done.** *Unit:* a one-line-edit prompt classifies S and the
-workflow skips the heavy planning phases; a multi-package prompt classifies L and
-runs program-design. *Manual:* a trivial task finishes without the full plan
-ceremony; a large task shows all phases in the UI.
-
-### [ ] TASK-52: Program-design artifact (signatures / call-stack / file-tree diff) before code
-
-**What's wrong.** We go plan → build with nothing between. WSFF inserts an explicit
-"program design" phase — types, method signatures, projected file-tree diff, call
-stacks — decided and reviewed *before* implementation, because that review is cheap
-and catches architectural mistakes while they're still free. Today the first time a
-human sees structure is in the slice diff, which is exactly the expensive review
-WSFF warns against.
-
-**What to do.** Add a program-design artifact type produced (for L tasks per
-TASK-51) after the plan and before the first slice: projected file-tree diff (files
-added/changed), key type/interface definitions, and function signatures with a
-one-line intent each — no bodies. Route it through the same gate machinery as the
-plan so a human (or the adversarial reviewer, TASK-14) can redirect before code
-exists. Feed it into the builder as context for the slices.
-
-**Where.** artifact/phase definitions, `workers/temporal-worker/src/activities/`
-(new phase between plan and build), `packages/review/` (reviewer sees it), builder
-context payload. Depends on TASK-51 for when-to-run; complements TASK-19.
-
-**How we'll know it's done.** *Unit:* an L task emits a program-design artifact with
-a file-tree diff + signatures and no implementation bodies, and it reaches the gate
-before any slice runs. *Manual:* rejecting the program design redirects structure
-without a build ever happening.
-
-### [ ] TASK-53: Maintainability review, distinct from correctness, advisory to the human
-
-**What's wrong.** Every gate we have (verify, QA, TASK-42) answers *does it work* —
-correctness. WSFF's whole thesis is correctness ≠ maintainability, and
-maintainability has **no reliable model self-signal** ("if a model could tell good
-code from bad it would have written the good version"). So we have zero coverage on
-the exact axis the article says kills factories: duplication, coupling, dead
-abstractions, naming, layering.
-
-**What to do.** Add a maintainability-review pass over the run's diff that *surfaces
-candidates* for human attention rather than emitting a pass/fail: new duplication
-introduced, tight coupling / layering violations, abstractions with a single caller,
-inconsistent naming vs. the surrounding code. Present it as advisory annotations on
-the review artifact (explicitly "for human review", per WSFF), complementing —
-not replacing — the correctness gate (TASK-42) and the adversarial reviewer
-(TASK-14). Do not let it block; its job is to make the human review faster and
-targeted.
-
-**Where.** `packages/review/` (new advisory pass), review artifact schema (an
-advisory section), `apps/web` review display. Sits alongside TASK-14 / TASK-42.
-
-**How we'll know it's done.** *Unit:* a diff that copy-pastes an existing helper
-produces a duplication annotation flagged advisory (non-blocking) and the run still
-completes. *Manual:* a real run's review artifact lists concrete maintainability
-candidates a human can act on.
-
-### [ ] TASK-54: Reviewer-alignment gate *before* implementation
-
-**What's wrong.** Our gates are approve/reject *after* artifacts exist (plan gate,
-review gate). WSFF says to align with the person who'll review the PR on problem +
-success criteria *before* coding — the cheapest possible redirection. We have no
-pre-implementation product/success-criteria checkpoint; the earliest human signal
-is on an already-produced plan.
-
-**What to do.** Add a lightweight product-review artifact (problem statement +
-measurable success criteria; rough mockup optional for UI tasks) as the first gate,
-before planning/architecture spend. On approval it becomes the reference the plan,
-program-design, and QA rubric are all held to (success criteria → QA assertions,
-tying into TASK-42). For S tasks (TASK-51) this collapses into the single-shot path;
-it's mandatory only for M/L.
-
-**Where.** intake / first gate, artifact definitions (product-review type),
-contract-gate path, and downstream consumers (planner, QA rubric). Depends on
-TASK-51 for sizing; feeds TASK-42/TASK-52.
-
-**How we'll know it's done.** *Unit:* an M/L task cannot reach planning until the
-product-review gate is answered, and the recorded success criteria are readable by
-the QA phase. *Manual:* rejecting problem/success-criteria redirects the task before
-any plan or code is produced.
-
-### [ ] TASK-55: Track WSFF decay metrics on our own runs
-
-**What's wrong.** WSFF's point is that maintainability decay is *invisible on the
-fast loop* — it shows up weeks later as incidents. We have observability
-(one-trace-per-run, TASK-36) but we measure success/latency, not decay. We can't
-currently answer "is the factory degrading the codebases it works on?"
-
-**What to do.** Capture per-run decay signals and expose them over time: duplication
-delta introduced by the run, diff size vs. reviewed-diff ratio, review-comment /
-maintainability-annotation density (from TASK-53), and — where we can observe it —
-regression/repair-loop rate and post-merge revert/incident signal on workbench PRs.
-Add them to the observability layer as run attributes so a dashboard can trend them.
-This is the measurement that tells us whether we're at WSFF's "2–3× safely" or
-sliding toward the +242%-incidents outcome.
-
-**Where.** `packages/observability/` (new run attributes / metrics), review pass
-(TASK-53) as a source, `apps/web` or Grafana for the trend. Relates to TASK-46
-(token cost) and TASK-49 (surface status).
-
-**How we'll know it's done.** *Unit:* a run emits duplication-delta and
-reviewed-ratio attributes on its trace. *Manual:* the metrics trend across several
-runs in Grafana/Tempo (or the UI), visibly moving when a run introduces duplication.
-
-### [ ] TASK-56: "Amplify, don't automate" velocity guardrail
-
-**What's wrong.** Nothing caps how much unreviewed diff a single run can produce
-before a human sees it. WSFF's concrete anti-pattern is reviewing 2000+ lines of
-untested code in one dump; the antidote is frequent redirection on thin vertical
-slices. We bias toward fewest slices (TASK-19) for tractability, which is in tension
-with this — we need a ceiling, not just a floor.
-
-**What to do.** Add a configurable guardrail: when a slice's projected/actual diff
-exceeds a threshold (lines or files), force a human checkpoint (or auto-split the
-slice) before continuing, and prefer the WSFF slice progression (mock API + curl →
-frontend on mocks → wire services → add DB) for end-to-end features. Make the
-threshold a profile/config knob, off by default for MOCK, on for the real path.
-Explicitly the counterweight to TASK-19: fewest slices *up to* a review-sized cap.
-
-**Where.** builder / slice execution in
-`workers/temporal-worker/src/activities/`, profile/config (the threshold knob),
-contract-gate path (the forced checkpoint). Counterbalances TASK-19; feeds the
-human review WSFF requires.
-
-**How we'll know it's done.** *Unit:* a slice whose diff exceeds the threshold
-triggers a checkpoint/split instead of proceeding; under the threshold it proceeds
-untouched. *Manual:* a large feature run pauses for human review at the cap rather
-than dumping one giant diff.
