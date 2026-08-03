@@ -123,9 +123,8 @@ packages/                domain, config, database, evidence, repository,
                           repository-map, repository-memory, workflow,
                           workspace, execution, agent-gateway,
                           capability-broker, planning, verification, qa,
-                          review, github, policy — see docs/dependencies.md
-                          for the full dependency graph
-tests/fixtures/          throwaway repo fixtures for automated tests only
+                          review, github, policy, telemetry — see
+                          docs/dependencies.md for the full dependency graph
 scripts/                 durable developer tooling
 docs/                    design docs + docs/decisions/ (ADRs)
 archive/                 frozen v1-v4 predecessors — historical reference only
