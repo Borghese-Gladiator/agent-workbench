@@ -173,19 +173,61 @@ couple of shallow steps and rubber-stamps, matching the standing "QA static chec
 miss runtime bugs" and "QA cold re-entry never converges" learnings. So "run
 success" ≠ "working artifact".
 
+Root cause in the gate itself: the `exercise` gate
+(`evaluatePhaseCompletion` → `evaluateExercise`, `evaluate-completion.ts:105-122`)
+clears as long as `structuredAssertionsPass` is true, a recording exists, and a
+browser scenario has a trace (`completion-context.ts:51-59`) — it never inspects
+**how strong** those assertions are. A scenario that asserts almost nothing passes
+exactly like one that asserts the real behavior, so "QA passed" can mean "the
+feature is wired and live" while saying nothing about whether it is **correct**.
+
+**Concrete evidence (President dogfood, `browser-games__ai#10`).** The President
+e2e (`e2e/president.spec.js`) drove 4 real clients through create-room → join →
+auto-start → play a trick, and its only assertions were:
+```
+expect(sawFirstPlay).toBe(true);     // at least one card was played
+expect(sawTrickAdvance).toBe(true);  // the trick moved past its first play
+```
+Those prove the `useGameSocket("president")` → gateway → engine wiring is alive;
+they exercise **no** President rule (turn order, beating by higher rank, matching
+multiples, finishing order, roles). Consistent with that, the adversarial reviewer
+separately found a fidelity bug QA was structurally incapable of catching —
+`passedSeats` resets on every play (`engine.js:261`), so a player who passed
+re-enters the same trick. QA was green; the behavior was wrong.
+
 **What to do.** Strengthen the QA rubric toward *interaction correctness*, not just
-page-load: assert on functional outcomes (a game action produces the expected
-state change), detect duplicate/leaked WebSocket connections (count sockets per
-user action), and treat unhandled console errors / repeated identical socket opens
-as failing signals. Lean on the adversarial reviewer to actually gate runtime
-correctness rather than trusting agent-reported completion.
+page-load, AND make QA strength a first-class, checkable gate property rather than
+trusting assertion *count > 0*:
+- Assert on functional outcomes (a game action produces the expected state change),
+  detect duplicate/leaked WebSocket connections (count sockets per user action),
+  and treat unhandled console errors / repeated identical socket opens as failing
+  signals.
+- Tie QA scenarios to behavioral acceptance claims and check *coverage of the
+  claim*: make `everyBehavioralClaimCovered` (already a gate field) mean "an
+  assertion actually exercises this claim's observable behavior", not merely "a
+  scenario ran for it". "A higher rank beats a lower one" should require an
+  assertion that observes a *beat*, not just that a card was played.
+- Have the planner emit the expected per-claim assertions (the specific state
+  transition to observe) so the QA author has a target and the gate can check it.
+- Treat trivially-weak scenarios (all existence/liveness checks, no state-transition
+  or value comparison) as a QA-quality *finding* for the challenge phase, not a
+  silent pass. Lean on the adversarial reviewer to gate runtime correctness rather
+  than trusting agent-reported completion.
 
-**Where.** `packages/qa/` (browser QA assertions + rubric), `packages/review/`
-(adversarial gate wiring), the QA scenario templates.
+**Where.** `packages/qa/` (browser QA assertions + rubric, classify weak
+scenarios), `packages/workflow/src/evaluate-completion.ts` (`evaluateExercise` —
+strengthen what `everyBehavioralClaimCovered`/`structuredAssertionsPass` require),
+`packages/workflow/src/completion-context.ts` (fields feeding it),
+`packages/planning/*` (planner emits expected per-claim assertions),
+`packages/review/` (adversarial gate wiring), the QA scenario templates.
 
-**How we'll know it's done.** *Unit/fixture:* a QA scenario fails when a button
-opens N>1 sockets or when the asserted post-action state never appears. *Manual:*
-re-run the Sheng Ji case and confirm QA blocks it instead of passing.
+**How we'll know it's done.** *Unit:* a QA scenario fails when a button opens N>1
+sockets or when the asserted post-action state never appears; and an
+`evaluateExercise` test where a scenario with only liveness assertions against a
+behavioral claim leaves `missing` non-empty (gate does NOT clear), while one
+asserting the claim's state transition clears it. *Manual:* re-run the Sheng Ji
+case and confirm QA blocks it; re-drive a rules-bearing feature and confirm a
+`passedSeats`-style fidelity bug is caught by QA, not only by the reviewer.
 
 ### [ ] TASK-53: Maintainability review, distinct from correctness, advisory to the human
 
@@ -307,6 +349,55 @@ etc.). Encode the checkable rules as assertions in `pr-content.test.ts`.
 **How we'll know it's done.** The reference exists and at least the mechanizable
 rules (length, no prompt-echo, no `[AWB]`) are covered by tests over
 `derivePrTitle`/`buildPrBody`.
+
+### [ ] TASK-58: Embed QA video as a downscaled GIF (WEBM stays a committed local file)
+
+**What's wrong.** The QA "Recording" never renders inline in the PR. We commit the
+Playwright capture as `.awb/qa/recording.webm` and link it with `blobViewUrl(...)`
+→ `github.com/<o>/<r>/blob/<branch>/.awb/qa/recording.webm`, on the belief (see the
+comment on `blobViewUrl` in `pr-content.ts:121-128` and `renderQaMediaSection` in
+`pr-content.ts:158-159`) that GitHub renders its native `<video>` player on the
+blob page. It does not: GitHub only plays videos uploaded through its own
+attachment/upload flow, NOT a `.webm` committed to a branch. So the section
+degrades to a plain text link ("▶ Watch recording (opens in a tab)") and the
+reviewer has to click out to a bare blob page. Live example that FAILS to embed:
+`browser-games__ai#8` (`issuecomment-5108991804`).
+
+**What to do.** GitHub DOES render an animated GIF inline via image markdown
+(`![...](raw.githubusercontent.com/...)`), the same path the screenshot already
+uses. So:
+1. In the QA-media step, after capturing the WEBM, transcode it to an animated
+   **GIF** (`ffmpeg` two-pass `palettegen`/`paletteuse`).
+2. **Scale the GIF down** — a full-res/full-length GIF is huge and blows past
+   GitHub's inline-image ceiling. Constrain it: width ≤ **~640px**
+   (`scale=640:-1:flags=lanczos`, never upscale — `min(640,iw)`), **~10 fps**
+   (`fps=10`), total size under **~10 MB**; if the first transcode is over budget,
+   step down (width → 480, then fps → 5) and re-encode. Make the caps named
+   constants so they're tunable in one place.
+3. Commit the GIF alongside the WEBM (`.awb/qa/recording.gif`) via the existing
+   `commitQaMediaToBranch` path, and add `'image/gif' → '.gif'` to
+   `EXT_BY_MEDIA_TYPE` in `qa-media-support.ts:95`.
+4. **Keep the WEBM** as the full-fidelity source. In the PR comment render the GIF
+   inline (`![Browser QA recording](raw…/recording.gif)`) as the primary artifact
+   and keep the WEBM as a secondary "full recording (WEBM)" link.
+5. **View it in the local UI.** `EvidenceViewerPage.tsx:29-34` says it "cannot yet
+   show video/trace playback". Add a daemon read route serving the committed QA
+   media bytes and render them in the Evidence Viewer: GIF via `<img>`, WEBM via
+   `<video controls>`, so a run's recording is watchable locally without the PR.
+
+**Where.** `packages/github/src/pr-content.ts` (`renderQaMediaSection` — inline GIF
++ secondary WEBM link; the `blobViewUrl` player assumption is wrong, keep it only
+as the WEBM fallback), `workers/temporal-worker/src/activities/qa-media-support.ts`
+(GIF transcode + downscale, `EXT_BY_MEDIA_TYPE`, `qaMediaFileName`),
+`packages/qa/src/browser-qa.ts` (likely home for the transcode), a new daemon media
+route + `apps/web/src/pages/EvidenceViewerPage.tsx` (local playback).
+
+**How we'll know it's done.** *Unit:* `renderQaMediaSection` with a `qa-video` item
+emits an inline `![...](raw.githubusercontent.com/.../recording.gif)` image (not
+just a blob link) plus a secondary WEBM link; a transcode test asserts output GIF
+width ≤ cap and that an over-budget input triggers a step-down re-encode. *Manual:*
+re-drive a browser-QA task — the PR comment shows the recording playing inline as a
+GIF (no click-out), the WEBM is still committed, and the Evidence Viewer plays both.
 
 ---
 
@@ -481,12 +572,57 @@ sliding toward the +242%-incidents outcome.
 reviewed-ratio attributes on its trace. *Manual:* the metrics trend across several
 runs in Grafana/Tempo (or the UI), visibly moving when a run introduces duplication.
 
+### [ ] TASK-57: Task-detail "Live event timeline" stays empty + fake "reconnecting…"
+
+**What's wrong.** On the task-detail page the **Live event timeline** shows "No
+events yet" and a permanent "(reconnecting…)" header even for a task with
+**hundreds of stored events** (the President run had 299 rows in `semantic_events`
+for `run_id=<taskId>-run`, yet the panel was blank). Two distinct defects in
+`apps/web/src/hooks/useEventStream.ts`:
+1. **Backfill is gated on the WebSocket opening.** `catchUp()` (the REST
+   `GET /api/events?afterSequence=N` call that loads stored events) is invoked ONLY
+   inside the socket's `onOpen` handler (`useEventStream.ts:51-55`). If the WS never
+   connects, `onOpen` never fires, so existing events are never fetched — the
+   timeline is empty despite the data being in SQLite and served by the working
+   catch-up route.
+2. **"reconnecting…" is a lie — nothing reconnects.** `openEventStream`
+   (`apps/web/src/api/events.ts:31-48`) opens the socket exactly once; on
+   close/error it sets `connected=false` and never re-opens, so the header's
+   "reconnecting…" state (rendered when `!connected`) is permanent.
+
+This corrects TASK-49's premise: the detail timeline is *not* actually working
+end-to-end today, so fix the backfill/reconnect here before surfacing the stream on
+the list (TASK-49).
+
+**What to do.**
+1. Run the initial `catchUp()` **on mount / `runId` change**, independent of the WS
+   — historical events must render even if the socket is down.
+2. Add a real reconnect loop to `openEventStream` (or the hook): on close/error,
+   back off and re-open, and re-run `catchUp(lastSeq)` on each reconnect (dedupe by
+   `sequence` already makes this gap-free).
+3. Distinguish the states in the UI: "connecting" vs "reconnecting" vs "disconnected
+   (showing history)", so a dead socket with backfilled events doesn't read as "no
+   events".
+
+**Where.** `apps/web/src/hooks/useEventStream.ts` (backfill-on-mount + reconnect),
+`apps/web/src/api/events.ts` (`openEventStream` retry), `TaskDetailPage.tsx` (status
+label). Confirm the daemon WS route `/api/events/stream`
+(`apps/daemon/src/routes/websocket.ts`) actually accepts the connection — if the
+handshake itself fails, that's a third root cause to rule out.
+
+**How we'll know it's done.** *Unit:* a hook test that, with the WS never opening,
+still populates `events` from a mocked `fetchEventsAfter`; and a reconnect test that
+a dropped socket re-opens and backfills without duplicating sequences. *Manual:*
+open the task-detail page for a completed run — the timeline shows the full ordered
+event list immediately, and killing/restoring the daemon flips the header through
+reconnecting→connected without losing or duplicating events.
+
 ### [ ] TASK-49: Propagate live status to the list/overview, not just task detail
 
-The live event stream already exists: `useEventStream.ts` opens the daemon
-**WebSocket** and backfills via `GET /api/events?afterSequence=N` (TASK-23, done),
-so "auto-update UI as status changes" and a live "event log" are implemented on
-`TaskDetailPage`. The remaining slice is narrower — surface it on the overview.
+The live event stream backfills via `GET /api/events?afterSequence=N` (TASK-23,
+done) and drives `TaskDetailPage` via the daemon **WebSocket** — but the backfill/
+reconnect on that page is itself broken (TASK-57), so land TASK-57 first. This
+task is the narrower remaining slice: surface the status on the overview.
 
 **What's wrong.** The WebSocket timeline drives `TaskDetailPage`, but `TasksPage`
 (the list/status overview) does not appear to update live — you still refresh to
