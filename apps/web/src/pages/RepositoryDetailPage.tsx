@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api, type Repository, type RepositorySnapshotSummary } from '../api/client.js';
+import { PageHeader } from '../components/PageHeader.js';
+import { Button } from '../components/Button.js';
+import { ErrorText } from '../components/ErrorText.js';
+import { StatusBadge } from '../components/Badge.js';
 
 export function RepositoryDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -50,28 +54,36 @@ export function RepositoryDetailPage() {
     }
   }
 
-  if (error) return <p className="error">{error}</p>;
+  if (error) return <ErrorText>{error}</ErrorText>;
   if (!repository) return <p>Loading…</p>;
 
   return (
-    <div>
-      <h1>{repository.name}</h1>
-      <p>{repository.canonicalPath}</p>
+    <div className="page">
+      <PageHeader
+        title={repository.name}
+        action={
+          repository.trusted ? (
+            <StatusBadge label="Trusted" tone="success" icon="✓" />
+          ) : (
+            <StatusBadge label="Untrusted" tone="attention" icon="!" />
+          )
+        }
+      />
+      <p className="repository-path">{repository.canonicalPath}</p>
       <p>Default branch: {repository.defaultBranch}</p>
-      <p>Status: {repository.trusted ? 'trusted' : 'untrusted'}</p>
       {snapshot && (
         <p>
           Last indexed at <code>{snapshot.headSha.slice(0, 12)}</code>
         </p>
       )}
       <div className="actions">
-        <button type="button" disabled={busy} onClick={() => void handleRefresh()}>
+        <Button variant="secondary" disabled={busy} onClick={() => void handleRefresh()}>
           Refresh
-        </button>
+        </Button>
         {!repository.trusted && (
-          <button type="button" disabled={busy} onClick={() => void handleApprove()}>
+          <Button variant="primary" disabled={busy} onClick={() => void handleApprove()}>
             Approve
-          </button>
+          </Button>
         )}
       </div>
     </div>

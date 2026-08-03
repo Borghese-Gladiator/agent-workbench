@@ -3,6 +3,10 @@ import { useParams } from 'react-router-dom';
 import { tasksApi, type TaskWorkflowState } from '../api/tasks.js';
 import { useEventStream } from '../hooks/useEventStream.js';
 import { GatePanel } from './GatePanel.js';
+import { Button } from '../components/Button.js';
+import { CopyButton } from '../components/CopyButton.js';
+import { ErrorText } from '../components/ErrorText.js';
+import { shortId } from '../lib/format.js';
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -61,15 +65,23 @@ export function TaskDetailPage() {
     }
   }
 
-  if (!repositoryId || !taskId) return <p className="error">Missing repositoryId or taskId.</p>;
-  if (error && !state) return <p className="error">{error}</p>;
+  if (!repositoryId || !taskId) return <ErrorText>Missing repositoryId or taskId.</ErrorText>;
+  if (error && !state) return <ErrorText>{error}</ErrorText>;
   if (!state) return <p>Loading…</p>;
 
   return (
-    <div>
-      <h1>Task {taskId}</h1>
-      <p className="repository-path">Repository {repositoryId}</p>
-      {error && <p className="error">{error}</p>}
+    <div className="page">
+      <header className="page__header">
+        <h1>
+          Task <span className="mono-id">{shortId(taskId)}</span>
+        </h1>
+        <CopyButton value={taskId} label="Copy full task ID" />
+      </header>
+      <p className="repository-path">
+        Repository <span className="mono-id">{shortId(repositoryId)}</span>
+        <CopyButton value={repositoryId} label="Copy full repository ID" />
+      </p>
+      {error && <ErrorText>{error}</ErrorText>}
       <dl className="task-facts">
         <dt>Phase</dt>
         <dd>{state.phase}</dd>
@@ -146,13 +158,13 @@ export function TaskDetailPage() {
       )}
 
       <div className="actions">
-        <button
-          type="button"
+        <Button
+          variant="danger"
           disabled={busy || TERMINAL_CONDITIONS.has(state.condition)}
           onClick={() => void withBusy(() => tasksApi.cancel(repositoryId, taskId))}
         >
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );

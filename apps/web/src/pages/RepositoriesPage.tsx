@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type Repository } from '../api/client.js';
+import { PageHeader } from '../components/PageHeader.js';
+import { Button } from '../components/Button.js';
+import { ErrorText } from '../components/ErrorText.js';
+import { Field } from '../components/Field.js';
+import { StatusBadge } from '../components/Badge.js';
 
 export function RepositoriesPage() {
   const [repositories, setRepositories] = useState<Repository[]>([]);
@@ -36,20 +41,31 @@ export function RepositoriesPage() {
   }
 
   return (
-    <div>
-      <h1>Repositories</h1>
-      <div className="add-repository-form">
-        <input
-          type="text"
-          placeholder="/path/to/repo"
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-        />
-        <button type="button" onClick={() => void handleAdd()}>
+    <div className="page">
+      <PageHeader title="Repositories" />
+      <form
+        className="add-repository-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void handleAdd();
+        }}
+      >
+        <Field label="Repository path">
+          {(id) => (
+            <input
+              id={id}
+              type="text"
+              placeholder="/path/to/repo"
+              value={path}
+              onChange={(e) => setPath(e.target.value)}
+            />
+          )}
+        </Field>
+        <Button type="submit" variant="primary">
           Add repository
-        </button>
-      </div>
-      {error && <p className="error">{error}</p>}
+        </Button>
+      </form>
+      {error && <ErrorText>{error}</ErrorText>}
       {loading ? (
         <p>Loading…</p>
       ) : repositories.length === 0 ? (
@@ -59,9 +75,11 @@ export function RepositoriesPage() {
           {repositories.map((repo) => (
             <li key={repo.id}>
               <Link to={`/repositories/${repo.id}`}>{repo.name}</Link>
-              <span className={repo.trusted ? 'badge trusted' : 'badge untrusted'}>
-                {repo.trusted ? 'trusted' : 'untrusted'}
-              </span>
+              {repo.trusted ? (
+                <StatusBadge label="Trusted" tone="success" icon="✓" />
+              ) : (
+                <StatusBadge label="Untrusted" tone="attention" icon="!" />
+              )}
               <span className="repository-path">{repo.canonicalPath}</span>
             </li>
           ))}

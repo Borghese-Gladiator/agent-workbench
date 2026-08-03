@@ -1,4 +1,6 @@
 import type { TaskWorkflowState } from '../api/tasks.js';
+import { Button } from '../components/Button.js';
+import { Note } from '../components/Note.js';
 
 interface GatePanelProps {
   repositoryId: string;
@@ -43,32 +45,32 @@ export function GatePanel({
       <p className="repository-path">Created at {gate.createdAt}</p>
       {gate.reason === 'task-contract-approval' ? (
         <div className="actions">
-          <button type="button" disabled={busy} onClick={onApproveContract}>
+          <Button variant="primary" disabled={busy} onClick={onApproveContract}>
             Approve contract
-          </button>
-          <button type="button" disabled={busy} onClick={onRejectContract}>
+          </Button>
+          <Button variant="secondary" disabled={busy} onClick={onRejectContract}>
             Reject contract
-          </button>
+          </Button>
         </div>
       ) : gate.reason === 'pr-readiness' ? (
-        <p className="note">
+        <Note>
           This is a release-phase gate (pr-readiness). No dedicated daemon route exists for it yet,
           so no action is available here — display only.
-        </p>
+        </Note>
       ) : phase === 'plan' ? (
         <div className="actions">
-          <button type="button" disabled={busy} onClick={onApprovePlan}>
+          <Button variant="primary" disabled={busy} onClick={onApprovePlan}>
             Approve plan
-          </button>
-          <button type="button" disabled={busy} onClick={onRejectPlan}>
+          </Button>
+          <Button variant="secondary" disabled={busy} onClick={onRejectPlan}>
             Reject plan
-          </button>
+          </Button>
         </div>
       ) : (
-        <p className="note">
+        <Note>
           No dedicated daemon action is wired up for gate reason &quot;{gate.reason}&quot; — display
           only.
-        </p>
+        </Note>
       )}
     </div>
   );

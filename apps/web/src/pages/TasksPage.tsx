@@ -5,6 +5,8 @@ import { api, type Repository } from '../api/client.js';
 import { deriveTaskStatus, STATUS_FILTER_OPTIONS } from '../lib/task-status.js';
 import { shortId } from '../lib/format.js';
 import { StatusBadge } from '../components/Badge.js';
+import { Button } from '../components/Button.js';
+import { PageHeader } from '../components/PageHeader.js';
 import { CopyButton } from '../components/CopyButton.js';
 import { RelativeTime } from '../components/RelativeTime.js';
 import { DropdownMenu, type MenuItem } from '../components/DropdownMenu.js';
@@ -151,12 +153,14 @@ export function TasksPage() {
 
   return (
     <div className="page">
-      <header className="page__header">
-        <h1>Tasks</h1>
-        <button type="button" className="button button--primary" onClick={() => setShowCreate(true)}>
-          Create task
-        </button>
-      </header>
+      <PageHeader
+        title="Tasks"
+        action={
+          <Button variant="primary" onClick={() => setShowCreate(true)}>
+            Create task
+          </Button>
+        }
+      />
 
       <InfoNotice learnMoreHref="https://github.com/timothysheee/agent-workbench/blob/main/docs/README.md">
         Tasks shown here are stored by the daemon and reappear after a restart.
@@ -205,9 +209,9 @@ export function TasksPage() {
       {error && !loading ? (
         <div className="state-panel state-panel--error" role="alert">
           <p>Tasks could not be loaded. {error}</p>
-          <button type="button" className="button button--secondary" onClick={() => void refresh()}>
+          <Button variant="secondary" onClick={() => void refresh()}>
             Retry
-          </button>
+          </Button>
         </div>
       ) : (
         <table className="task-table">
@@ -274,20 +278,19 @@ export function TasksPage() {
           {filtersActive ? (
             <>
               <p>No tasks match the current filters.</p>
-              <button
-                type="button"
-                className="button button--secondary"
+              <Button
+                variant="secondary"
                 onClick={() => setSearchParams(new URLSearchParams(), { replace: true })}
               >
                 Clear filters
-              </button>
+              </Button>
             </>
           ) : (
             <>
               <p>No tasks yet. Create a task to start work in one of your repositories.</p>
-              <button type="button" className="button button--primary" onClick={() => setShowCreate(true)}>
+              <Button variant="primary" onClick={() => setShowCreate(true)}>
                 Create task
-              </button>
+              </Button>
             </>
           )}
         </div>

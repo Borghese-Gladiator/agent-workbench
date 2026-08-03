@@ -1,4 +1,5 @@
 import { Modal } from './Modal.js';
+import { Button } from './Button.js';
 
 /** Confirmation dialog for destructive actions (cancel/delete a task). */
 export function ConfirmDialog({
@@ -18,12 +19,12 @@ export function ConfirmDialog({
     <Modal title={title} onClose={onCancel}>
       <p>{message}</p>
       <div className="modal__actions">
-        <button type="button" className="button button--secondary" onClick={onCancel}>
+        <Button variant="secondary" onClick={onCancel}>
           Cancel
-        </button>
-        <button type="button" className="button button--danger" onClick={onConfirm}>
+        </Button>
+        <Button variant="danger" onClick={onConfirm}>
           {confirmLabel}
-        </button>
+        </Button>
       </div>
     </Modal>
   );

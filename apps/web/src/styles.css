@@ -1,33 +1,4 @@
-:root {
-  color-scheme: light dark;
-  font-family: system-ui, sans-serif;
-  --fg: #1a1a1a;
-  --fg-muted: #5c5c6a;
-  --bg: #ffffff;
-  --bg-subtle: rgba(120, 120, 140, 0.08);
-  --bg-raised: #ffffff;
-  --border: rgba(120, 120, 140, 0.28);
-  --accent: #4646d8;
-  --accent-fg: #ffffff;
-  --danger: #c0261e;
-  --focus: #4646d8;
-  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --fg: #ececf2;
-    --fg-muted: #9a9aad;
-    --bg: #16161c;
-    --bg-subtle: rgba(200, 200, 220, 0.06);
-    --bg-raised: #21212b;
-    --border: rgba(200, 200, 220, 0.16);
-    --accent: #8a8aff;
-    --accent-fg: #12121a;
-    --danger: #ff6b61;
-    --focus: #8a8aff;
-  }
-}
+@import './design/tokens.css';
 
 body {
   color: var(--fg);
@@ -76,6 +47,12 @@ body {
   background: var(--bg-subtle);
   color: var(--fg);
   cursor: pointer;
+}
+
+.button--secondary {
+  background: var(--bg-subtle);
+  color: var(--fg);
+  border-color: var(--border);
 }
 
 .button--primary {
@@ -282,20 +259,20 @@ body {
 }
 
 .status-badge--progress {
-  background: rgba(70, 70, 216, 0.14);
-  border-color: rgba(70, 70, 216, 0.4);
+  background: var(--tone-progress);
+  border-color: var(--tone-progress-border);
 }
 .status-badge--attention {
-  background: rgba(200, 150, 0, 0.16);
-  border-color: rgba(200, 150, 0, 0.45);
+  background: var(--tone-attention);
+  border-color: var(--tone-attention-border);
 }
 .status-badge--success {
-  background: rgba(0, 150, 70, 0.16);
-  border-color: rgba(0, 150, 70, 0.45);
+  background: var(--tone-success);
+  border-color: var(--tone-success-border);
 }
 .status-badge--danger {
-  background: rgba(200, 40, 30, 0.14);
-  border-color: rgba(200, 40, 30, 0.45);
+  background: var(--tone-danger);
+  border-color: var(--tone-danger-border);
 }
 
 /* ---- State panels ---- */
@@ -374,16 +351,19 @@ body {
   margin-top: 1rem;
 }
 
-.create-task-form .field {
+.field {
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
-  margin-bottom: 0.9rem;
 }
 
-.create-task-form label {
+.field > label {
   font-weight: 600;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
+}
+
+.create-task-form .field {
+  margin-bottom: 0.9rem;
 }
 
 .create-task-form input,
@@ -509,17 +489,49 @@ body {
 }
 
 .error {
-  color: #d33;
+  color: var(--danger);
+}
+
+.mono-id {
+  font-family: var(--mono);
+  font-size: 0.9em;
+}
+
+.lookup-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: end;
+  margin-bottom: 1.25rem;
+}
+
+.lookup-form .field {
+  flex: 1 1 220px;
+}
+
+.lookup-form input {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--fg);
+  font: inherit;
 }
 
 .add-repository-form {
   display: flex;
   gap: 0.5rem;
+  align-items: end;
   margin-bottom: 1rem;
 }
 
-.add-repository-form input {
+.add-repository-form .field {
   flex: 1;
+}
+
+.add-repository-form input {
+  width: 100%;
   padding: 0.4rem 0.6rem;
 }
 
@@ -640,4 +652,23 @@ body {
 
 .event-timeline .event--session {
   color: #2e7d32;
+}
+
+/* ---- Styleguide ---- */
+.styleguide section {
+  margin: var(--space-5) 0;
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.styleguide section h2 {
+  font-size: 1rem;
+  margin: 0 0 var(--space-3);
+}
+
+.styleguide__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
 }

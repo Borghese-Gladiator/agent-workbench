@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { Modal } from './Modal.js';
+import { Button } from './Button.js';
+import { ErrorText } from './ErrorText.js';
 import { RepositorySelect } from './RepositorySelect.js';
 import type { Repository } from '../api/client.js';
 
@@ -70,14 +72,14 @@ export function CreateTaskModal({
             onChange={(e) => setPrompt(e.target.value)}
           />
         </div>
-        {error && <p className="error" role="alert">{error}</p>}
+        {error && <ErrorText>{error}</ErrorText>}
         <div className="modal__actions">
-          <button type="button" className="button button--secondary" onClick={onCancel} disabled={busy}>
+          <Button variant="secondary" onClick={onCancel} disabled={busy}>
             Cancel
-          </button>
-          <button type="submit" className="button button--primary" disabled={!valid || busy}>
+          </Button>
+          <Button type="submit" variant="primary" disabled={!valid || busy}>
             {busy ? 'Creating…' : 'Create'}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>
