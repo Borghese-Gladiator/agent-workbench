@@ -19,3 +19,7 @@ playwright-report/
 blob-report/
 playwright/.cache/
 .playwright-mcp/
+
+# scratch / local-only root files
+plan.md
+tasks-desktop.png
