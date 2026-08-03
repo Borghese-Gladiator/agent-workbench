@@ -8,12 +8,14 @@
   },
   "packageManager": "pnpm@10.33.0",
   "scripts": {
+    "prepare": "git rev-parse --git-dir > /dev/null 2>&1 && git config core.hooksPath .githooks || true",
     "build": "pnpm -r --filter='./packages/**' --filter='./apps/**' --filter='./workers/**' run build",
     "typecheck": "pnpm -r run typecheck",
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "audit:docs": "scripts/audit-docs.sh"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
