@@ -2,10 +2,12 @@
 #
 # pre-commit — block commits that make the agent-facing docs lie about the repo.
 #
-# Runs scripts/audit-docs.sh, but only when the staged change could affect what
-# the audit checks: the entrypoint docs, any package README, or the set of
-# tracked directories (an added/removed dir can invalidate a path claim). This
-# keeps ordinary code commits fast — the audit runs only when it's relevant.
+# Runs scripts/audit-docs.sh, which resolves every structural path claim in
+# AGENTS.md / README.md against the real filesystem. The audit is just path
+# resolution (milliseconds), so it always runs — trying to predict "does this
+# commit affect docs?" from staged filenames is unreliable (e.g. a README
+# removed via rename or `git rm` doesn't look like a README change but still
+# breaks a claim), so we don't try.
 #
 # Bypass in an emergency with:  git commit --no-verify
 #
@@ -16,23 +18,11 @@ set -uo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 
-# Staged (added/copied/modified/renamed/deleted) paths for this commit.
-staged="$(git diff --cached --name-only --diff-filter=ACMRD)"
-
-# Trigger the audit when a staged path is one the audit reasons about:
-#   - AGENTS.md / README.md (entrypoints + path claims + Layout block)
-#   - any README.md under packages/ (the every-package-README claim)
-#   - a package being added or removed (packages/<name>/... changes the set)
-#   - the audit script or this hook itself
-# A pure prefix/name match is enough; false positives just run a ~instant check.
-if printf '%s\n' "$staged" | grep -qE '^(AGENTS\.md|README\.md|packages/[^/]+/(README\.md|package\.json)|scripts/audit-docs\.sh|\.githooks/pre-commit)$'; then
-  echo "pre-commit: docs/structure changed - running scripts/audit-docs.sh"
-  if ! "$repo_root/scripts/audit-docs.sh"; then
-    echo
-    echo "pre-commit: docs drift from the filesystem (see above). Fix the docs," >&2
-    echo "            or bypass with 'git commit --no-verify' if intentional." >&2
-    exit 1
-  fi
+if ! "$repo_root/scripts/audit-docs.sh"; then
+  echo
+  echo "pre-commit: docs drift from the filesystem (see above). Fix the docs," >&2
+  echo "            or bypass with 'git commit --no-verify' if intentional." >&2
+  exit 1
 fi
 
 exit 0

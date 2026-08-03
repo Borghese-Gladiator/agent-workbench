@@ -11,9 +11,11 @@ root entrypoint files exist, and the "every package has a README" invariant
 holds. Exit 0 when clean, nonzero on drift.
 
 - Run directly: `scripts/audit-docs.sh`, or `pnpm run audit:docs`.
-- It runs automatically as a **pre-commit hook** (`.githooks/pre-commit`) —
-  but only when a commit touches a doc/structure path, so ordinary commits
-  aren't slowed. Bypass in an emergency with `git commit --no-verify`.
+- It runs automatically as a **pre-commit hook** (`.githooks/pre-commit`). The
+  audit is just path resolution (milliseconds), so it always runs — a
+  filename-based "only when docs change" trigger is unreliable (a README
+  removed via rename doesn't look like a README change but still breaks a
+  claim). Bypass in an emergency with `git commit --no-verify`.
 - The hook is installed by the `prepare` npm script (`git config
   core.hooksPath .githooks`), which runs on `pnpm install`. `core.hooksPath`
   is local git config and doesn't travel with the branch, so the `prepare`
