@@ -1,13 +1,9 @@
 import { Plus } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Panel, PanelHeader } from '@/components/ui/panel';
@@ -18,68 +14,111 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { deriveTaskStatus, STATUS_FILTER_OPTIONS } from '@/lib/task-status';
+import { deriveTaskStatus, STATUS_FILTER_OPTIONS, type TaskStatus } from '@/lib/task-status';
 import { relativeTime, shortId } from '@/lib/format';
+import { api, type Repository } from '../api/client.js';
+import { tasksApi, type TaskSummary } from '../api/tasks.js';
 
-/**
- * PROOF-OF-CONCEPT ONLY. This page renders STUB data (no daemon call) to demonstrate the Tasks
- * UI in the ported v4 shadcn/ui + Linear design system. It is NOT wired to `/api/tasks`. See the
- * draft PR description; a production version would fetch the real widened payload.
- */
-
-/** Stub task shape mirroring the widened GET /api/tasks payload. */
-interface TaskRow {
-  taskId: string;
-  repositoryId: string;
-  repositoryName: string;
-  prompt: string;
-  phase: string;
-  condition: string;
-  createdAt: string;
-}
-
-const iso = (minAgo: number) => new Date(Date.now() - minAgo * 60000).toISOString();
-
-const STUB_TASKS: TaskRow[] = [
-  { taskId: '77665544-3333-2222-1111-000000000000', repositoryId: 'repo-2', repositoryName: 'portal', prompt: 'Implement President card game with multiplayer lobby', phase: 'plan', condition: 'running', createdAt: iso(0.4) },
-  { taskId: 'a1b2c3d4-eeee-ffff-0000-999988887777', repositoryId: 'repo-1', repositoryName: 'browser-games', prompt: 'Add portal footer with copyright and links', phase: 'implement', condition: 'running', createdAt: iso(4) },
-  { taskId: 'ed33645f-aaaa-bbbb-cccc-111122223333', repositoryId: 'repo-1', repositoryName: 'browser-games', prompt: 'Add README game count so the repository landing page shows how many playable games are bundled', phase: 'assimilate', condition: 'completed', createdAt: iso(8) },
-  { taskId: 'deadbeef-1234-5678-9abc-def012345678', repositoryId: 'repo-2', repositoryName: 'portal', prompt: 'Fix login redirect loop', phase: 'verify', condition: 'awaiting-human', createdAt: iso(62) },
-];
-
-const REPOS = [
-  { id: 'repo-1', name: 'browser-games' },
-  { id: 'repo-2', name: 'portal' },
-];
+const POLL_INTERVAL_MS = 4000;
 
 export function TasksPage() {
+  const navigate = useNavigate();
+  const [tasks, setTasks] = useState<TaskSummary[]>([]);
+  const [repositories, setRepositories] = useState<Repository[]>([]);
+  // Per-task derived status, keyed by taskId. Populated from GET /tasks/:repo/:id (the workflow
+  // query) since the list endpoint on this API doesn't carry lifecycle state.
+  const [statusById, setStatusById] = useState<Record<string, TaskStatus>>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | undefined>();
+
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
   const [repoFilter, setRepoFilter] = useState('All');
   const [sort, setSort] = useState('newest');
+
   const [createOpen, setCreateOpen] = useState(false);
+  const [newRepoId, setNewRepoId] = useState('');
+  const [newPrompt, setNewPrompt] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | undefined>();
+
+  const refresh = useCallback(async (): Promise<void> => {
+    try {
+      const result = await tasksApi.list();
+      setTasks(result);
+      setError(undefined);
+      // Fetch lifecycle status for each task in parallel; failures (e.g. a completed workflow that
+      // no longer answers queries) degrade to no badge rather than breaking the row.
+      const statuses = await Promise.all(
+        result.map(async (t) => {
+          try {
+            const { state } = await tasksApi.getState(t.repositoryId, t.taskId);
+            return [t.taskId, deriveTaskStatus(state.condition, state.phase)] as const;
+          } catch {
+            return [t.taskId, undefined] as const;
+          }
+        }),
+      );
+      setStatusById(Object.fromEntries(statuses.filter((s): s is [string, TaskStatus] => Boolean(s[1]))));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    void api
+      .listRepositories()
+      .then(setRepositories)
+      .catch(() => setRepositories([]));
+    const interval = setInterval(() => void refresh(), POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [refresh]);
+
+  const repoName = useMemo(() => {
+    const map = new Map(repositories.map((r) => [r.id, r.name]));
+    return (id: string) => map.get(id) ?? shortId(id);
+  }, [repositories]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const rows = STUB_TASKS.filter((t) => {
-      const status = deriveTaskStatus(t.condition, t.phase);
-      if (statusFilter !== 'All' && status.label !== statusFilter) return false;
+    const rows = tasks.filter((t) => {
+      const status = statusById[t.taskId];
+      if (statusFilter !== 'All' && status?.label !== statusFilter) return false;
       if (repoFilter !== 'All' && t.repositoryId !== repoFilter) return false;
-      if (q && ![t.prompt, t.taskId, t.repositoryName].join(' ').toLowerCase().includes(q)) return false;
+      if (q && ![t.prompt, t.taskId, repoName(t.repositoryId)].join(' ').toLowerCase().includes(q)) {
+        return false;
+      }
       return true;
     });
-    rows.sort((a, b) => (sort === 'oldest' ? a.createdAt.localeCompare(b.createdAt) : b.createdAt.localeCompare(a.createdAt)));
+    rows.sort((a, b) =>
+      sort === 'oldest' ? a.createdAt.localeCompare(b.createdAt) : b.createdAt.localeCompare(a.createdAt),
+    );
     return rows;
-  }, [search, statusFilter, repoFilter, sort]);
+  }, [tasks, statusById, search, statusFilter, repoFilter, sort, repoName]);
+
+  const filtersActive = search !== '' || statusFilter !== 'All' || repoFilter !== 'All';
+
+  async function handleCreate(): Promise<void> {
+    if (!newRepoId || !newPrompt.trim()) return;
+    setCreating(true);
+    setCreateError(undefined);
+    try {
+      const result = await tasksApi.create(newRepoId, newPrompt.trim());
+      setCreateOpen(false);
+      setNewPrompt('');
+      setNewRepoId('');
+      navigate(`/tasks/${newRepoId}/${result.taskId}`);
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCreating(false);
+    }
+  }
 
   const controls = (
     <div className="flex items-center gap-2">
@@ -108,7 +147,7 @@ export function TasksPage() {
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="All">All repositories</SelectItem>
-          {REPOS.map((r) => (
+          {repositories.map((r) => (
             <SelectItem key={r.id} value={r.id}>
               {r.name}
             </SelectItem>
@@ -144,6 +183,15 @@ export function TasksPage() {
         Tasks shown here are stored by the daemon and reappear after a restart.
       </div>
 
+      {error && (
+        <div className="mb-4 flex items-center justify-between rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          <span>Tasks could not be loaded. {error}</span>
+          <Button variant="outline" size="sm" onClick={() => void refresh()}>
+            Retry
+          </Button>
+        </div>
+      )}
+
       <Panel className="flex flex-col">
         <PanelHeader title="Pipeline" action={controls} />
         <Table>
@@ -157,18 +205,26 @@ export function TasksPage() {
           </TableHeader>
           <TableBody>
             {filtered.map((task) => {
-              const status = deriveTaskStatus(task.condition, task.phase);
+              const status = statusById[task.taskId];
               return (
-                <TableRow key={task.taskId}>
+                <TableRow
+                  key={task.workflowId}
+                  className="cursor-pointer"
+                  onClick={() => navigate(`/tasks/${task.repositoryId}/${task.taskId}`)}
+                >
                   <TableCell className="max-w-md align-top">
                     <div className="font-mono text-xs text-primary">{shortId(task.taskId)}</div>
                     <div className="mt-1 line-clamp-2 text-sm font-medium leading-snug text-foreground">
                       {task.prompt}
                     </div>
                   </TableCell>
-                  <TableCell className="align-top text-sm">{task.repositoryName}</TableCell>
+                  <TableCell className="align-top text-sm">{repoName(task.repositoryId)}</TableCell>
                   <TableCell className="align-top">
-                    <Badge variant={status.variant}>{status.label}</Badge>
+                    {status ? (
+                      <Badge variant={status.variant}>{status.label}</Badge>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell className="align-top text-sm text-muted-foreground">
                     {relativeTime(task.createdAt)}
@@ -178,9 +234,18 @@ export function TasksPage() {
             })}
           </TableBody>
         </Table>
-        {filtered.length === 0 && (
-          <p className="p-6 text-center text-sm text-muted-foreground">No tasks match the current filters.</p>
+        {!loading && filtered.length === 0 && (
+          <p className="p-6 text-center text-sm text-muted-foreground">
+            {tasks.length === 0 ? (
+              <>No tasks yet. Use Create task to start work in one of your repositories.</>
+            ) : filtersActive ? (
+              'No tasks match the current filters.'
+            ) : (
+              'No tasks yet.'
+            )}
+          </p>
         )}
+        {loading && <p className="p-6 text-center text-sm text-muted-foreground">Loading…</p>}
       </Panel>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -191,12 +256,12 @@ export function TasksPage() {
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="repo">Repository</Label>
-              <Select>
+              <Select value={newRepoId} onValueChange={setNewRepoId}>
                 <SelectTrigger id="repo">
                   <SelectValue placeholder="Select a repository" />
                 </SelectTrigger>
                 <SelectContent>
-                  {REPOS.map((r) => (
+                  {repositories.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
                       {r.name}
                     </SelectItem>
@@ -206,13 +271,22 @@ export function TasksPage() {
             </div>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="prompt">Task prompt</Label>
-              <Textarea id="prompt" rows={4} placeholder="Describe the task…" />
+              <Textarea
+                id="prompt"
+                rows={4}
+                placeholder="Describe the task…"
+                value={newPrompt}
+                onChange={(e) => setNewPrompt(e.target.value)}
+              />
             </div>
+            {createError && <p className="text-sm text-danger">{createError}</p>}
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setCreateOpen(false)}>
+              <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>
                 Cancel
               </Button>
-              <Button>Create</Button>
+              <Button onClick={() => void handleCreate()} disabled={creating || !newRepoId || !newPrompt.trim()}>
+                {creating ? 'Creating…' : 'Create'}
+              </Button>
             </div>
           </div>
         </DialogContent>
