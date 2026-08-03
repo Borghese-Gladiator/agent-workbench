@@ -585,3 +585,170 @@ a cold session, so cross-cutting engine/client/server wiring may need a repair
 loop or two — but the review step can now actually catch an under-wired result.
 Still: run it interactively (answer the contract gate, be ready to reject a coarse
 plan) and remember release pushes a REAL PR, so a human must be present.
+
+---
+
+## P1 — "Why Software Factories Fail" follow-ups (2026-08-03)
+
+Source: Dex/HumanLayer, *"Why Software Factories Fail: or, harness engineering is
+not enough"* (`humanlayer/advanced-context-engineering-for-coding-agents/wsff.md`).
+Thesis directly relevant to this workbench (we *are* a loop-engineered software
+factory with a goal): models get instant pass/fail feedback on correctness but
+**no training signal for maintainability**, so a lights-off factory erodes the
+codebase over weeks (Faros AI: review quality −25–31%, incidents +242%). The fix
+is human-steered / AI-amplified — four planning phases (product review → system
+architecture → program design → vertical slices), sized 80/20 to task
+complexity, aiming for 2–3× *safely* rather than 10–100× recklessly. Each task
+below fills a gap WSFF exposes that TASK-38..50 do not already cover; cross-links
+noted. These were checked against the current pipeline, not filed blind.
+
+### [ ] TASK-51: Phase-sizing router (the WSFF 80/20 rule)
+
+**What's wrong.** The pipeline runs one-size-fits-all — every task gets the same
+planning weight regardless of size. WSFF's central structural claim is that ~40%
+of tasks deserve single-shot execution, medium tasks a single combined
+product+architecture doc, and only large tasks the full four-phase treatment.
+Applying full ceremony to a one-line README edit is waste; applying single-shot to
+a multi-package feature is the 2000-line-dump failure mode. We have neither the
+classification nor the branching.
+
+**What to do.** Add a task-sizing classifier at intake (S/M/L) that selects which
+planning phases run: S → single-shot (skip straight to a slice), M → one combined
+product+arch artifact, L → full plan + program-design (TASK-52) + slices. Size
+from cheap signals first (prompt length, target-file count, cross-package span
+from the discovered command/structure map) before spending a model call. Make the
+chosen size and phase set visible in the run state / UI and overridable at the
+contract gate.
+
+**Where.** intake / contract-gate path, `workers/temporal-worker/src/activities/`
+(phase selection), run-state schema (persist the size + phase set), `apps/web`
+task detail (show it). Interacts with TASK-19 (fewest-slices bias) and TASK-49
+(surface status).
+
+**How we'll know it's done.** *Unit:* a one-line-edit prompt classifies S and the
+workflow skips the heavy planning phases; a multi-package prompt classifies L and
+runs program-design. *Manual:* a trivial task finishes without the full plan
+ceremony; a large task shows all phases in the UI.
+
+### [ ] TASK-52: Program-design artifact (signatures / call-stack / file-tree diff) before code
+
+**What's wrong.** We go plan → build with nothing between. WSFF inserts an explicit
+"program design" phase — types, method signatures, projected file-tree diff, call
+stacks — decided and reviewed *before* implementation, because that review is cheap
+and catches architectural mistakes while they're still free. Today the first time a
+human sees structure is in the slice diff, which is exactly the expensive review
+WSFF warns against.
+
+**What to do.** Add a program-design artifact type produced (for L tasks per
+TASK-51) after the plan and before the first slice: projected file-tree diff (files
+added/changed), key type/interface definitions, and function signatures with a
+one-line intent each — no bodies. Route it through the same gate machinery as the
+plan so a human (or the adversarial reviewer, TASK-14) can redirect before code
+exists. Feed it into the builder as context for the slices.
+
+**Where.** artifact/phase definitions, `workers/temporal-worker/src/activities/`
+(new phase between plan and build), `packages/review/` (reviewer sees it), builder
+context payload. Depends on TASK-51 for when-to-run; complements TASK-19.
+
+**How we'll know it's done.** *Unit:* an L task emits a program-design artifact with
+a file-tree diff + signatures and no implementation bodies, and it reaches the gate
+before any slice runs. *Manual:* rejecting the program design redirects structure
+without a build ever happening.
+
+### [ ] TASK-53: Maintainability review, distinct from correctness, advisory to the human
+
+**What's wrong.** Every gate we have (verify, QA, TASK-42) answers *does it work* —
+correctness. WSFF's whole thesis is correctness ≠ maintainability, and
+maintainability has **no reliable model self-signal** ("if a model could tell good
+code from bad it would have written the good version"). So we have zero coverage on
+the exact axis the article says kills factories: duplication, coupling, dead
+abstractions, naming, layering.
+
+**What to do.** Add a maintainability-review pass over the run's diff that *surfaces
+candidates* for human attention rather than emitting a pass/fail: new duplication
+introduced, tight coupling / layering violations, abstractions with a single caller,
+inconsistent naming vs. the surrounding code. Present it as advisory annotations on
+the review artifact (explicitly "for human review", per WSFF), complementing —
+not replacing — the correctness gate (TASK-42) and the adversarial reviewer
+(TASK-14). Do not let it block; its job is to make the human review faster and
+targeted.
+
+**Where.** `packages/review/` (new advisory pass), review artifact schema (an
+advisory section), `apps/web` review display. Sits alongside TASK-14 / TASK-42.
+
+**How we'll know it's done.** *Unit:* a diff that copy-pastes an existing helper
+produces a duplication annotation flagged advisory (non-blocking) and the run still
+completes. *Manual:* a real run's review artifact lists concrete maintainability
+candidates a human can act on.
+
+### [ ] TASK-54: Reviewer-alignment gate *before* implementation
+
+**What's wrong.** Our gates are approve/reject *after* artifacts exist (plan gate,
+review gate). WSFF says to align with the person who'll review the PR on problem +
+success criteria *before* coding — the cheapest possible redirection. We have no
+pre-implementation product/success-criteria checkpoint; the earliest human signal
+is on an already-produced plan.
+
+**What to do.** Add a lightweight product-review artifact (problem statement +
+measurable success criteria; rough mockup optional for UI tasks) as the first gate,
+before planning/architecture spend. On approval it becomes the reference the plan,
+program-design, and QA rubric are all held to (success criteria → QA assertions,
+tying into TASK-42). For S tasks (TASK-51) this collapses into the single-shot path;
+it's mandatory only for M/L.
+
+**Where.** intake / first gate, artifact definitions (product-review type),
+contract-gate path, and downstream consumers (planner, QA rubric). Depends on
+TASK-51 for sizing; feeds TASK-42/TASK-52.
+
+**How we'll know it's done.** *Unit:* an M/L task cannot reach planning until the
+product-review gate is answered, and the recorded success criteria are readable by
+the QA phase. *Manual:* rejecting problem/success-criteria redirects the task before
+any plan or code is produced.
+
+### [ ] TASK-55: Track WSFF decay metrics on our own runs
+
+**What's wrong.** WSFF's point is that maintainability decay is *invisible on the
+fast loop* — it shows up weeks later as incidents. We have observability
+(one-trace-per-run, TASK-36) but we measure success/latency, not decay. We can't
+currently answer "is the factory degrading the codebases it works on?"
+
+**What to do.** Capture per-run decay signals and expose them over time: duplication
+delta introduced by the run, diff size vs. reviewed-diff ratio, review-comment /
+maintainability-annotation density (from TASK-53), and — where we can observe it —
+regression/repair-loop rate and post-merge revert/incident signal on workbench PRs.
+Add them to the observability layer as run attributes so a dashboard can trend them.
+This is the measurement that tells us whether we're at WSFF's "2–3× safely" or
+sliding toward the +242%-incidents outcome.
+
+**Where.** `packages/observability/` (new run attributes / metrics), review pass
+(TASK-53) as a source, `apps/web` or Grafana for the trend. Relates to TASK-46
+(token cost) and TASK-49 (surface status).
+
+**How we'll know it's done.** *Unit:* a run emits duplication-delta and
+reviewed-ratio attributes on its trace. *Manual:* the metrics trend across several
+runs in Grafana/Tempo (or the UI), visibly moving when a run introduces duplication.
+
+### [ ] TASK-56: "Amplify, don't automate" velocity guardrail
+
+**What's wrong.** Nothing caps how much unreviewed diff a single run can produce
+before a human sees it. WSFF's concrete anti-pattern is reviewing 2000+ lines of
+untested code in one dump; the antidote is frequent redirection on thin vertical
+slices. We bias toward fewest slices (TASK-19) for tractability, which is in tension
+with this — we need a ceiling, not just a floor.
+
+**What to do.** Add a configurable guardrail: when a slice's projected/actual diff
+exceeds a threshold (lines or files), force a human checkpoint (or auto-split the
+slice) before continuing, and prefer the WSFF slice progression (mock API + curl →
+frontend on mocks → wire services → add DB) for end-to-end features. Make the
+threshold a profile/config knob, off by default for MOCK, on for the real path.
+Explicitly the counterweight to TASK-19: fewest slices *up to* a review-sized cap.
+
+**Where.** builder / slice execution in
+`workers/temporal-worker/src/activities/`, profile/config (the threshold knob),
+contract-gate path (the forced checkpoint). Counterbalances TASK-19; feeds the
+human review WSFF requires.
+
+**How we'll know it's done.** *Unit:* a slice whose diff exceeds the threshold
+triggers a checkpoint/split instead of proceeding; under the threshold it proceeds
+untouched. *Manual:* a large feature run pauses for human review at the cap rather
+than dumping one giant diff.
