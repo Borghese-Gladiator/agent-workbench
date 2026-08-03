@@ -67,6 +67,14 @@ Full field-level detail: `docs/domain-model.md`.
 
 ## Where things live
 
+This is a pnpm workspace monorepo (`pnpm-workspace.yaml`), split three ways:
+**`apps/`** = runnable entrypoints (cli, daemon, web); **`packages/`** = the
+domain and infrastructure libraries they compose (one focused public API each);
+**`workers/`** = the Temporal worker process where all I/O-bearing Activities
+run. Tests are co-located with their source per package (Vitest), not under a
+top-level `tests/`. Nothing under `packages/` runs on its own — `apps/` and
+`workers/` wire them together.
+
 | Concern | Path |
 | --- | --- |
 | Zod schemas / domain types (no I/O) | `packages/domain` |

@@ -6,6 +6,23 @@ The `awb` command-line entry point. Separates the **runtime** (Temporal + worker
 + daemon) from the **optional UI** (Vite frontend) so machines and agents can
 start the minimum they need without launching a browser.
 
+## Installation
+
+Bare `awb`, working from any directory — one-time symlink:
+
+```bash
+ln -sf "$PWD/apps/cli/bin/awb.sh" ~/.local/bin/awb   # run from repo root
+```
+
+- **Why it resolves**: `~/.zshrc` exports `~/.local/bin` onto `$PATH`, so a
+  symlink dropped there becomes a global command. On a machine whose `.zshrc`
+  doesn't do this, pick a dir that is on `$PATH` (or add `~/.local/bin` to it).
+- **Why no build step**: the wrapper (`bin/awb.sh`) canonicalizes its own
+  symlinked location, then execs the package-local `tsx` against `src/index.ts`
+  — so `awb` always runs the live TypeScript source.
+- **pnpm alternative**: `bin.awb` in `package.json` points at the same wrapper,
+  so `pnpm link --global` also works where a pnpm global bin dir is configured.
+
 ## Command surface
 
 **Runtime**

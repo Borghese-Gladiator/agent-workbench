@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+#
+# pre-commit — block commits that make the agent-facing docs lie about the repo.
+#
+# Runs scripts/audit-docs.sh, which resolves every structural path claim in
+# AGENTS.md / README.md against the real filesystem. The audit is just path
+# resolution (milliseconds), so it always runs — trying to predict "does this
+# commit affect docs?" from staged filenames is unreliable (e.g. a README
+# removed via rename or `git rm` doesn't look like a README change but still
+# breaks a claim), so we don't try.
+#
+# Bypass in an emergency with:  git commit --no-verify
+#
+# Installed via `git config core.hooksPath .githooks`, which the package.json
+# `prepare` script sets on `pnpm install`.
+
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+
+if ! "$repo_root/scripts/audit-docs.sh"; then
+  echo
+  echo "pre-commit: docs drift from the filesystem (see above). Fix the docs," >&2
+  echo "            or bypass with 'git commit --no-verify' if intentional." >&2
+  exit 1
+fi
+
+exit 0
