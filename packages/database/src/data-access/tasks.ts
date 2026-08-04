@@ -26,6 +26,7 @@ import {
   pullRequests,
   pullRequestFeedback,
   workspaceLeases,
+  repositories,
 } from '../schema/index.js';
 import type { DrizzleDb } from '../connection.js';
 import type { TaskRow } from '../row-types.js';
@@ -92,6 +93,28 @@ export function getTask(db: DrizzleDb, taskId: string): TaskRow | undefined {
 
 export function listTasks(db: DrizzleDb): TaskRow[] {
   return db.select().from(tasks).all();
+}
+
+export interface TaskWithRepository extends TaskRow {
+  repositoryName: string | null;
+}
+
+export function listTasksWithRepository(db: DrizzleDb): TaskWithRepository[] {
+  return db
+    .select({
+      id: tasks.id,
+      repositoryId: tasks.repositoryId,
+      prompt: tasks.prompt,
+      phase: tasks.phase,
+      condition: tasks.condition,
+      deliveryState: tasks.deliveryState,
+      createdAt: tasks.createdAt,
+      updatedAt: tasks.updatedAt,
+      repositoryName: repositories.name,
+    })
+    .from(tasks)
+    .leftJoin(repositories, eq(tasks.repositoryId, repositories.id))
+    .all() as TaskWithRepository[];
 }
 
 /**

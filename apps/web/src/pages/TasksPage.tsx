@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { deriveTaskStatus, STATUS_FILTER_OPTIONS, type TaskStatus } from '@/lib/task-status';
+import { deriveTaskStatus, STATUS_FILTER_OPTIONS } from '@/lib/task-status';
 import { relativeTime, shortId } from '@/lib/format';
 import { api, type Repository } from '../api/client.js';
 import { tasksApi, type TaskSummary } from '../api/tasks.js';
@@ -27,9 +27,6 @@ export function TasksPage() {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [repositories, setRepositories] = useState<Repository[]>([]);
-  // Per-task derived status, keyed by taskId. Populated from GET /tasks/:repo/:id (the workflow
-  // query) since the list endpoint on this API doesn't carry lifecycle state.
-  const [statusById, setStatusById] = useState<Record<string, TaskStatus>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
 
@@ -49,19 +46,6 @@ export function TasksPage() {
       const result = await tasksApi.list();
       setTasks(result);
       setError(undefined);
-      // Fetch lifecycle status for each task in parallel; failures (e.g. a completed workflow that
-      // no longer answers queries) degrade to no badge rather than breaking the row.
-      const statuses = await Promise.all(
-        result.map(async (t) => {
-          try {
-            const { state } = await tasksApi.getState(t.repositoryId, t.taskId);
-            return [t.taskId, deriveTaskStatus(state.condition, state.phase)] as const;
-          } catch {
-            return [t.taskId, undefined] as const;
-          }
-        }),
-      );
-      setStatusById(Object.fromEntries(statuses.filter((s): s is [string, TaskStatus] => Boolean(s[1]))));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -79,27 +63,22 @@ export function TasksPage() {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  const repoName = useMemo(() => {
-    const map = new Map(repositories.map((r) => [r.id, r.name]));
-    return (id: string) => map.get(id) ?? shortId(id);
-  }, [repositories]);
+  const repoLabel = (task: TaskSummary) => task.repositoryName ?? shortId(task.repositoryId);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const rows = tasks.filter((t) => {
-      const status = statusById[t.taskId];
-      if (statusFilter !== 'All' && status?.label !== statusFilter) return false;
+      const status = deriveTaskStatus(t.condition, t.phase);
+      if (statusFilter !== 'All' && status.label !== statusFilter) return false;
       if (repoFilter !== 'All' && t.repositoryId !== repoFilter) return false;
-      if (q && ![t.prompt, t.taskId, repoName(t.repositoryId)].join(' ').toLowerCase().includes(q)) {
-        return false;
-      }
+      if (q && ![t.prompt, t.taskId, repoLabel(t)].join(' ').toLowerCase().includes(q)) return false;
       return true;
     });
     rows.sort((a, b) =>
       sort === 'oldest' ? a.createdAt.localeCompare(b.createdAt) : b.createdAt.localeCompare(a.createdAt),
     );
     return rows;
-  }, [tasks, statusById, search, statusFilter, repoFilter, sort, repoName]);
+  }, [tasks, search, statusFilter, repoFilter, sort]);
 
   const filtersActive = search !== '' || statusFilter !== 'All' || repoFilter !== 'All';
 
@@ -205,7 +184,7 @@ export function TasksPage() {
           </TableHeader>
           <TableBody>
             {filtered.map((task) => {
-              const status = statusById[task.taskId];
+              const status = deriveTaskStatus(task.condition, task.phase);
               return (
                 <TableRow
                   key={task.workflowId}
@@ -218,13 +197,9 @@ export function TasksPage() {
                       {task.prompt}
                     </div>
                   </TableCell>
-                  <TableCell className="align-top text-sm">{repoName(task.repositoryId)}</TableCell>
+                  <TableCell className="align-top text-sm">{repoLabel(task)}</TableCell>
                   <TableCell className="align-top">
-                    {status ? (
-                      <Badge variant={status.variant}>{status.label}</Badge>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
+                    <Badge variant={status.variant}>{status.label}</Badge>
                   </TableCell>
                   <TableCell className="align-top text-sm text-muted-foreground">
                     {relativeTime(task.createdAt)}
@@ -236,13 +211,11 @@ export function TasksPage() {
         </Table>
         {!loading && filtered.length === 0 && (
           <p className="p-6 text-center text-sm text-muted-foreground">
-            {tasks.length === 0 ? (
-              <>No tasks yet. Use Create task to start work in one of your repositories.</>
-            ) : filtersActive ? (
-              'No tasks match the current filters.'
-            ) : (
-              'No tasks yet.'
-            )}
+            {tasks.length === 0
+              ? 'No tasks yet. Use Create task to start work in one of your repositories.'
+              : filtersActive
+                ? 'No tasks match the current filters.'
+                : 'No tasks yet.'}
           </p>
         )}
         {loading && <p className="p-6 text-center text-sm text-muted-foreground">Loading…</p>}

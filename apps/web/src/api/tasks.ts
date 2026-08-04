@@ -26,15 +26,21 @@ export interface TaskStateResponse {
 }
 
 /**
- * Mirrors the daemon's in-memory, process-lifetime task record (see apps/daemon/src/routes/tasks.ts).
- * This is not a durable list — it resets whenever the daemon restarts.
+ * Mirrors the daemon's persisted task record (see apps/daemon/src/routes/tasks.ts CreatedTaskRecord).
+ * `phase`/`condition`/`deliveryState` come from the SQLite tasks row; `repositoryName` is joined from
+ * the repositories table so the UI can show a human-readable name instead of a UUID.
  */
 export interface TaskSummary {
   taskId: string;
   repositoryId: string;
+  repositoryName: string | null;
   workflowId: string;
   prompt: string;
+  phase: string;
+  condition: string;
+  deliveryState: string;
   createdAt: string;
+  updatedAt: string;
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -66,4 +72,6 @@ export const tasksApi = {
   rejectPlan: (repositoryId: string, taskId: string, reason: string) =>
     request('POST', `/tasks/${repositoryId}/${taskId}/reject-plan`, { reason }),
   cancel: (repositoryId: string, taskId: string) => request('POST', `/tasks/${repositoryId}/${taskId}/cancel`),
+  remove: (repositoryId: string, taskId: string) =>
+    request<{ removed: string }>('DELETE', `/tasks/${repositoryId}/${taskId}`),
 };
