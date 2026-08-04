@@ -725,9 +725,39 @@ const implementHandler: PhaseHandler = {
   phase: 'implement',
   async run(ctx): Promise<PhaseOutcome> {
     const { state, runState } = ctx;
-    const plan = runState.plan;
+    // Single-shot (S) tasks skip the plan phase (TASK-51), so there is no accepted plan here. Synthesize
+    // a one-slice plan straight from the contract objective — that IS the single-shot: go directly to a
+    // slice. This fires whenever the plan phase was skipped (no plan) but a contract exists, so it does
+    // not depend on runState.size (which a gate-time override may not have propagated onto run-state).
+    let plan = runState.plan;
     if (!plan) {
-      return { kind: 'early', result: blockedResult('implement', ['no accepted plan available from the plan phase']) };
+      const contract = runState.contract;
+      if (contract) {
+        plan = acceptPlan(
+          draftPlan(
+            {
+              taskId: state.taskId,
+              contractVersion: contract.version,
+              summary: contract.objective,
+              slices: [
+                {
+                  objective: contract.objective,
+                  claimIds: contract.claims.map((c) => c.id),
+                  likelyPaths: [],
+                  requiredTargetedChecks: ['test'],
+                  dependencies: [],
+                  qaScenarioIds: [],
+                },
+              ],
+            },
+            contract.claims,
+            1,
+          ),
+        );
+        runState.plan = plan;
+      } else {
+        return { kind: 'early', result: blockedResult('implement', ['no accepted plan available from the plan phase']) };
+      }
     }
 
     runState.builderSessionId = runState.builderSessionId ?? randomUUID();
