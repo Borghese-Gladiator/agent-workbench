@@ -6,6 +6,7 @@ import type {
   TaskPhase,
   PhaseAttemptResult,
   ValidatedCommand,
+  Finding,
 } from '@awb/domain';
 import type { TaskWorkflowState } from '@awb/workflow';
 import { evaluatePhaseCompletion, type CompletionContext } from '@awb/workflow';
@@ -57,6 +58,7 @@ import {
 } from '@awb/qa';
 import {
   runAdversarialReview,
+  runMaintainabilityReview,
   reviewerSessionDiffersFromBuilder,
   noBlockerOrHighFindingOpen,
   everyFindingResolvedInvalidatedOrWaived,
@@ -1022,7 +1024,61 @@ const challengeHandler: PhaseHandler = {
     });
 
     runState.reviewerSessionId = review.reviewerSessionId;
-    runState.reviewFindings = review.findings;
+
+    // TASK-53: advisory maintainability review — a separate pass that surfaces duplication /
+    // coupling / dead-abstraction / naming candidates for the human, distinct from correctness.
+    // Its findings are advisory-only (category `maintainability`, severity `note`) so they NEVER
+    // enter the challenge gate's blocking predicates below — they are persisted alongside the
+    // review findings purely so the human sees them. Only the real path runs it (the mock path
+    // has no real diff to review); mock-path gate behaviour is therefore unchanged.
+    let advisoryFindings: Finding[] = [];
+    if (ctx.strategy === 'claude') {
+      const maintainability = await runMaintainabilityReview({
+        taskId: state.taskId,
+        reviewInputs,
+        runReviewer: async (inputs) => {
+          const session = await adapter.createSession({
+            role: 'adversarial-reviewer',
+            taskId: state.taskId,
+            cwd: reviewCwd,
+            contextPayload: { inputs },
+            allowedTools: allowedToolsForBrokerRole('adversarial-reviewer', ctx.strategy),
+            disallowedTools: deniedToolsForBrokerRole('adversarial-reviewer', ctx.strategy),
+          });
+          const { sink, flush } = createPhaseEventSink({
+            artifactsDir: runState.artifactsDir as string,
+            taskId: state.taskId,
+            // Reuses the read-only adversarial-reviewer role/capability profile; the instruction
+            // scopes this session to maintainability only.
+            role: 'adversarial-reviewer',
+            phase: 'challenge',
+            attemptNumber: state.attemptNumber,
+            durable: ctx.strategy === 'claude',
+          });
+          const start = Date.now();
+          const instr =
+            'The contract, plan, candidate diff, changed paths, and evidence ids are in the JSON ' +
+            'context above. Review the diff ONLY for maintainability (NOT correctness): new ' +
+            'duplication, tight coupling / layering violations, abstractions with a single caller, ' +
+            'and naming inconsistent with the surrounding code. These are advisory notes for a ' +
+            'human — report each as a finding; do not block.';
+          const execution = await adapter.execute(session, { instruction: instr }, sink, new AbortController().signal);
+          ctx.usage.record(execution.usage, Date.now() - start);
+          await flush();
+          return {
+            reviewerSessionId: session.id,
+            completed: execution.completed,
+            findings: execution.findings,
+            summary: execution.summary,
+          };
+        },
+      });
+      advisoryFindings = maintainability.findings;
+    }
+
+    // Persist adversarial findings + advisory maintainability notes together. The gate predicates
+    // below read only `review.findings`, so the advisory notes cannot block.
+    runState.reviewFindings = [...review.findings, ...advisoryFindings];
 
     // WSFF decay signals (TASK-55): the challenge phase is the one place both the reviewed diff and
     // the findings are in hand. Emit them as a nested run.decay span (auto-parents to the phase's run

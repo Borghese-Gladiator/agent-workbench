@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { tasksApi, type TaskWorkflowState } from '../api/tasks.js';
+import { tasksApi, type MaintainabilityFinding, type TaskWorkflowState } from '../api/tasks.js';
 import { useEventStream } from '../hooks/useEventStream.js';
 import { GatePanel } from './GatePanel.js';
 
@@ -31,6 +31,7 @@ const CONTROL_PLANE_EVENT_CLASS: Record<string, string> = {
 export function TaskDetailPage() {
   const { repositoryId, taskId } = useParams<{ repositoryId: string; taskId: string }>();
   const [state, setState] = useState<TaskWorkflowState | undefined>();
+  const [maintainabilityFindings, setMaintainabilityFindings] = useState<MaintainabilityFinding[]>([]);
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   // Live semantic-event timeline over the WebSocket, with reconnect catch-up (TASK-23).
@@ -41,6 +42,7 @@ export function TaskDetailPage() {
     try {
       const result = await tasksApi.getState(repositoryId, taskId);
       setState(result.state);
+      setMaintainabilityFindings(result.maintainabilityFindings ?? []);
       setError(undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -130,6 +132,25 @@ export function TaskDetailPage() {
             <li key={id}>{id}</li>
           ))}
         </ul>
+      )}
+
+      {maintainabilityFindings.length > 0 && (
+        <section className="maintainability-advisory">
+          <h3>Maintainability notes (advisory — for human review, non-blocking)</h3>
+          <ul>
+            {maintainabilityFindings.map((f) => (
+              <li key={f.id}>
+                {f.path ? (
+                  <code>
+                    {f.path}
+                    {f.line ? `:${f.line}` : ''}
+                  </code>
+                ) : null}{' '}
+                {f.description}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {state.pendingHumanGate && (

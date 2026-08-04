@@ -15,7 +15,14 @@ import {
   getPendingHumanGateQuery,
 } from '@awb/workflow';
 import type { WorkbenchDatabase } from '@awb/database';
-import { upsertTask, listTasksWithRepository, deleteTask, getTokenBreakdown, getRuntimeAttribution } from '@awb/database';
+import {
+  upsertTask,
+  listTasksWithRepository,
+  deleteTask,
+  getTokenBreakdown,
+  getRuntimeAttribution,
+  listFindingsByTask,
+} from '@awb/database';
 import { routeFeedback, NO_ROUTING_SIGNAL, type FeedbackRoutingSignal } from '@awb/github';
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
 import { TASK_QUEUE } from '../temporal-worker-constants.js';
@@ -83,7 +90,20 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
         // §27 breakdown from SQLite (not Workflow state, which stays compact — docs/temporal-workflows).
         const tokenBreakdown = getTokenBreakdown(database.db, request.params.taskId);
         const runtimeAttribution = getRuntimeAttribution(database.db, request.params.taskId);
-        return { state, openFindings, pendingHumanGate, tokenBreakdown, runtimeAttribution };
+        // TASK-53: advisory maintainability annotations (category maintainability, severity note),
+        // read from persisted findings. Non-blocking — surfaced for the human, distinct from the
+        // blocking open findings above.
+        const maintainabilityFindings = listFindingsByTask(database.db, request.params.taskId)
+          .filter((f) => f.category === 'maintainability' && f.severity === 'note')
+          .map((f) => ({ id: f.id, path: f.path, line: f.line, description: f.description }));
+        return {
+          state,
+          openFindings,
+          pendingHumanGate,
+          tokenBreakdown,
+          runtimeAttribution,
+          maintainabilityFindings,
+        };
       } catch (err) {
         reply.code(404);
         return { error: err instanceof Error ? err.message : String(err) };
