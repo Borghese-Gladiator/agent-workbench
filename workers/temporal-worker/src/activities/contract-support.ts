@@ -1,4 +1,5 @@
 import type { DraftContractInput } from '@awb/planning';
+import type { TaskContract } from '@awb/domain';
 
 /**
  * Builds a deterministic draft-contract input from the task's natural-language prompt (Fix 9,
@@ -15,6 +16,17 @@ export function draftContractInputFromPrompt(taskId: string, prompt: string): Dr
   return {
     taskId,
     objective,
+    // TASK-54: the problem statement + a measurable success criterion the human aligns on at the
+    // specify gate. The behavioral claim below requires QA evidence, so the specify gate now demands
+    // at least one measurable criterion (successCriteriaPresentForBehavioralClaims); this deterministic
+    // MVP substitute supplies one so the real path clears without a live specify session.
+    problemStatement: `The repository does not yet satisfy: ${objective}`,
+    successCriteria: [
+      {
+        description: `The requested behavior is observable end to end in QA: ${objective}`,
+        measurable: true,
+      },
+    ],
     constraints: [],
     nonGoals: [],
     claims: [
@@ -34,4 +46,23 @@ export function draftContractInputFromPrompt(taskId: string, prompt: string): Dr
       },
     ],
   };
+}
+
+/**
+ * TASK-54: renders the contract's problem statement + measurable success criteria into the
+ * specify gate summary, so the human reviewing the `task-contract-approval` gate aligns on them
+ * before any planning spend — without a separate contract read route in the daemon/UI.
+ */
+export function formatContractGateSummary(contract: TaskContract): string {
+  const criteria =
+    contract.successCriteria.length > 0
+      ? contract.successCriteria.map((c) => `  - ${c.description}${c.measurable ? '' : ' (not measurable)'}`).join('\n')
+      : '  (none)';
+  return [
+    `Contract v${contract.version} for task ${contract.taskId} awaits human approval.`,
+    '',
+    `Problem: ${contract.problemStatement}`,
+    'Success criteria:',
+    criteria,
+  ].join('\n');
 }

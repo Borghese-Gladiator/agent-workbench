@@ -79,6 +79,8 @@ describe('internal worker→daemon routes', () => {
         taskId: TASK_ID,
         version: 1,
         objective: 'obj',
+        problemStatement: 'problem',
+        successCriteria: [],
         constraints: [],
         nonGoals: [],
         risk: 'low',

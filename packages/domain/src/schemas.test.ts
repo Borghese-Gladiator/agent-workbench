@@ -103,6 +103,8 @@ describe('domain schemas', () => {
       taskId: 'task-1',
       version: 1,
       objective: 'Implement feature X',
+      problemStatement: 'feature X is missing',
+      successCriteria: [{ id: 'sc-1', description: 'feature X works', measurable: true }],
       constraints: [],
       nonGoals: [],
       risk: 'low',

@@ -26,6 +26,8 @@ describe('evaluatePhaseCompletion — specify', () => {
       constraintsArrayPresent: true,
       nonGoalsArrayPresent: true,
       noUnresolvedAmbiguity: true,
+      problemStatementPresent: true,
+      successCriteriaPresentForBehavioralClaims: true,
       contractStatus: 'approved',
     },
   };
@@ -62,6 +64,25 @@ describe('evaluatePhaseCompletion — specify', () => {
       specify: { ...completeContext.specify!, noUnresolvedAmbiguity: false },
     };
     expect(evaluatePhaseCompletion(candidateFor('specify'), ctx).complete).toBe(false);
+  });
+
+  // TASK-54: reviewer-alignment before implementation.
+  it('is not complete when the problem statement is empty', () => {
+    const ctx: CompletionContext = {
+      specify: { ...completeContext.specify!, problemStatementPresent: false },
+    };
+    const result = evaluatePhaseCompletion(candidateFor('specify'), ctx);
+    expect(result.complete).toBe(false);
+    expect(result.missing).toContain('problem statement is empty');
+  });
+
+  it('is not complete when a behavioral claim has no measurable success criterion', () => {
+    const ctx: CompletionContext = {
+      specify: { ...completeContext.specify!, successCriteriaPresentForBehavioralClaims: false },
+    };
+    const result = evaluatePhaseCompletion(candidateFor('specify'), ctx);
+    expect(result.complete).toBe(false);
+    expect(result.missing).toContain('a behavioral claim has no measurable success criterion');
   });
 });
 

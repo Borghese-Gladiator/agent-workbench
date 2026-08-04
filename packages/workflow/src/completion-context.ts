@@ -13,6 +13,13 @@ export interface CompletionContext {
     constraintsArrayPresent: boolean;
     nonGoalsArrayPresent: boolean;
     noUnresolvedAmbiguity: boolean;
+    /** TASK-54: a non-empty problem statement the human aligns on before planning. */
+    problemStatementPresent: boolean;
+    /**
+     * TASK-54: at least one measurable success criterion exists when the contract carries a
+     * behavioral claim. True vacuously for non-behavioral contracts.
+     */
+    successCriteriaPresentForBehavioralClaims: boolean;
     contractStatus: TaskContractStatus;
   };
   plan?: {

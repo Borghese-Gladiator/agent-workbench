@@ -23,6 +23,15 @@ function evaluateSpecify(ctx: CompletionContext['specify']): CompletionDecision 
   if (!ctx.nonGoalsArrayPresent) missing.push('nonGoals array is not present');
   if (!ctx.noUnresolvedAmbiguity) missing.push('unresolved ambiguity remains');
 
+  if (!ctx.problemStatementPresent) missing.push('problem statement is empty');
+  else reasons.push('problem statement is present');
+
+  if (!ctx.successCriteriaPresentForBehavioralClaims) {
+    missing.push('a behavioral claim has no measurable success criterion');
+  } else {
+    reasons.push('behavioral claims have measurable success criteria');
+  }
+
   if (ctx.contractStatus !== 'approved') missing.push(`contract status is "${ctx.contractStatus}", not "approved"`);
   else reasons.push('a human approved the current contract version');
 

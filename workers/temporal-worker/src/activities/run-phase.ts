@@ -27,7 +27,7 @@ import {
   installWorktreeDependencies,
 } from './command-support.js';
 import { runBrowserQaViaServer } from './browser-qa-support.js';
-import { draftContractInputFromPrompt } from './contract-support.js';
+import { draftContractInputFromPrompt, formatContractGateSummary } from './contract-support.js';
 import { resolveRepoRef, createRealDelivery } from './delivery-support.js';
 import { createPhaseEventSink } from './durable-event-sink.js';
 import { createCapabilityBroker } from '@awb/capability-broker';
@@ -238,7 +238,9 @@ const specifyHandler: PhaseHandler = {
             taskId: state.taskId,
             phase: 'specify',
             reason: 'task-contract-approval',
-            summary: `Contract v${contract.version} for task ${state.taskId} awaits human approval.`,
+            // TASK-54: surface the problem statement + measurable success criteria in the gate
+            // summary so the human aligns on them before planning spend (no separate read route).
+            summary: formatContractGateSummary(contract),
             createdAt: new Date().toISOString(),
           },
         },

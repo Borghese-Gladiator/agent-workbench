@@ -8,6 +8,8 @@ const taskContract: TaskContract = {
   taskId: 'task-1',
   version: 1,
   objective: 'do the thing',
+  problemStatement: 'the thing is not done',
+  successCriteria: [],
   constraints: [],
   nonGoals: [],
   risk: 'low',

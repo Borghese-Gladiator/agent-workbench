@@ -39,7 +39,7 @@ export function GatePanel({
       <p>
         <strong>Phase:</strong> {gate.phase}
       </p>
-      <p>{gate.summary}</p>
+      <p style={{ whiteSpace: 'pre-wrap' }}>{gate.summary}</p>
       <p className="repository-path">Created at {gate.createdAt}</p>
       {gate.reason === 'task-contract-approval' ? (
         <div className="actions">

@@ -53,6 +53,8 @@ const sampleContract = (): TaskContract => ({
   taskId: TASK_ID,
   version: 1,
   objective: 'Add a feature',
+  problemStatement: 'the feature is missing',
+  successCriteria: [{ id: 'sc-1', description: 'the feature works', measurable: true }],
   constraints: ['keep tests green'],
   nonGoals: [],
   risk: 'low',

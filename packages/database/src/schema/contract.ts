@@ -9,6 +9,8 @@ export const taskContracts = sqliteTable('task_contracts', {
     .references(() => tasks.id),
   version: integer('version').notNull(),
   objective: text('objective').notNull(),
+  problemStatement: text('problem_statement').notNull().default(''),
+  successCriteriaJson: text('success_criteria_json').notNull().default('[]'),
   constraintsJson: text('constraints_json').notNull(),
   nonGoalsJson: text('non_goals_json').notNull(),
   risk: text('risk').notNull().$type<TaskRisk>(),
