@@ -82,6 +82,26 @@ Ready to work.
 - **Do NOT call `EnterWorktree`** for worktrees created by this skill — it only accepts worktrees under the repo's `.claude/worktrees/`. Operate with explicit `git -C <path>` for the rest of the session.
 - Before any commit/push, verify with `git -C <path> branch --show-current` and `git worktree list`.
 
+## Self-editing: running the workbench against its own code
+
+agent-workbench can be a target of its own tasks (implementing a feature in itself). If you
+will **run the workbench from this worktree while a task edits this same source**, start the
+runtime in **pinned mode** so the daemon/worker run compiled `dist` instead of watching source:
+
+```bash
+# Build once, then start pinned (default) — `node dist/index.js`, no tsx watch:
+pnpm -C <worktree-path> build
+awb up            # pinned by default; editing src/ will NOT hot-reload the running runtime
+
+# `awb up --dev` (tsx watch) is for the normal inner loop and MUST NOT be used while a
+# self-task is editing this worktree's source — a save would hot-reload the daemon mid-run.
+```
+
+Why: under `tsx watch` (dev mode), a task editing this checkout's `src/` reloads the very
+process driving the run. Pinned mode (`node dist`) decouples the running runtime from the
+source being edited. Rebuild + restart to pick up changes deliberately. This only matters when
+the workbench targets itself; for editing an unrelated repo, either mode is fine.
+
 ## Cleanup
 
 To land the work on local `main` and clean up in one pass (rebase → fast-forward →

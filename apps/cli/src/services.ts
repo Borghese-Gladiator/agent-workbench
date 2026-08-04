@@ -40,9 +40,65 @@ function repoRoot(): string {
   return resolve(new URL('../../../..', import.meta.url).pathname);
 }
 
-export function serviceDefinitions(): Record<ServiceKey, ServiceDefinition> {
+/**
+ * Runtime execution mode:
+ * - `pinned` (default): worker + daemon run compiled `dist` (`node dist/index.js`) from the live
+ *   repo — no `tsx watch`, so editing the live `src/` can never hot-reload the running runtime.
+ *   This is the precondition for safely running a task against the workbench's own code.
+ * - `dev`: worker + daemon run `tsx watch` from the live source (workbench inner-loop DX).
+ *
+ * Requires `dist` to be built (`pnpm build`); `awb up` in pinned mode assumes a prior build.
+ */
+export type RuntimeMode = 'pinned' | 'dev';
+
+export function resolveRuntimeMode(): RuntimeMode {
+  return process.env.AWB_RUNTIME_MODE === 'dev' ? 'dev' : 'pinned';
+}
+
+export function serviceDefinitions(mode: RuntimeMode = resolveRuntimeMode()): Record<ServiceKey, ServiceDefinition> {
   const root = repoRoot();
   const layout = resolveLayout();
+  const pinned = mode === 'pinned';
+  const workerService: ServiceDefinition = pinned
+    ? {
+        key: 'worker',
+        label: 'Temporal worker',
+        command: 'node',
+        args: ['dist/index.js'],
+        cwd: join(root, 'workers', 'temporal-worker'),
+        env: { OTEL_EXPORTER_OTLP_ENDPOINT: OTEL_ENDPOINT },
+        ui: false,
+      }
+    : {
+        key: 'worker',
+        label: 'Temporal worker',
+        command: 'pnpm',
+        args: ['--filter', '@awb/temporal-worker', 'dev'],
+        cwd: root,
+        env: { OTEL_EXPORTER_OTLP_ENDPOINT: OTEL_ENDPOINT },
+        ui: false,
+      };
+  const daemonService: ServiceDefinition = pinned
+    ? {
+        key: 'daemon',
+        label: 'Daemon (Fastify API)',
+        command: 'node',
+        args: ['dist/index.js'],
+        cwd: join(root, 'apps', 'daemon'),
+        port: DAEMON_PORT,
+        env: { OTEL_EXPORTER_OTLP_ENDPOINT: OTEL_ENDPOINT },
+        ui: false,
+      }
+    : {
+        key: 'daemon',
+        label: 'Daemon (Fastify API)',
+        command: 'pnpm',
+        args: ['--filter', '@awb/daemon', 'dev'],
+        cwd: root,
+        port: DAEMON_PORT,
+        env: { OTEL_EXPORTER_OTLP_ENDPOINT: OTEL_ENDPOINT },
+        ui: false,
+      };
   return {
     otel: {
       key: 'otel',
@@ -78,26 +134,8 @@ export function serviceDefinitions(): Record<ServiceKey, ServiceDefinition> {
       port: TEMPORAL_PORT,
       ui: false,
     },
-    worker: {
-      key: 'worker',
-      label: 'Temporal worker',
-      command: 'pnpm',
-      args: ['--filter', '@awb/temporal-worker', 'dev'],
-      cwd: root,
-      // Point the worker's OTel SDK at the local collector (TASK-34); a no-op if the collector isn't up.
-      env: { OTEL_EXPORTER_OTLP_ENDPOINT: OTEL_ENDPOINT },
-      ui: false,
-    },
-    daemon: {
-      key: 'daemon',
-      label: 'Daemon (Fastify API)',
-      command: 'pnpm',
-      args: ['--filter', '@awb/daemon', 'dev'],
-      cwd: root,
-      port: DAEMON_PORT,
-      env: { OTEL_EXPORTER_OTLP_ENDPOINT: OTEL_ENDPOINT },
-      ui: false,
-    },
+    worker: workerService,
+    daemon: daemonService,
     ui: {
       key: 'ui',
       label: 'Web UI (Vite)',

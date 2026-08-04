@@ -40,7 +40,9 @@ export function registerLifecycleCommands(program: Command): void {
   program
     .command('up')
     .description('Start the core runtime (OTel collector, Temporal, worker, daemon) and wait until healthy')
-    .action(async () => {
+    .option('--dev', 'Run worker + daemon from live source via tsx watch (hot reload) instead of pinned dist')
+    .action(async (opts: { dev?: boolean }) => {
+      if (opts.dev === true) process.env.AWB_RUNTIME_MODE = 'dev';
       const { ready, alreadyReady, elapsedMs } = await ensureRuntime();
       if (outputOptions().json) {
         emitJson({ ok: ready, runtime: ready ? 'ready' : 'unhealthy', alreadyReady });
