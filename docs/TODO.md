@@ -164,7 +164,7 @@ Correctness ≠ maintainability (WSFF). TASK-42 hardens the correctness gate;
 TASK-53 adds the missing maintainability axis (advisory, non-blocking); TASK-54
 moves the cheapest redirection (problem + success criteria) *before* any code.
 
-### [ ] TASK-42: QA is not thorough enough — run "succeeds" but artifact is broken
+### [x] TASK-42: QA is not thorough enough — run "succeeds" but artifact is broken
 
 **What's wrong.** Runs report success while the delivered feature is actually
 broken (observed: a Sheng Ji game that doesn't work; multiple WebSocket
@@ -229,7 +229,7 @@ asserting the claim's state transition clears it. *Manual:* re-run the Sheng Ji
 case and confirm QA blocks it; re-drive a rules-bearing feature and confirm a
 `passedSeats`-style fidelity bug is caught by QA, not only by the reviewer.
 
-### [ ] TASK-53: Maintainability review, distinct from correctness, advisory to the human
+### [x] TASK-53: Maintainability review, distinct from correctness, advisory to the human
 
 **What's wrong.** Every gate we have (verify, QA, TASK-42) answers *does it work* —
 correctness. WSFF's whole thesis is correctness ≠ maintainability, and
@@ -255,7 +255,7 @@ produces a duplication annotation flagged advisory (non-blocking) and the run st
 completes. *Manual:* a real run's review artifact lists concrete maintainability
 candidates a human can act on.
 
-### [ ] TASK-54: Reviewer-alignment gate *before* implementation
+### [x] TASK-54: Reviewer-alignment gate *before* implementation
 
 **What's wrong.** Our gates are approve/reject *after* artifacts exist (plan gate,
 review gate). WSFF says to align with the person who'll review the PR on problem +
@@ -278,6 +278,15 @@ TASK-51 for sizing; feeds TASK-42/TASK-52.
 product-review gate is answered, and the recorded success criteria are readable by
 the QA phase. *Manual:* rejecting problem/success-criteria redirects the task before
 any plan or code is produced.
+
+**Shipped as (scope note).** Folded into the existing `specify` contract gate rather
+than a new phase — TASK-51 (S/M/L sizing) does not exist yet, so a standalone
+product-review phase would need sizing stubbed. `TaskContract` now carries
+`problemStatement` + measurable `successCriteria`; the specify gate blocks until the
+problem statement is present and (when a behavioral claim exists) at least one
+measurable criterion is recorded. Both are shown in the contract gate summary and are
+readable by the QA phase, feeding TASK-42. When TASK-51 lands, this can be lifted into
+a dedicated first phase.
 
 ---
 
