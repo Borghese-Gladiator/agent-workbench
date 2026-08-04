@@ -48,6 +48,9 @@ export type NewPlanSliceRow = typeof schema.planSlices.$inferInsert;
 export type PlanClaimCoverageRow = typeof schema.planClaimCoverage.$inferSelect;
 export type NewPlanClaimCoverageRow = typeof schema.planClaimCoverage.$inferInsert;
 
+export type ProgramDesignRow = typeof schema.programDesigns.$inferSelect;
+export type NewProgramDesignRow = typeof schema.programDesigns.$inferInsert;
+
 export type RunRow = typeof schema.runs.$inferSelect;
 export type NewRunRow = typeof schema.runs.$inferInsert;
 

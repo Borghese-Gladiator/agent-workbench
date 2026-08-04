@@ -107,6 +107,7 @@ describe('domain schemas', () => {
       constraints: [],
       nonGoals: [],
       risk: 'low',
+      size: 'M',
       claims: [claim],
       status: 'draft',
     });

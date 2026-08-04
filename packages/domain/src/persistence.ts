@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { TaskContractSchema } from './contract.js';
-import { ImplementationPlanSchema } from './plan.js';
+import { TaskContractSchema, TaskSizeSchema } from './contract.js';
+import { ImplementationPlanSchema, ProgramDesignSchema } from './plan.js';
 import { WorkspaceLeaseSchema } from './workspace.js';
 import { EvidenceSchema, FindingSchema, ArtifactRecordSchema } from './evidence.js';
 
@@ -15,8 +15,12 @@ export const RunStateSnapshotSchema = z.object({
   taskId: z.string(),
   repositoryId: z.string(),
   prompt: z.string().optional(),
+  /** Task size class (TASK-51), classified at specify and driving the phase set. */
+  size: TaskSizeSchema.optional(),
   contract: TaskContractSchema.optional(),
   plan: ImplementationPlanSchema.optional(),
+  /** Program-design artifact (TASK-52), produced for L tasks between plan and prepare. */
+  programDesign: ProgramDesignSchema.optional(),
   baseSha: z.string().optional(),
   candidateSha: z.string().optional(),
   worktreePath: z.string().optional(),

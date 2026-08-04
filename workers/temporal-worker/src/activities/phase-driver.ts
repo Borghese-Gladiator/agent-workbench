@@ -1,5 +1,6 @@
 import type {
   TaskPhase,
+  TaskSize,
   PhaseAttemptResult,
   CompletionCandidate,
   ModelUsage,
@@ -115,6 +116,12 @@ export type PhaseOutcome =
       openFindingIds: string[];
       /** Overrides for the completion candidate literal (versions/SHAs); the rest is boilerplate. */
       candidateOverrides?: Partial<CompletionCandidate>;
+      /**
+       * Extra fields to attach to a `candidate` PhaseAttemptResult beyond the candidate itself
+       * (TASK-51): specify uses this to report the classified `size` to the Workflow. Ignored on a
+       * non-complete (blocked) decision.
+       */
+      candidateExtra?: { size?: TaskSize };
       /** How to map a non-complete decision; defaults to `blockedResult(phase, missing)`. */
       onBlocked?: (missing: string[]) => PhaseAttemptResult;
     };
@@ -194,6 +201,10 @@ export async function drivePhase(handler: PhaseHandler, ctx: PhaseContext): Prom
     const decision = evaluatePhaseCompletion(candidate, outcome.completion);
     if (decision.complete) {
       result = candidateResult(candidate);
+      // Attach the classified size (TASK-51) so the Workflow can derive the run's phase set.
+      if (outcome.candidateExtra?.size && result.outcome === 'candidate') {
+        result = { ...result, size: outcome.candidateExtra.size };
+      }
     } else {
       result = outcome.onBlocked
         ? outcome.onBlocked(decision.missing)

@@ -78,7 +78,7 @@ WSFF's 80/20 core: right-size the ceremony, review structure before code, and ca
 how much unreviewed diff a run can dump. TASK-51 gates when TASK-52 runs; TASK-56
 is the deliberate counterweight to the fewest-slices bias (TASK-19).
 
-### [ ] TASK-51: Phase-sizing router (the WSFF 80/20 rule)
+### [x] TASK-51: Phase-sizing router (the WSFF 80/20 rule)
 
 **What's wrong.** The pipeline runs one-size-fits-all — every task gets the same
 planning weight regardless of size. WSFF's central structural claim is that ~40%
@@ -106,7 +106,7 @@ workflow skips the heavy planning phases; a multi-package prompt classifies L an
 runs program-design. *Manual:* a trivial task finishes without the full plan
 ceremony; a large task shows all phases in the UI.
 
-### [ ] TASK-52: Program-design artifact (signatures / call-stack / file-tree diff) before code
+### [x] TASK-52: Program-design artifact (signatures / call-stack / file-tree diff) before code
 
 **What's wrong.** We go plan → build with nothing between. WSFF inserts an explicit
 "program design" phase — types, method signatures, projected file-tree diff, call
@@ -131,7 +131,7 @@ a file-tree diff + signatures and no implementation bodies, and it reaches the g
 before any slice runs. *Manual:* rejecting the program design redirects structure
 without a build ever happening.
 
-### [ ] TASK-56: "Amplify, don't automate" velocity guardrail
+### [x] TASK-56: "Amplify, don't automate" velocity guardrail
 
 **What's wrong.** Nothing caps how much unreviewed diff a single run can produce
 before a human sees it. WSFF's concrete anti-pattern is reviewing 2000+ lines of

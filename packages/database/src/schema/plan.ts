@@ -37,3 +37,20 @@ export const planClaimCoverage = sqliteTable('plan_claim_coverage', {
   qaScenarioIdsJson: text('qa_scenario_ids_json').notNull(),
   expectedAssertionsJson: text('expected_assertions_json').notNull().default('[]'),
 });
+
+/**
+ * Program-design artifacts (TASK-52), one row per (task, version). The signatures/file-tree diff are
+ * small structured JSON, so unlike plans they are stored as JSON columns on a single row rather than
+ * fanned into child tables.
+ */
+export const programDesigns = sqliteTable('program_designs', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id')
+    .notNull()
+    .references(() => tasks.id),
+  planVersion: integer('plan_version').notNull(),
+  version: integer('version').notNull(),
+  fileTreeDiffJson: text('file_tree_diff_json').notNull(),
+  typeSignaturesJson: text('type_signatures_json').notNull(),
+  functionSignaturesJson: text('function_signatures_json').notNull(),
+});

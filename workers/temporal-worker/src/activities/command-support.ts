@@ -145,3 +145,28 @@ export async function resolveReviewDiff(input: {
     return { diff: '', changedPaths: [] };
   }
 }
+
+/**
+ * Computes the changed-line + changed-file counts for a `base..head` range via `git diff --numstat`
+ * (TASK-56 velocity guardrail). Binary files report `-` for adds/dels in numstat — those rows count
+ * toward the file total but contribute 0 lines. Returns zeros on any git error so the guardrail never
+ * crashes a phase (a missing range simply reads as "no diff", i.e. under any cap).
+ */
+export async function resolveDiffNumstat(input: {
+  worktreePath: string;
+  baseSha: string;
+  headSha: string;
+}): Promise<{ changedLines: number; changedFiles: number }> {
+  try {
+    const { stdout } = await runGit(input.worktreePath, ['diff', '--numstat', `${input.baseSha}..${input.headSha}`]);
+    const rows = stdout.split('\n').filter((line) => line.trim().length > 0);
+    let changedLines = 0;
+    for (const row of rows) {
+      const [added, deleted] = row.split('\t');
+      changedLines += (Number.parseInt(added ?? '', 10) || 0) + (Number.parseInt(deleted ?? '', 10) || 0);
+    }
+    return { changedLines, changedFiles: rows.length };
+  } catch {
+    return { changedLines: 0, changedFiles: 0 };
+  }
+}

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AcceptanceClaim, TaskContract, TaskRisk } from '@awb/domain';
+import type { AcceptanceClaim, TaskContract, TaskRisk, TaskSize } from '@awb/domain';
 
 export interface DraftContractInput {
   taskId: string;
@@ -12,6 +12,8 @@ export interface DraftContractInput {
   constraints?: string[];
   nonGoals?: string[];
   risk?: TaskRisk;
+  /** Task size class (TASK-51); defaults to `M` until the classifier or a human sets it. */
+  size?: TaskSize;
   claims: Omit<AcceptanceClaim, 'id'>[];
 }
 
@@ -31,6 +33,7 @@ export function draftContract(input: DraftContractInput, version = 1): TaskContr
     constraints: input.constraints ?? [],
     nonGoals: input.nonGoals ?? [],
     risk: input.risk ?? 'low',
+    size: input.size ?? 'M',
     claims: input.claims.map((claim) => ({ ...claim, id: randomUUID() })),
     status: 'draft',
   };

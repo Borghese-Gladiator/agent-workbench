@@ -58,8 +58,10 @@ export class SqliteRunStateStore implements RunStateStore {
 
     const state: TaskRunState = {
       repositoryId: snapshot?.repositoryId,
+      size: snapshot?.size,
       contract: snapshot?.contract,
       plan: snapshot?.plan,
+      programDesign: snapshot?.programDesign,
       baseSha: snapshot?.baseSha,
       candidateSha: snapshot?.candidateSha,
       worktreePath: snapshot?.worktreePath,
@@ -96,8 +98,10 @@ export function toSnapshot(taskId: string, state: TaskRunState): RunStateSnapsho
   return {
     taskId,
     repositoryId: state.repositoryId ?? state.lease?.repositoryId ?? '',
+    ...(state.size ? { size: state.size } : {}),
     ...(state.contract ? { contract: state.contract } : {}),
     ...(state.plan ? { plan: state.plan } : {}),
+    ...(state.programDesign ? { programDesign: state.programDesign } : {}),
     ...(state.baseSha ? { baseSha: state.baseSha } : {}),
     ...(state.candidateSha ? { candidateSha: state.candidateSha } : {}),
     ...(state.worktreePath ? { worktreePath: state.worktreePath } : {}),

@@ -111,6 +111,8 @@ export interface ClaudeSdkQueryOptions {
   disallowedTools?: string[];
   maxTurns?: number;
   resume?: string;
+  /** Provider model to use for this query (TASK-51); when omitted the SDK uses its default model. */
+  model?: string;
   abortController?: AbortController;
   /**
    * The SDK's permission mode. Workbench sessions run headless in a worker with no human to answer
@@ -139,6 +141,8 @@ interface ClaudeSessionState {
   disallowedTools: string[];
   /** The caller's context payload (contract/plan/diff/evidence), serialized into the first prompt. */
   contextPayload: unknown;
+  /** Optional provider model override for this session (TASK-51). */
+  model?: string;
   resumeSessionId?: string;
   liveQuery?: ClaudeSdkQueryHandle;
 }
@@ -229,6 +233,7 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
       allowedTools: input.allowedTools,
       disallowedTools: input.disallowedTools ?? [],
       contextPayload: input.contextPayload,
+      model: input.model,
       // TASK-32: seed the resume token if the caller is resuming a prior (possibly cross-process)
       // session. When set, `execute` skips the context preamble and passes `resume` to the SDK.
       resumeSessionId: input.resumeSessionId,
@@ -273,6 +278,7 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
         disallowedTools: state.disallowedTools,
         maxTurns: assignment.stopConditions?.maxTurns,
         resume: state.resumeSessionId,
+        model: state.model,
         abortController,
         // Headless worker: no human to answer per-tool permission prompts. See the option's doc.
         permissionMode: 'bypassPermissions',

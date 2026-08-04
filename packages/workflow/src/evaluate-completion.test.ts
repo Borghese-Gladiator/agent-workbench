@@ -122,6 +122,52 @@ describe('evaluatePhaseCompletion — plan', () => {
   });
 });
 
+describe('evaluatePhaseCompletion — program-design (TASK-52)', () => {
+  const completeContext: CompletionContext = {
+    programDesign: {
+      artifactExists: true,
+      fileTreeDiffNonEmpty: true,
+      hasSignatures: true,
+      signaturesAreBodyless: true,
+      designAccepted: true,
+    },
+  };
+
+  it('clears with a file-tree diff, bodyless signatures, and acceptance', () => {
+    expect(evaluatePhaseCompletion(candidateFor('program-design'), completeContext).complete).toBe(true);
+  });
+
+  it('does not clear when the file-tree diff is empty', () => {
+    const ctx: CompletionContext = {
+      programDesign: { ...completeContext.programDesign!, fileTreeDiffNonEmpty: false },
+    };
+    const result = evaluatePhaseCompletion(candidateFor('program-design'), ctx);
+    expect(result.complete).toBe(false);
+    expect(result.missing).toContain('projected file-tree diff is empty');
+  });
+
+  it('does not clear when there are no signatures', () => {
+    const ctx: CompletionContext = {
+      programDesign: { ...completeContext.programDesign!, hasSignatures: false },
+    };
+    expect(evaluatePhaseCompletion(candidateFor('program-design'), ctx).complete).toBe(false);
+  });
+
+  it('does not clear when signatures leak implementation bodies', () => {
+    const ctx: CompletionContext = {
+      programDesign: { ...completeContext.programDesign!, signaturesAreBodyless: false },
+    };
+    expect(evaluatePhaseCompletion(candidateFor('program-design'), ctx).complete).toBe(false);
+  });
+
+  it('does not clear until the design is accepted', () => {
+    const ctx: CompletionContext = {
+      programDesign: { ...completeContext.programDesign!, designAccepted: false },
+    };
+    expect(evaluatePhaseCompletion(candidateFor('program-design'), ctx).complete).toBe(false);
+  });
+});
+
 describe('evaluatePhaseCompletion — prepare', () => {
   const completeContext: CompletionContext = {
     prepare: {

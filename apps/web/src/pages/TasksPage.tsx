@@ -183,6 +183,7 @@ export function TasksPage() {
             <TableRow>
               <TableHead>Task</TableHead>
               <TableHead>Repository</TableHead>
+              <TableHead>Size</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Created</TableHead>
             </TableRow>
@@ -203,6 +204,7 @@ export function TasksPage() {
                     </div>
                   </TableCell>
                   <TableCell className="align-top text-sm">{repoLabel(task)}</TableCell>
+                  <TableCell className="align-top text-sm text-muted-foreground">{task.size ?? '—'}</TableCell>
                   <TableCell className="align-top">
                     <Badge variant={status.variant}>{status.label}</Badge>
                   </TableCell>

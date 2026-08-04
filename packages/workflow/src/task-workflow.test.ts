@@ -69,6 +69,12 @@ function candidateWithUsage(
   return { ...candidate(phase), usage };
 }
 
+function sizedSpecifyCandidate(size: 'S' | 'M' | 'L'): PhaseAttemptResult {
+  const base = candidate('specify');
+  if (base.outcome !== 'candidate') throw new Error('unreachable');
+  return { ...base, size };
+}
+
 function repair(): PhaseAttemptResult {
   return { outcome: 'repair', target: 'implement', findings: [] };
 }
@@ -124,6 +130,65 @@ describe('TaskWorkflow', () => {
     );
     expect(result.phase).toBe('assimilate');
     expect(result.condition).toBe('completed');
+  }, 30_000);
+
+  it('classifies size S at specify and skips plan + program-design (TASK-51)', async () => {
+    // The specify candidate reports size S. `plan` and `program-design` are NEVER scripted; if the
+    // run walked them it would stall (scripted activities have no default for an unlisted phase only
+    // when accessed — here reaching assimilate proves they were skipped). We also assert phaseSet.
+    let finalPhaseSet: TaskPhase[] | undefined;
+    const { result } = await runWithActivities(
+      {
+        specify: [sizedSpecifyCandidate('S')],
+      },
+      async (h) => {
+        // capture the phaseSet once specify has advanced
+        await waitForCondition(async () => {
+          const state = await h.query(getCurrentStateQuery);
+          finalPhaseSet = state.phaseSet;
+          return state.phase !== 'specify';
+        });
+      },
+    );
+    expect(result.phase).toBe('assimilate');
+    expect(result.size).toBe('S');
+    expect(result.phaseSet).toBeDefined();
+    expect(result.phaseSet).not.toContain('plan');
+    expect(result.phaseSet).not.toContain('program-design');
+    expect(finalPhaseSet).not.toContain('plan');
+  }, 30_000);
+
+  it('classifies size L at specify and runs program-design (TASK-51/52)', async () => {
+    const { result } = await runWithActivities(
+      {
+        specify: [sizedSpecifyCandidate('L')],
+        // program-design must be scripted or the run would block there
+        'program-design': [candidate('program-design')],
+      },
+      async () => {},
+    );
+    expect(result.phase).toBe('assimilate');
+    expect(result.size).toBe('L');
+    expect(result.phaseSet).toContain('program-design');
+  }, 30_000);
+
+  it('a human size override at the contract gate wins over the classifier (TASK-51)', async () => {
+    // Classifier says L, but the human approves with size S — the run must skip plan/program-design.
+    const { result } = await runWithActivities(
+      {
+        specify: [awaitHuman('specify', 'task-contract-approval'), sizedSpecifyCandidate('L')],
+      },
+      async (handle) => {
+        await waitForCondition(async () => {
+          const state = await handle.query(getCurrentStateQuery);
+          return state.condition === 'awaiting-human';
+        });
+        await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion: 1, size: 'S' }] });
+      },
+    );
+    expect(result.phase).toBe('assimilate');
+    expect(result.size).toBe('S');
+    expect(result.phaseSet).not.toContain('program-design');
   }, 30_000);
 
   it('resumes from a continue-as-new resumeState instead of starting fresh (TASK-26)', async () => {

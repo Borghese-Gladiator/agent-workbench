@@ -1,12 +1,15 @@
-import type { TaskWorkflowState } from '../api/tasks.js';
+import { useState } from 'react';
+import type { TaskWorkflowState, TaskSize } from '../api/tasks.js';
 
 interface GatePanelProps {
   repositoryId: string;
   taskId: string;
   phase: TaskWorkflowState['phase'];
   gate: NonNullable<TaskWorkflowState['pendingHumanGate']>;
+  /** The classified size shown at the contract gate; the human may override it before approving (TASK-51). */
+  size?: TaskSize;
   busy: boolean;
-  onApproveContract: () => void;
+  onApproveContract: (sizeOverride?: TaskSize) => void;
   onRejectContract: () => void;
   onApprovePlan: () => void;
   onRejectPlan: () => void;
@@ -21,15 +24,23 @@ interface GatePanelProps {
  * this is a best-effort mapping given current daemon capability, not a guarantee every reason is
  * correctly handled.
  */
+const SIZE_LABELS: Record<TaskSize, string> = {
+  S: 'S — single-shot (skips plan + program-design)',
+  M: 'M — one plan artifact (skips program-design)',
+  L: 'L — full plan + program-design',
+};
+
 export function GatePanel({
   phase,
   gate,
+  size,
   busy,
   onApproveContract,
   onRejectContract,
   onApprovePlan,
   onRejectPlan,
 }: GatePanelProps) {
+  const [sizeChoice, setSizeChoice] = useState<TaskSize | ''>(size ?? '');
   return (
     <div className="gate-panel">
       <h3>Pending human gate</h3>
@@ -43,7 +54,26 @@ export function GatePanel({
       <p className="repository-path">Created at {gate.createdAt}</p>
       {gate.reason === 'task-contract-approval' ? (
         <div className="actions">
-          <button type="button" disabled={busy} onClick={onApproveContract}>
+          <label>
+            Size{' '}
+            <select
+              value={sizeChoice}
+              disabled={busy}
+              onChange={(e) => setSizeChoice(e.target.value as TaskSize | '')}
+            >
+              <option value="">(keep classified)</option>
+              {(Object.keys(SIZE_LABELS) as TaskSize[]).map((s) => (
+                <option key={s} value={s}>
+                  {SIZE_LABELS[s]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onApproveContract(sizeChoice === '' ? undefined : sizeChoice)}
+          >
             Approve contract
           </button>
           <button type="button" disabled={busy} onClick={onRejectContract}>

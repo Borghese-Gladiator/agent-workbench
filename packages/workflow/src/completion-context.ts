@@ -26,6 +26,18 @@ export interface CompletionContext {
     planStatus: ImplementationPlanStatus;
     humanApprovedHighRiskPlan: boolean;
   };
+  programDesign?: {
+    /** The program-design artifact was produced and recorded. */
+    artifactExists: boolean;
+    /** At least one file is listed in the projected file-tree diff. */
+    fileTreeDiffNonEmpty: boolean;
+    /** At least one type or function signature was declared. */
+    hasSignatures: boolean;
+    /** No implementation bodies leaked into the signatures (design-only, per WSFF). */
+    signaturesAreBodyless: boolean;
+    /** A human (or the gate machinery) accepted the design before code. */
+    designAccepted: boolean;
+  };
   prepare?: {
     baseShaRecorded: boolean;
     worktreeExists: boolean;

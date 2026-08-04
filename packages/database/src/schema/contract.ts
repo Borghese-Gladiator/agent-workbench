@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
-import type { AcceptanceClaimCategory, TaskContractStatus, TaskRisk } from '@awb/domain';
+import type { AcceptanceClaimCategory, TaskContractStatus, TaskRisk, TaskSize } from '@awb/domain';
 import { tasks } from './tasks.js';
 
 export const taskContracts = sqliteTable('task_contracts', {
@@ -13,6 +13,7 @@ export const taskContracts = sqliteTable('task_contracts', {
   constraintsJson: text('constraints_json').notNull(),
   nonGoalsJson: text('non_goals_json').notNull(),
   risk: text('risk').notNull().$type<TaskRisk>(),
+  size: text('size').notNull().$type<TaskSize>().default('M'),
   status: text('status').notNull().$type<TaskContractStatus>(),
 });
 

@@ -19,6 +19,12 @@ export interface CreateAgentSessionInput {
   /** Allowed tool names for this session, derived from the capability broker for this role. */
   allowedTools: string[];
   /**
+   * Provider model override for this session (TASK-51). Lets a cheap role (e.g. the S/M/L size
+   * classifier) request a small/fast model without changing any other role's model. Optional — when
+   * omitted the adapter uses its provider default. The mock adapter accepts and ignores it.
+   */
+  model?: string;
+  /**
    * Tool names this session must be DENIED (the complement of `allowedTools` over the core tool
    * universe). Enforced by the adapter as the SDK's `disallowedTools` so a read-only role provably
    * cannot use them, even under `bypassPermissions` (TASK-24, §18/§33). Optional — the mock adapter

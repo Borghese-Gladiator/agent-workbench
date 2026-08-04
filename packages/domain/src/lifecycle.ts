@@ -1,8 +1,10 @@
 import { z } from 'zod';
+import { TaskSizeSchema } from './contract.js';
 
 export const TaskPhaseSchema = z.enum([
   'specify',
   'plan',
+  'program-design',
   'prepare',
   'implement',
   'verify',
@@ -69,6 +71,7 @@ export const HumanGateReasonSchema = z.enum([
   'qa-inconclusive',
   'reviewer-product-decision',
   'waiver-request',
+  'slice-diff-exceeds-cap',
 ]);
 export type HumanGateReason = z.infer<typeof HumanGateReasonSchema>;
 
@@ -107,6 +110,11 @@ export const PhaseAttemptResultSchema = z.discriminatedUnion('outcome', [
     outcome: z.literal('candidate'),
     candidate: CompletionCandidateSchema,
     usage: PhaseUsageSchema.optional(),
+    /**
+     * The task size the specify phase classified (TASK-51). Only the specify candidate sets this; the
+     * Workflow reads it to derive the run's `phaseSet`. Omitted by every other phase.
+     */
+    size: TaskSizeSchema.optional(),
   }),
   z.object({
     outcome: z.literal('repair'),

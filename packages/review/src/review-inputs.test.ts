@@ -12,6 +12,7 @@ const taskContract: TaskContract = {
   constraints: [],
   nonGoals: [],
   risk: 'low',
+  size: 'M',
   claims: [],
   status: 'approved',
 };
