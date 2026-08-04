@@ -9,6 +9,7 @@ import type {
   WorkspaceLease,
   ArtifactRecord,
   SuccessCriterion,
+  ExpectedAssertion,
 } from '@awb/domain';
 import type {
   TaskContractRow,
@@ -37,6 +38,11 @@ function parseArray(json: string): string[] {
 function parseSuccessCriteria(json: string): SuccessCriterion[] {
   const value = JSON.parse(json);
   return Array.isArray(value) ? (value as SuccessCriterion[]) : [];
+}
+
+function parseExpectedAssertions(json: string): ExpectedAssertion[] {
+  const value = JSON.parse(json);
+  return Array.isArray(value) ? (value as ExpectedAssertion[]) : [];
 }
 
 // --- TaskContract (+ acceptance claims) ---
@@ -140,14 +146,17 @@ export function coverageToRow(coverage: ClaimCoverage, planId: string): Omit<Pla
     claimId: coverage.claimId,
     planSliceIdsJson: JSON.stringify(coverage.planSliceIds),
     qaScenarioIdsJson: JSON.stringify(coverage.qaScenarioIds),
+    expectedAssertionsJson: JSON.stringify(coverage.expectedAssertions ?? []),
   };
 }
 
 export function rowToCoverage(row: PlanClaimCoverageRow): ClaimCoverage {
+  const expectedAssertions = parseExpectedAssertions(row.expectedAssertionsJson);
   return {
     claimId: row.claimId,
     planSliceIds: parseArray(row.planSliceIdsJson),
     qaScenarioIds: parseArray(row.qaScenarioIdsJson),
+    ...(expectedAssertions.length > 0 ? { expectedAssertions } : {}),
   };
 }
 

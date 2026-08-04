@@ -50,6 +50,34 @@ describe('draftPlan', () => {
     );
     expect(plan.claimCoverage[0]?.planSliceIds).toEqual([]);
   });
+
+  // TASK-42: expected per-claim assertions aggregate from covering slices into ClaimCoverage.
+  it('aggregates a slice\'s expected assertions into the covered claim', () => {
+    const claim = makeClaim({ id: 'claim-1' });
+    const plan = draftPlan(
+      {
+        taskId: 'task-1',
+        contractVersion: 1,
+        summary: 'add feature',
+        slices: [
+          {
+            objective: 'engine',
+            claimIds: ['claim-1'],
+            likelyPaths: [],
+            requiredTargetedChecks: ['unit'],
+            dependencies: [],
+            expectedAssertions: [
+              { claimId: 'claim-1', observes: 'a higher rank beats a lower one', kind: 'state-transition' },
+            ],
+          },
+        ],
+      },
+      [claim],
+    );
+    expect(plan.claimCoverage[0]?.expectedAssertions).toEqual([
+      { claimId: 'claim-1', observes: 'a higher rank beats a lower one', kind: 'state-transition' },
+    ]);
+  });
 });
 
 describe('revisePlan', () => {

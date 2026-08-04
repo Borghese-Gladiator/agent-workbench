@@ -118,6 +118,11 @@ function evaluateExercise(ctx: CompletionContext['exercise']): CompletionDecisio
 
   if (!ctx.everyRequiredScenarioHasResult) missing.push('some required QA scenario has no result');
   if (!ctx.everyBehavioralClaimCovered) missing.push('some behavioral acceptance claim is not covered');
+  if (ctx.behavioralClaimsMissingStrongAssertion && ctx.behavioralClaimsMissingStrongAssertion.length > 0) {
+    missing.push(
+      `${ctx.behavioralClaimsMissingStrongAssertion.length} behavioral claim(s) lack a passing state-transition/value assertion`,
+    );
+  }
   if (!ctx.structuredAssertionsPass) missing.push('structured assertions do not pass');
   if (!ctx.requiredRecordingExists) missing.push('required video or terminal recording does not exist');
   if (!ctx.browserScenariosHaveTraces) missing.push('a browser scenario is missing a Playwright trace');

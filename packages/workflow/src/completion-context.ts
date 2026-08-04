@@ -58,6 +58,13 @@ export interface CompletionContext {
   exercise?: {
     everyRequiredScenarioHasResult: boolean;
     everyBehavioralClaimCovered: boolean;
+    /**
+     * TASK-42: behavioral claim ids that have no passing *strong* (state-transition/value-match)
+     * QA assertion exercising them. Non-empty ⇒ the gate does not clear, even if
+     * `everyBehavioralClaimCovered` was reported true, so a scenario of only liveness checks can
+     * no longer rubber-stamp a behavioral claim. Optional for back-compat with fixtures.
+     */
+    behavioralClaimsMissingStrongAssertion?: string[];
     structuredAssertionsPass: boolean;
     requiredRecordingExists: boolean;
     browserScenariosHaveTraces: boolean;

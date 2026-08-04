@@ -263,6 +263,23 @@ describe('evaluatePhaseCompletion — exercise', () => {
     };
     expect(evaluatePhaseCompletion(candidateFor('exercise'), ctx).complete).toBe(false);
   });
+
+  // TASK-42: a behavioral claim covered only by liveness assertions must not clear the gate.
+  it('is not complete when a behavioral claim lacks a strong assertion', () => {
+    const ctx: CompletionContext = {
+      exercise: { ...completeContext.exercise!, behavioralClaimsMissingStrongAssertion: ['claim-1'] },
+    };
+    const result = evaluatePhaseCompletion(candidateFor('exercise'), ctx);
+    expect(result.complete).toBe(false);
+    expect(result.missing.some((m) => m.includes('state-transition/value assertion'))).toBe(true);
+  });
+
+  it('stays complete when no behavioral claim is missing a strong assertion (empty list)', () => {
+    const ctx: CompletionContext = {
+      exercise: { ...completeContext.exercise!, behavioralClaimsMissingStrongAssertion: [] },
+    };
+    expect(evaluatePhaseCompletion(candidateFor('exercise'), ctx).complete).toBe(true);
+  });
 });
 
 describe('evaluatePhaseCompletion — challenge', () => {

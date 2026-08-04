@@ -27,6 +27,10 @@ function buildClaimCoverage(claims: AcceptanceClaim[], slices: PlanSlice[]): Cla
       // one. (Previously hardcoded to [], which made everyBehavioralClaimHasQaScenario impossible
       // to satisfy — the plan phase then always blocked as repeated-failure-no-progress.)
       qaScenarioIds: [...new Set(coveringSlices.flatMap((s) => s.qaScenarioIds ?? []))],
+      // TASK-42: aggregate the expected per-claim assertions this claim's covering slices declare.
+      expectedAssertions: coveringSlices
+        .flatMap((s) => s.expectedAssertions ?? [])
+        .filter((a) => a.claimId === claim.id),
     };
   });
 }

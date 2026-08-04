@@ -47,7 +47,14 @@ import {
   type SliceAssignment,
 } from '@awb/planning';
 import { runVerificationMatrix, allRequiredCommandsPass, type VerificationRunContext } from '@awb/verification';
-import { runCliQa, runBrowserQa, runHttpApiQa, runLibraryQa, type QaEvidenceContext } from '@awb/qa';
+import {
+  runCliQa,
+  runBrowserQa,
+  runHttpApiQa,
+  runLibraryQa,
+  evaluateBehavioralClaimCoverage,
+  type QaEvidenceContext,
+} from '@awb/qa';
 import {
   runAdversarialReview,
   reviewerSessionDiffersFromBuilder,
@@ -863,18 +870,47 @@ const exerciseHandler: PhaseHandler = {
     const structuredAssertionsPass = qaResult.assertions.every((a) => a.passed);
     const hasTraceArtifact = qaResult.artifacts.some((a) => a.kind === 'browser-trace');
 
+    // TASK-42: derive the two gate signals that were previously hard-coded.
+    // (1) policyBlockingErrorsPresent — the browser executor reports whether it saw an unhandled
+    //     console error, a failed/4xx network request, or a leaked/duplicate WebSocket open. Other
+    //     executors don't observe those signals, so they report no blocking error.
+    const policyBlockingErrorsPresent =
+      'policyBlockingErrorsPresent' in qaResult ? qaResult.policyBlockingErrorsPresent : false;
+
+    // (2) everyBehavioralClaimCovered — a behavioral claim is only covered when a passing *strong*
+    //     (state-transition/value-match) assertion exercises it, not merely because a scenario ran.
+    //     The planner's expected per-claim assertions (plan.claimCoverage) raise the bar per claim.
+    const behavioralClaimIds =
+      runState.contract?.claims
+        .filter((c) => c.category === 'behavior' && c.qaEvidenceRequired)
+        .map((c) => c.id) ?? [];
+    const expectedByClaim = new Map(
+      (runState.plan?.claimCoverage ?? []).map((c) => [c.claimId, c.expectedAssertions ?? []]),
+    );
+    const coverage = evaluateBehavioralClaimCoverage({
+      behavioralClaimIds,
+      assertions: qaResult.assertions,
+      claimHasExpectedAssertion: (claimId) => (expectedByClaim.get(claimId)?.length ?? 0) > 0,
+      assertionCoversClaim: (claimId, assertion) => {
+        const expected = expectedByClaim.get(claimId) ?? [];
+        const haystack = `${assertion.name} ${assertion.detail ?? ''}`.toLowerCase();
+        return expected.some((e) => haystack.includes(e.observes.toLowerCase()));
+      },
+    });
+
     return {
       kind: 'evaluate',
       completion: {
         exercise: {
           everyRequiredScenarioHasResult: true,
-          everyBehavioralClaimCovered: true,
+          everyBehavioralClaimCovered: coverage.everyBehavioralClaimCovered,
+          behavioralClaimsMissingStrongAssertion: coverage.missing,
           structuredAssertionsPass,
           requiredRecordingExists: qaResult.artifacts.length > 0,
           // A browser run must have produced a real trace artifact; a CLI run has no browser scenarios.
           browserScenariosHaveTraces: ranBrowserQa ? hasTraceArtifact : true,
           evidenceTiedToCandidateSha: qaResult.evidence.candidateSha === context.candidateSha,
-          policyBlockingErrorsPresent: false,
+          policyBlockingErrorsPresent,
         },
       },
       evidenceIds: [qaResult.evidence.id],
