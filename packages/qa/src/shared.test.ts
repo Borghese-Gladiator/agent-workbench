@@ -60,13 +60,12 @@ describe('scenarioStrength (TASK-42)', () => {
 
 describe('policyBlockingErrorsPresent (TASK-42)', () => {
   it('is false with no captured signals', () => {
-    expect(policyBlockingErrorsPresent({ consoleErrors: [], failedRequests: [], socketAnomalies: [] })).toBe(false);
+    expect(policyBlockingErrorsPresent({ consoleErrors: [], failedRequests: [] })).toBe(false);
   });
 
-  it('is true when any console, network, or socket signal is present', () => {
-    expect(policyBlockingErrorsPresent({ consoleErrors: ['boom'], failedRequests: [], socketAnomalies: [] })).toBe(true);
-    expect(policyBlockingErrorsPresent({ consoleErrors: [], failedRequests: ['404'], socketAnomalies: [] })).toBe(true);
-    expect(policyBlockingErrorsPresent({ consoleErrors: [], failedRequests: [], socketAnomalies: ['leak'] })).toBe(true);
+  it('is true when any console or network signal is present', () => {
+    expect(policyBlockingErrorsPresent({ consoleErrors: ['boom'], failedRequests: [] })).toBe(true);
+    expect(policyBlockingErrorsPresent({ consoleErrors: [], failedRequests: ['404'] })).toBe(true);
   });
 });
 

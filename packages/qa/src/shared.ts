@@ -42,21 +42,17 @@ export function scenarioStrength(assertions: QaAssertionResult[]): 'weak' | 'str
 }
 
 /**
- * TASK-42: whether a browser QA run hit a policy-blocking runtime signal — an unhandled console
- * error, a failed/4xx+ network request, or a leaked/duplicate WebSocket open. Feeds the exercise
- * gate's `policyBlockingErrorsPresent` (was hard-coded false), so a page that throws errors or
- * opens N>1 sockets per action no longer passes QA.
+ * TASK-42: whether a browser QA run hit a frontend-observable policy-blocking signal — an
+ * unhandled console error or a failed/4xx+ network request. Feeds the exercise gate's
+ * `policyBlockingErrorsPresent` (was hard-coded false), so a page that throws errors no longer
+ * passes QA. We deliberately do NOT inspect the transport (WebSocket/SSE/polling): QA validates
+ * the frontend's observable behaviour and lets the app make whatever connections it makes.
  */
 export function policyBlockingErrorsPresent(input: {
   consoleErrors: string[];
   failedRequests: string[];
-  socketAnomalies: string[];
 }): boolean {
-  return (
-    input.consoleErrors.length > 0 ||
-    input.failedRequests.length > 0 ||
-    input.socketAnomalies.length > 0
-  );
+  return input.consoleErrors.length > 0 || input.failedRequests.length > 0;
 }
 
 export interface QaEvidenceContext {

@@ -31,12 +31,6 @@ export type BrowserQaStep =
 export interface BrowserQaScenario {
   baseUrl: string;
   steps: BrowserQaStep[];
-  /**
-   * TASK-42: the maximum number of WebSocket connections a single user action (a `click`) may
-   * open before it is flagged as a leak. A "Join" button that opens a fresh socket on every click
-   * is the concrete bug this catches. Defaults to 1 (one action → at most one new socket).
-   */
-  maxSocketsPerAction?: number;
 }
 
 export interface BrowserQaResult {
@@ -44,9 +38,13 @@ export interface BrowserQaResult {
   artifacts: ArtifactRecord[];
   consoleErrors: string[];
   failedRequests: string[];
-  /** TASK-42: leaked/duplicate WebSocket opens attributed to a single user action. */
-  socketAnomalies: string[];
-  /** TASK-42: convenience — whether any console/network/socket signal should block the gate. */
+  /**
+   * TASK-42: convenience — whether any frontend-observable error (an unhandled console error or a
+   * failed/4xx+ network request) should block the gate. We do NOT inspect the transport (e.g.
+   * WebSocket) directly: QA validates the frontend's observable behaviour and lets the app make
+   * whatever connections it makes. A transport-level bug (e.g. a duplicate socket) is caught via
+   * its observable symptom — a console/network error, or a failing state/value assertion.
+   */
   policyBlockingErrorsPresent: boolean;
   evidence: ReturnType<typeof produceQaEvidence>;
 }
@@ -67,9 +65,6 @@ export async function runBrowserQa(
   const artifacts: ArtifactRecord[] = [];
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
-  const socketAnomalies: string[] = [];
-  const maxSocketsPerAction = scenario.maxSocketsPerAction ?? 1;
-  let socketOpenCount = 0;
   let executionErrored = false;
   let videoProduced = false;
   let traceProduced = false;
@@ -94,19 +89,10 @@ export async function runBrowserQa(
         failedRequests.push(`${res.request().method()} ${res.url()} - ${res.status()}`);
       }
     });
-    // TASK-42: count every WebSocket the page opens so a click that opens more than
-    // `maxSocketsPerAction` (a leaked/duplicate "Join" connection) can be flagged.
-    page.on('websocket', () => {
-      socketOpenCount += 1;
-    });
 
     try {
       for (const step of scenario.steps) {
-        await executeStep(page, scenario.baseUrl, step, assertions, artifactStore, context, artifacts, {
-          socketsBefore: () => socketOpenCount,
-          maxSocketsPerAction,
-          socketAnomalies,
-        });
+        await executeStep(page, scenario.baseUrl, step, assertions, artifactStore, context, artifacts);
       }
     } catch (err) {
       executionErrored = true;
@@ -192,9 +178,6 @@ export async function runBrowserQa(
   for (const req of failedRequests) {
     assertions.push({ name: 'no-failed-request', passed: false, detail: req, strength: 'state-transition' });
   }
-  for (const anomaly of socketAnomalies) {
-    assertions.push({ name: 'no-socket-leak', passed: false, detail: anomaly, strength: 'state-transition' });
-  }
 
   const evidence = produceQaEvidence({
     kind: 'qa-video',
@@ -211,16 +194,9 @@ export async function runBrowserQa(
     artifacts,
     consoleErrors,
     failedRequests,
-    socketAnomalies,
-    policyBlockingErrorsPresent: policyBlockingErrorsPresent({ consoleErrors, failedRequests, socketAnomalies }),
+    policyBlockingErrorsPresent: policyBlockingErrorsPresent({ consoleErrors, failedRequests }),
     evidence,
   };
-}
-
-interface SocketTracking {
-  socketsBefore: () => number;
-  maxSocketsPerAction: number;
-  socketAnomalies: string[];
 }
 
 async function executeStep(
@@ -231,7 +207,6 @@ async function executeStep(
   artifactStore: ArtifactStore,
   context: QaEvidenceContext,
   artifacts: ArtifactRecord[],
-  sockets: SocketTracking,
 ): Promise<void> {
   switch (step.kind) {
     case 'navigate': {
@@ -241,17 +216,7 @@ async function executeStep(
       return;
     }
     case 'click': {
-      // TASK-42: attribute any WebSocket opens to this click, then flag more than the allowed
-      // number as a leak (the "clicking Join opens N sockets" bug).
-      const before = sockets.socketsBefore();
       await page.locator(step.selector).click();
-      await page.waitForTimeout(100);
-      const opened = sockets.socketsBefore() - before;
-      if (opened > sockets.maxSocketsPerAction) {
-        sockets.socketAnomalies.push(
-          `click:${step.selector} opened ${opened} sockets (max ${sockets.maxSocketsPerAction})`,
-        );
-      }
       assertions.push({ name: `click:${step.selector}`, passed: true, strength: 'liveness' });
       return;
     }

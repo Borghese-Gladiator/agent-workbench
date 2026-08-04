@@ -12,18 +12,18 @@ import { ArtifactStore, InMemoryArtifactMetadataStore } from '@awb/evidence';
 import { runBrowserQa, evaluateBehavioralClaimCoverage, type QaEvidenceContext } from '@awb/qa';
 import { evaluatePhaseCompletion } from '@awb/workflow';
 
-// BROKEN: "Join" opens TWO sockets per click (leaked-connection bug) and the panel never appears.
+// BROKEN: clicking "Join" does NOT perform the behavioral state transition — the room panel stays
+// empty (the button's handler is broken/absent). QA validates the frontend's observable
+// behaviour, so the expected value assertion fails and the behavioral claim is uncovered.
 const BROKEN_HTML = `<!doctype html><html><head><title>broken</title></head><body>
-  <button id="join" onclick="new WebSocket('ws://127.0.0.1:1/a'); new WebSocket('ws://127.0.0.1:1/b')">Join</button>
-  <div id="revealed" style="display:none">Revealed Text</div>
+  <button id="join">Join</button>
+  <div id="revealed"></div>
 </body></html>`;
 
-// CORRECT: the click reveals the panel with the expected text — no leaked sockets, no failed
-// requests, no console errors. (The broken variant's bug is the duplicate socket; the correct
-// feature simply does the state transition the behavioral claim demands.)
+// CORRECT: the click performs the state transition — the panel is populated with the expected text.
 const CORRECT_HTML = `<!doctype html><html><head><title>correct</title></head><body>
-  <button id="join" onclick="document.getElementById('revealed').style.display='block'">Join</button>
-  <div id="revealed" style="display:none">Revealed Text</div>
+  <button id="join" onclick="document.getElementById('revealed').textContent='Revealed Text'">Join</button>
+  <div id="revealed"></div>
 </body></html>`;
 
 const CLAIM_ID = 'claim-behavior-1';
@@ -106,10 +106,10 @@ describe('TASK-42 proof: real QA → real completion gate', () => {
     const qa = await runBrowserQa(
       {
         baseUrl,
-        maxSocketsPerAction: 1,
         steps: [
           { kind: 'navigate', url: path },
           { kind: 'click', selector: '#join' },
+          // The behavioral claim's target: after clicking Join, the room panel shows this text.
           { kind: 'expectText', selector: '#revealed', equals: 'Revealed Text' },
         ],
       },
@@ -121,24 +121,24 @@ describe('TASK-42 proof: real QA → real completion gate', () => {
     return { qa, ctx, decision };
   }
 
-  it('BLOCKS a broken feature (leaked sockets + missing state transition)', async () => {
+  it('BLOCKS a broken feature (the behavioral state transition never happens)', async () => {
     const { qa, ctx, decision } = await driveQaAndGate('/broken');
-    console.log('[BROKEN] qaStatus=%s socketAnomalies=%o policyBlocking=%s claimCovered=%s gate.complete=%s missing=%o',
-      qa.evidence.status, qa.socketAnomalies, qa.policyBlockingErrorsPresent,
+    console.log('[BROKEN] qaStatus=%s structuredAssertionsPass=%s claimCovered=%s gate.complete=%s missing=%o',
+      qa.evidence.status, ctx.exercise.structuredAssertionsPass,
       ctx.exercise.everyBehavioralClaimCovered, decision.complete, decision.missing);
-    // The click opened 2 sockets (leak) and the expected text never appeared.
-    expect(qa.socketAnomalies.length).toBeGreaterThan(0);
-    expect(qa.policyBlockingErrorsPresent).toBe(true);
+    // The click did nothing, so the expected-value assertion failed and no passing strong
+    // assertion covers the behavioral claim — the gate refuses to clear.
+    expect(ctx.exercise.everyBehavioralClaimCovered).toBe(false);
     expect(decision.complete).toBe(false);
   }, 30_000);
 
   it('CLEARS the same feature when it actually works', async () => {
     const { qa, ctx, decision } = await driveQaAndGate('/correct');
-    console.log('[CORRECT] qaStatus=%s socketAnomalies=%o policyBlocking=%s claimCovered=%s gate.complete=%s',
-      qa.evidence.status, qa.socketAnomalies, qa.policyBlockingErrorsPresent,
+    console.log('[CORRECT] qaStatus=%s structuredAssertionsPass=%s claimCovered=%s gate.complete=%s',
+      qa.evidence.status, ctx.exercise.structuredAssertionsPass,
       ctx.exercise.everyBehavioralClaimCovered, decision.complete);
-    expect(qa.socketAnomalies).toEqual([]);
     expect(qa.policyBlockingErrorsPresent).toBe(false);
+    expect(ctx.exercise.everyBehavioralClaimCovered).toBe(true);
     expect(decision.complete).toBe(true);
   }, 30_000);
 });

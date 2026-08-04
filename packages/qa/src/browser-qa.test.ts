@@ -29,16 +29,6 @@ const CONSOLE_ERROR_HTML = `<!doctype html>
   </body>
 </html>`;
 
-// TASK-42: a fixture whose "Join" button opens TWO WebSockets on a single click — the concrete
-// duplicate/leaked-connection bug (clicking Join opens N>1 sockets).
-const SOCKET_LEAK_HTML = `<!doctype html>
-<html>
-  <head><title>QA Fixture (socket leak)</title></head>
-  <body>
-    <button id="join" onclick="new WebSocket('ws://127.0.0.1:1/a'); new WebSocket('ws://127.0.0.1:1/b')">Join</button>
-  </body>
-</html>`;
-
 describe('runBrowserQa', () => {
   let root: string;
   let store: ArtifactStore;
@@ -50,11 +40,6 @@ describe('runBrowserQa', () => {
       if (req.url === '/console-error') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(CONSOLE_ERROR_HTML);
-        return;
-      }
-      if (req.url === '/socket-leak') {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(SOCKET_LEAK_HTML);
         return;
       }
       if (req.url !== '/' && req.url !== '/index.html') {
@@ -180,30 +165,6 @@ describe('runBrowserQa', () => {
       );
 
       expect(result.consoleErrors.some((e) => e.includes('fixture console error'))).toBe(true);
-      expect(result.policyBlockingErrorsPresent).toBe(true);
-      expect(result.evidence.status).toBe('failed');
-    },
-    20_000,
-  );
-
-  it(
-    'flags a button that opens more than one WebSocket per click as a leak',
-    async () => {
-      const result = await runBrowserQa(
-        {
-          baseUrl,
-          maxSocketsPerAction: 1,
-          steps: [
-            { kind: 'navigate', url: '/socket-leak' },
-            { kind: 'click', selector: '#join' },
-          ],
-        },
-        makeQaEvidenceContext(),
-        store,
-      );
-
-      // A single click opened two sockets, exceeding the per-action max of 1.
-      expect(result.socketAnomalies.length).toBeGreaterThan(0);
       expect(result.policyBlockingErrorsPresent).toBe(true);
       expect(result.evidence.status).toBe('failed');
     },
