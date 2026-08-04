@@ -7,7 +7,7 @@ import type {
 } from '@awb/domain';
 import type { TaskWorkflowState } from '@awb/workflow';
 import { evaluatePhaseCompletion, type CompletionContext } from '@awb/workflow';
-import type { AgentRuntime } from './agent-factory.js';
+import type { AgentRuntime, RuntimeProfile } from './agent-factory.js';
 import type { RunStateStore, TaskRunState } from './run-state-store.js';
 import type { ObservabilityAccumulator } from './observability-accumulator.js';
 import type { DaemonClient } from '../daemon-client.js';
@@ -73,7 +73,18 @@ export interface PhaseContext {
   state: TaskWorkflowState;
   runState: TaskRunState;
   store: RunStateStore;
+  /**
+   * The selected runtime name, kept for adapter selection + the observability `runtime:` label. Do
+   * NOT branch real-vs-mock on this (that was the TASK-38 anti-pattern) — ask `profile` instead.
+   */
   strategy: AgentRuntime;
+  /**
+   * The RuntimeProfile for `strategy`, resolved once at driver entry (TASK-38). Every real-vs-mock
+   * decision in a phase handler routes through a capability on this profile (`usesRealAgent`,
+   * `usesRealWorktree`, `usesDurableRunState`, `usesSdkToolNames`) so "run the real path" is a
+   * property of the selected runtime, not a string equality on one vendor's name.
+   */
+  profile: RuntimeProfile;
   usage: UsageAccumulator;
   emit: PhaseEventEmitter;
   /** §27 runtime-attribution + per-session observability for this attempt (TASK-22). */
