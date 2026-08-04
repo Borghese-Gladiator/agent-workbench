@@ -1,19 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchEventsAfter, openEventStream, type SemanticEvent } from '../api/events.js';
 
+/** Connection state for the live timeline. `reconnecting` means the socket is down but any already
+ * backfilled history is still shown — so a dead socket never reads as "no events". */
+export type EventStreamStatus = 'connecting' | 'connected' | 'reconnecting';
+
 /**
- * Live semantic-event timeline for a task with reconnect catch-up (TASK-23 / spec §31). Opens the
- * daemon WebSocket for new events and, on every (re)connect, backfills anything missed since the
- * last sequence seen via `GET /api/events?afterSequence=N`. Events are deduped and kept ordered by
- * `sequence`, so a disconnect/reconnect leaves no gap in the timeline.
+ * Live semantic-event timeline for a task (TASK-23 / spec §31, TASK-57). History is backfilled on
+ * mount via `GET /api/events?afterSequence=N` — independent of the WebSocket, so stored events render
+ * even if the socket never connects. The socket then delivers new events and, on every (re)connect,
+ * re-runs catch-up to fill any gap. Events are deduped and kept ordered by `sequence`, so a
+ * disconnect/reconnect leaves no gap and no duplicate.
  */
 export function useEventStream(taskId: string | undefined): {
   events: SemanticEvent[];
-  connected: boolean;
+  status: EventStreamStatus;
 } {
   const runId = taskId ? `${taskId}-run` : undefined;
   const [events, setEvents] = useState<SemanticEvent[]>([]);
-  const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState<EventStreamStatus>('connecting');
   // Highest sequence seen, so a reconnect only backfills the true tail.
   const lastSeq = useRef(-1);
   const seen = useRef(new Set<number>());
@@ -23,7 +28,7 @@ export function useEventStream(taskId: string | undefined): {
     lastSeq.current = -1;
     seen.current = new Set();
     setEvents([]);
-    setConnected(false);
+    setStatus('connecting');
 
     let closed = false;
 
@@ -47,16 +52,20 @@ export function useEventStream(taskId: string | undefined): {
       if (!closed) merge(missed);
     };
 
+    // Backfill immediately on mount, independent of the socket — history must render even if the WS
+    // never opens (TASK-57 defect 1).
+    void catchUp();
+
     const close = openEventStream({
       onOpen: () => {
         if (closed) return;
-        setConnected(true);
-        // Backfill anything produced while we were (re)connecting.
+        setStatus('connected');
+        // Fill anything produced while we were (re)connecting.
         void catchUp();
       },
       onEvent: (event) => merge([event]),
       onClose: () => {
-        if (!closed) setConnected(false);
+        if (!closed) setStatus('reconnecting');
       },
     });
 
@@ -66,5 +75,5 @@ export function useEventStream(taskId: string | undefined): {
     };
   }, [runId]);
 
-  return { events, connected };
+  return { events, status };
 }

@@ -41,6 +41,17 @@ describe('withSpan (TASK-34: spans carry the run_id/task_id bridge)', () => {
     expect(span.attributes['task_id']).toBe('task-1');
   });
 
+  it('exports attributes set on the span handle inside the body (run-completion pattern)', async () => {
+    await withSpan('run.decay', { run_id: 'task-1-run', task_id: 'task-1' }, async (span) => {
+      span.setAttributes({ 'awb.decay.diff_lines': 42, 'awb.decay.reviewed_ratio': 0.5 });
+    });
+
+    const span = exporter.getFinishedSpans()[0] as ReadableSpan;
+    expect(span.name).toBe('run.decay');
+    expect(span.attributes['awb.decay.diff_lines']).toBe(42);
+    expect(span.attributes['awb.decay.reviewed_ratio']).toBe(0.5);
+  });
+
   it('marks the span as an error and rethrows when the body throws', async () => {
     await expect(
       withSpan('phase.implement', { run_id: 'task-1-run', task_id: 'task-1' }, async () => {
