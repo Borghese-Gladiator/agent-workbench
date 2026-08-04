@@ -25,6 +25,19 @@ export interface TaskStateResponse {
   pendingHumanGate: TaskWorkflowState['pendingHumanGate'];
 }
 
+/** A committed QA-media artifact the Evidence Viewer can play/preview locally (TASK-58). */
+export interface TaskMediaArtifact {
+  id: string;
+  kind: string;
+  mediaType: string;
+  byteSize: number;
+}
+
+/** URL of a single artifact's raw bytes, served by the daemon with its real content-type. */
+export function artifactContentUrl(artifactId: string): string {
+  return `/api/artifacts/${artifactId}/content`;
+}
+
 /**
  * Mirrors the daemon's persisted task record (see apps/daemon/src/routes/tasks.ts CreatedTaskRecord).
  * `phase`/`condition`/`deliveryState` come from the SQLite tasks row; `repositoryName` is joined from
@@ -63,6 +76,8 @@ export const tasksApi = {
     request<{ taskId: string; workflowId: string }>('POST', '/tasks', { repositoryId, prompt }),
   getState: (repositoryId: string, taskId: string) =>
     request<TaskStateResponse>('GET', `/tasks/${repositoryId}/${taskId}`),
+  listMedia: (repositoryId: string, taskId: string) =>
+    request<TaskMediaArtifact[]>('GET', `/tasks/${repositoryId}/${taskId}/media`),
   approveContract: (repositoryId: string, taskId: string, contractVersion: number) =>
     request('POST', `/tasks/${repositoryId}/${taskId}/approve-contract`, { contractVersion }),
   rejectContract: (repositoryId: string, taskId: string, reason: string) =>

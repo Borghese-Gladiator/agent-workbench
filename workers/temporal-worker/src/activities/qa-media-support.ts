@@ -96,11 +96,19 @@ const EXT_BY_MEDIA_TYPE: Record<string, string> = {
   'video/webm': '.webm',
   'image/png': '.png',
   'image/jpeg': '.jpg',
+  'image/gif': '.gif',
 };
 
 /** File name (with extension) to commit a screenshot/video artifact under `.awb/qa/`. */
 export function qaMediaFileName(record: ArtifactRecord): string {
   const ext = EXT_BY_MEDIA_TYPE[record.mediaType] ?? '';
-  const base = record.kind === 'qa-video' ? 'recording' : record.kind === 'screenshot' ? 'screenshot' : record.kind;
+  const base =
+    record.kind === 'qa-video-gif'
+      ? 'recording'
+      : record.kind === 'qa-video'
+        ? 'recording'
+        : record.kind === 'screenshot'
+          ? 'screenshot'
+          : record.kind;
   return `${base}${ext}`;
 }

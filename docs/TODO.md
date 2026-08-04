@@ -286,7 +286,7 @@ any plan or code is produced.
 The live PR `browser-games__ai#7` surfaced these; all in the delivery/github
 path. TASK-41 (house style) subsumes the checkable rules from TASK-39/40.
 
-### [ ] TASK-39: PR branch name keeps the "In <scope>," preamble (ugly slug)
+### [x] TASK-39: PR branch name keeps the "In <scope>," preamble (ugly slug)
 
 **What's wrong.** The live PR branch was
 `awb/in-wip-browser-games-add-a-one-line-note-f47a0d8e` — the raw prompt ("In
@@ -308,7 +308,7 @@ optionally a shared `stripScopePreamble` in `@awb/github` or a small util.
 wip-browser-games, add a one-line note")` yields a slug with no leading `in-` and
 no repo-name filler. *Manual:* next live run's branch reads cleanly.
 
-### [ ] TASK-40: PR title is repo-name-scoped + hard-truncated with "…"
+### [x] TASK-40: PR title is repo-name-scoped + hard-truncated with "…"
 
 **What's wrong.** Same live PR titled "Wip-Browser-Games: add a one-line note to
 README.md stating how many ga…". Two problems: (a) when the prompt's `<scope>` is
@@ -330,7 +330,7 @@ note to README.md stating how many games…" with repo `wip-browser-games` yield
 title with no `Wip-Browser-Games:` prefix and no mid-word `…`. *Manual:* live PR
 title reads as a sentence.
 
-### [ ] TASK-41: PR description quality — worked examples + anti-patterns
+### [x] TASK-41: PR description quality — worked examples + anti-patterns
 
 **What's wrong.** The templated PR body (`delivery.ts` / `pr-content.ts`,
 Background/Changes/Test-plan) is serviceable but has no house style to hold it to
@@ -350,7 +350,7 @@ etc.). Encode the checkable rules as assertions in `pr-content.test.ts`.
 rules (length, no prompt-echo, no `[AWB]`) are covered by tests over
 `derivePrTitle`/`buildPrBody`.
 
-### [ ] TASK-58: Embed QA video as a downscaled GIF (WEBM stays a committed local file)
+### [x] TASK-58: Embed QA video as a downscaled GIF (WEBM stays a committed local file)
 
 **What's wrong.** The QA "Recording" never renders inline in the PR. We commit the
 Playwright capture as `.awb/qa/recording.webm` and link it with `blobViewUrl(...)`

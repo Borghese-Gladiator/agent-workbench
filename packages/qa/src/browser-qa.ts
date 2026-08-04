@@ -6,6 +6,7 @@ import type { Page, ConsoleMessage, Response } from 'playwright';
 import { ArtifactStore } from '@awb/evidence';
 import type { ArtifactRecord } from '@awb/domain';
 import { produceQaEvidence, type QaAssertionResult, type QaEvidenceContext } from './shared.js';
+import { transcodeWebmToGif } from './transcode.js';
 
 export type BrowserQaStep =
   | { kind: 'navigate'; url: string }
@@ -107,8 +108,9 @@ export async function runBrowserQa(
     const videoFiles = await readdir(videoDir).catch(() => []);
     const videoFile = videoFiles.find((f) => f.endsWith('.webm'));
     if (videoFile) {
+      const webmPath = join(videoDir, videoFile);
       const videoArtifact = await artifactStore.put({
-        source: join(videoDir, videoFile),
+        source: webmPath,
         mediaType: 'video/webm',
         kind: 'qa-video',
         retention: 'task',
@@ -119,6 +121,28 @@ export async function runBrowserQa(
       });
       artifacts.push(videoArtifact);
       videoProduced = true;
+
+      // Transcode a downscaled GIF alongside the WEBM so the PR comment can embed the recording
+      // inline (GitHub renders a GIF via image markdown but does NOT play a committed .webm). The
+      // WEBM stays the full-fidelity source; a transcode failure (e.g. no ffmpeg) is non-fatal —
+      // the run keeps the WEBM and simply has no inline GIF.
+      const gifPath = join(videoDir, 'recording.gif');
+      try {
+        await transcodeWebmToGif(webmPath, gifPath);
+        const gifArtifact = await artifactStore.put({
+          source: gifPath,
+          mediaType: 'image/gif',
+          kind: 'qa-video-gif',
+          retention: 'task',
+          taskId: context.taskId,
+          runId: context.runId,
+          phaseAttemptId: context.phaseAttemptId,
+          candidateSha: context.candidateSha,
+        });
+        artifacts.push(gifArtifact);
+      } catch {
+        // No GIF; the WEBM link remains the recording artifact.
+      }
     }
   } finally {
     await browser.close();

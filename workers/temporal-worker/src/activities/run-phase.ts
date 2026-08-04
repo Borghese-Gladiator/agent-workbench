@@ -1076,7 +1076,9 @@ const releaseHandler: PhaseHandler = {
             .map((id) => runState.artifactStore.get(id))
             .filter((a): a is { record: import('@awb/domain').ArtifactRecord; path: string } => a !== undefined)
         : [];
-    const branchMedia = allMedia.filter((a) => a.record.kind === 'qa-video' || a.record.kind === 'screenshot');
+    const branchMedia = allMedia.filter(
+      (a) => a.record.kind === 'qa-video' || a.record.kind === 'qa-video-gif' || a.record.kind === 'screenshot',
+    );
     const traceMedia = allMedia.filter((a) => a.record.kind === 'browser-trace');
 
     // Commit the screenshot + video into the branch BEFORE the push, so they ship with the PR.

@@ -49,7 +49,7 @@ export async function deliverToGitHub(
   };
   const { pushed } = await pushRunner.push(pushInput);
 
-  const title = derivePrTitle(input.objective, input.changedPaths);
+  const title = derivePrTitle(input.objective, input.changedPaths, input.ref.repo);
   const body = renderPrBody({
     objective: input.objective,
     planSummary: input.planSummary,
