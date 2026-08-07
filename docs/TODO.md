@@ -156,7 +156,7 @@ triggers a checkpoint/split instead of proceeding; under the threshold it procee
 untouched. *Manual:* a large feature run pauses for human review at the cap rather
 than dumping one giant diff.
 
-### [ ] TASK-60: Route `architecture` loop-backs to `program-design`, not `plan` (L tasks)
+### [x] TASK-60: Route `architecture` loop-backs to `program-design`, not `plan` (L tasks)
 
 **What's wrong.** `program-design` (TASK-52) is in the *forward* pass (plan →
 program-design → prepare, L only) but absent from the *loop*. `routeLoop`

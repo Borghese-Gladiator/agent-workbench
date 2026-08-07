@@ -10,7 +10,7 @@ import type {
   Finding,
 } from '@awb/domain';
 import type { TaskWorkflowState } from '@awb/workflow';
-import { evaluatePhaseCompletion, type CompletionContext } from '@awb/workflow';
+import { evaluatePhaseCompletion, routeLoop, type CompletionContext } from '@awb/workflow';
 import {
   createAgentAdapter,
   scriptMockTurns,
@@ -1344,8 +1344,22 @@ const challengeHandler: PhaseHandler = {
         baseSha: resolveBaseSha(runState),
       },
       onBlocked: () => {
-        if (review.findings.some((f) => f.category === 'requirements' && f.status === 'open')) {
-          return { outcome: 'replan', target: 'specify', findings: review.findings };
+        // Route the open findings through the spec's loop table (routeLoop) rather than a bespoke
+        // requirements-vs-implement check, so structural (architecture) findings reach the phase that
+        // owns structure — `program-design` on an L run, else `plan` (TASK-60). Requirements outrank
+        // architecture outrank everything else; the phase set decides plan-vs-program-design.
+        const open = review.findings.filter((f) => f.status === 'open');
+        const category = open.some((f) => f.category === 'requirements')
+          ? 'requirements'
+          : open.some((f) => f.category === 'architecture')
+            ? 'architecture'
+            : 'correctness';
+        const target = routeLoop({ kind: 'challenge-finding', category }, state.phaseSet);
+        // A structural/requirements redirect is a replan (back to specify/plan/program-design); anything
+        // else is a code-level repair (back to implement). routeChallengeFinding only ever returns one of
+        // these four phases, so the explicit membership check both routes correctly and narrows the type.
+        if (target === 'specify' || target === 'plan' || target === 'program-design') {
+          return { outcome: 'replan', target, findings: review.findings };
         }
         return { outcome: 'repair', target: 'implement', findings: review.findings };
       },

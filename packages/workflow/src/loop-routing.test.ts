@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import type { TaskPhase } from '@awb/domain';
 import { routeLoop, shouldEscalateToHuman } from './loop-routing.js';
+
+// Phase sets the router keys off (TASK-60): only membership of `program-design` matters.
+const L_PHASE_SET: TaskPhase[] = [
+  'specify', 'plan', 'program-design', 'prepare', 'implement', 'verify', 'exercise', 'challenge', 'release', 'assimilate',
+];
+const M_PHASE_SET: TaskPhase[] = [
+  'specify', 'plan', 'prepare', 'implement', 'verify', 'exercise', 'challenge', 'release', 'assimilate',
+];
 
 describe('routeLoop', () => {
   it('routes verify failure to implement', () => {
@@ -10,7 +19,7 @@ describe('routeLoop', () => {
     expect(routeLoop({ kind: 'exercise-behavior-defect' })).toBe('implement');
   });
 
-  it('routes an exercise design misunderstanding to plan', () => {
+  it('routes an exercise design misunderstanding to plan by default (no phase set)', () => {
     expect(routeLoop({ kind: 'exercise-design-misunderstanding' })).toBe('plan');
   });
 
@@ -18,12 +27,33 @@ describe('routeLoop', () => {
     expect(routeLoop({ kind: 'challenge-finding', category: 'correctness' })).toBe('implement');
   });
 
-  it('routes a challenge architecture finding to plan', () => {
+  it('routes a challenge architecture finding to plan by default (no phase set)', () => {
     expect(routeLoop({ kind: 'challenge-finding', category: 'architecture' })).toBe('plan');
   });
 
   it('routes a challenge requirements finding to specify', () => {
     expect(routeLoop({ kind: 'challenge-finding', category: 'requirements' })).toBe('specify');
+  });
+
+  // TASK-60: structural findings route to the phase that owns structure for the run.
+  it('routes an architecture finding to program-design on an L run', () => {
+    expect(routeLoop({ kind: 'challenge-finding', category: 'architecture' }, L_PHASE_SET)).toBe('program-design');
+  });
+
+  it('routes a design-misunderstanding to program-design on an L run', () => {
+    expect(routeLoop({ kind: 'exercise-design-misunderstanding' }, L_PHASE_SET)).toBe('program-design');
+  });
+
+  it('still routes an architecture finding to plan on an M run (no program-design phase)', () => {
+    expect(routeLoop({ kind: 'challenge-finding', category: 'architecture' }, M_PHASE_SET)).toBe('plan');
+  });
+
+  it('routes a requirements finding to specify regardless of phase set', () => {
+    expect(routeLoop({ kind: 'challenge-finding', category: 'requirements' }, L_PHASE_SET)).toBe('specify');
+  });
+
+  it('routes a code finding to implement regardless of phase set', () => {
+    expect(routeLoop({ kind: 'challenge-finding', category: 'correctness' }, L_PHASE_SET)).toBe('implement');
   });
 
   it('routes a release conflict requiring a code change to implement', () => {

@@ -124,7 +124,9 @@ export const PhaseAttemptResultSchema = z.discriminatedUnion('outcome', [
   }),
   z.object({
     outcome: z.literal('replan'),
-    target: z.enum(['plan', 'specify']),
+    // `program-design` is a valid replan target on L runs (TASK-60): a structural finding routes to
+    // the program-design phase, not plan. M/S runs (no program-design phase) still use plan/specify.
+    target: z.enum(['plan', 'program-design', 'specify']),
     findings: z.array(FindingRefSchema),
     usage: PhaseUsageSchema.optional(),
   }),

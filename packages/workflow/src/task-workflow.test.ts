@@ -79,7 +79,7 @@ function repair(): PhaseAttemptResult {
   return { outcome: 'repair', target: 'implement', findings: [] };
 }
 
-function replan(target: 'plan' | 'specify'): PhaseAttemptResult {
+function replan(target: 'plan' | 'program-design' | 'specify'): PhaseAttemptResult {
   return { outcome: 'replan', target, findings: [] };
 }
 
@@ -286,6 +286,24 @@ describe('TaskWorkflow', () => {
       async () => {},
     );
     expect(result.phase).toBe('assimilate');
+  }, 30_000);
+
+  it('routes a challenge replan back to program-design on an L run, then completes (TASK-60)', async () => {
+    // Classify L so program-design is in the phase set, then have challenge replan to it exactly once
+    // (its first scripted result) before yielding a candidate. Reaching assimilate is itself the proof:
+    // the workflow accepts `program-design` as a replan target, jumps back to it, re-completes it, and
+    // drives forward again. If program-design were not a valid replan target the run could not converge.
+    const { result } = await runWithActivities(
+      {
+        specify: [sizedSpecifyCandidate('L')],
+        'program-design': [candidate('program-design'), candidate('program-design')],
+        challenge: [replan('program-design'), candidate('challenge')],
+      },
+      async () => {},
+    );
+    expect(result.phase).toBe('assimilate');
+    expect(result.size).toBe('L');
+    expect(result.phaseSet).toContain('program-design');
   }, 30_000);
 
   it('escalates to a human gate after repeated identical repair outcomes, then resumes after extendBudget', async () => {

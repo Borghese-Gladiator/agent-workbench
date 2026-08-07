@@ -13,16 +13,23 @@ export type LoopTrigger =
   | { kind: 'release-conflict-requires-code-change' }
   | { kind: 'release-candidate-sha-changed' };
 
-export function routeLoop(trigger: LoopTrigger): TaskPhase {
+/**
+ * `phaseSet` is the run's ordered phase list (TASK-51). It matters only for structural loop-backs:
+ * a "the structure is wrong" finding (architecture / design-misunderstanding) routes to
+ * `program-design` when the run HAS that phase (L tasks — TASK-60), otherwise to `plan`. Passing
+ * `undefined` (or a set without `program-design`) preserves the pre-TASK-60 behavior of routing to
+ * `plan`, so M/S runs and callers that don't track the phase set are unaffected.
+ */
+export function routeLoop(trigger: LoopTrigger, phaseSet?: TaskPhase[]): TaskPhase {
   switch (trigger.kind) {
     case 'verify-failure':
       return 'implement';
     case 'exercise-behavior-defect':
       return 'implement';
     case 'exercise-design-misunderstanding':
-      return 'plan';
+      return structuralReviewPhase(phaseSet);
     case 'challenge-finding':
-      return routeChallengeFinding(trigger.category);
+      return routeChallengeFinding(trigger.category, phaseSet);
     case 'release-conflict-requires-code-change':
       return 'implement';
     case 'release-candidate-sha-changed':
@@ -30,10 +37,19 @@ export function routeLoop(trigger: LoopTrigger): TaskPhase {
   }
 }
 
-function routeChallengeFinding(category: FindingCategory): TaskPhase {
+/**
+ * The phase that owns structural review for this run: `program-design` when the run walks it (L),
+ * else `plan`. This is the single place TASK-60's "route structure findings to the structure phase"
+ * decision lives.
+ */
+function structuralReviewPhase(phaseSet: TaskPhase[] | undefined): TaskPhase {
+  return phaseSet?.includes('program-design') ? 'program-design' : 'plan';
+}
+
+function routeChallengeFinding(category: FindingCategory, phaseSet: TaskPhase[] | undefined): TaskPhase {
   switch (category) {
     case 'architecture':
-      return 'plan';
+      return structuralReviewPhase(phaseSet);
     case 'requirements':
       return 'specify';
     default:
