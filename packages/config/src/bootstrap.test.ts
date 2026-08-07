@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveLayout, ensureDataDir, initDataDir } from './index.js';
+import { resolveLayout, ensureDataDir, initDataDir, WorkbenchConfigSchema } from './index.js';
 
 describe('config bootstrap', () => {
   let root: string;
@@ -39,6 +39,17 @@ describe('config bootstrap', () => {
     ensureDataDir(layout);
     const raw = await readFile(layout.configFile, 'utf8');
     expect(raw).toContain('agentProvider');
+  });
+
+  it.each(['mock', 'claude', 'codex', 'pi', 'opencode'])(
+    'accepts agentProvider=%s (must match AGENT_RUNTIMES in @awb/agent-gateway)',
+    (provider) => {
+      expect(WorkbenchConfigSchema.parse({ agentProvider: provider }).agentProvider).toBe(provider);
+    },
+  );
+
+  it('rejects an unknown agentProvider', () => {
+    expect(() => WorkbenchConfigSchema.parse({ agentProvider: 'gpt' })).toThrow();
   });
 
   it('initDataDir reports created=true on first call, false on second', () => {
