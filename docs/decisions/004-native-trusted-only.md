@@ -9,7 +9,7 @@ interface stubs — no sandboxing/container enforcement ships in this MVP.
 
 ## Why
 
-Per the product spec (§17, §37), the MVP only needs full `native-trusted`
+The MVP only needs full `native-trusted`
 support, and building real container isolation (namespace/seccomp policies,
 image management, volume mounting for worktrees) is a substantial project on
 its own that would delay every other milestone without which this system has

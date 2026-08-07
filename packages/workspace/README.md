@@ -3,8 +3,7 @@
 ## Purpose
 
 Git worktree + port allocation manager — every implementation task gets one
-dedicated worktree, never the developer's primary checkout (product spec
-§17).
+dedicated worktree, never the developer's primary checkout.
 
 ## Responsibilities
 

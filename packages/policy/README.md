@@ -2,8 +2,8 @@
 
 ## Purpose
 
-The conditional human-gate trigger conditions from product spec §14 — pure
-predicates, independent of Temporal/database/agent concerns.
+The conditional human-gate trigger conditions — pure predicates, independent
+of Temporal/database/agent concerns.
 
 ## Responsibilities
 
@@ -20,7 +20,7 @@ predicates, independent of Temporal/database/agent concerns.
   never conditional (first-time repository trust, task-contract approval,
   PR readiness) — always required, not evaluated against a condition.
 - `requiresPlanApprovalGate` — encodes "do not require routine human plan
-  approval for ordinary low-risk tasks" (spec §14): only high risk or an
+  approval for ordinary low-risk tasks": only high risk or an
   actual conditional trigger forces a gate.
 
 ## Does NOT
@@ -30,7 +30,7 @@ predicates, independent of Temporal/database/agent concerns.
   construct one.
 - Duplicate `packages/workflow`'s `shouldEscalateToHuman` (repeated-failure/
   budget-exhaustion routing during the phase loop) — this package covers
-  the broader spec §14 conditional-gate table; `packages/workflow`'s
+  the broader conditional-gate table; `packages/workflow`'s
   version is scoped specifically to the loop-routing escalation path.
 
 ## Dependencies

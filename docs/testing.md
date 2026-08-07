@@ -4,8 +4,7 @@
 
 Every package under `packages/` ships its own `*.test.ts` files, run via
 `pnpm --filter @awb/<pkg> test` or in aggregate via the root `vitest.config.ts`
-(which globs `packages/**`, `apps/**`, `workers/**`). Priority coverage per
-product spec §34:
+(which globs `packages/**`, `apps/**`, `workers/**`). Priority coverage:
 
 - Zod schema round-trips (`packages/domain`) — accept valid, reject invalid,
   for every entity.
@@ -29,11 +28,11 @@ product spec §34:
 - Permission/capability-broker policies (`packages/capability-broker`) — each
   role's allow/deny table is exercised positively and negatively.
 - Human-gate trigger conditions (`packages/policy`) — each conditional gate
-  in product spec §14 fires under the described condition and does not fire
-  otherwise.
+  in `packages/policy/src/human-gates.ts` fires under the described condition
+  and does not fire otherwise.
 - PR feedback classification (`packages/github`) — each of the six
-  categories in product spec §29 classifies correctly on representative
-  sample comments.
+  categories in `packages/github/src/feedback-classification.ts` classifies
+  correctly on representative sample comments.
 - Repository fact invalidation (`packages/repository-memory`) — a fact whose
   `sourcePaths` overlap a changed-path set is invalidated; a fact whose paths
   don't overlap survives a refresh.
@@ -42,7 +41,8 @@ product spec §34:
 
 `TestWorkflowEnvironment.createLocal()` (real-time, not time-skipping — see
 `docs/temporal-workflows.md`'s Testing section for why) drives `TaskWorkflow`
-against the fake agent adapter for every scenario in product spec §34:
+against the fake agent adapter for every lifecycle scenario
+(`packages/workflow/src/task-workflow.test.ts`):
 successful lifecycle, contract rejection, plan-critic loop, verification
 repair loop, QA repair loop, review repair loop, human approval wait, budget
 exhaustion, candidate SHA invalidation, release rebase invalidation, PR
@@ -77,7 +77,7 @@ since they cost tokens and are non-deterministic by nature.
 
 ## End-to-end MVP test
 
-The full 20-step scenario in product spec §34 (create fixture → register →
+The full end-to-end scenario (create fixture → register →
 discover → approve onboarding → create task → approve contract → plan+critic
 → worktree → fake implementation → fail verify → repair → pass verify → fail
 QA → repair → pass QA → pass review → mocked draft PR → mark merged → refresh

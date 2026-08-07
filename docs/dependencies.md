@@ -39,7 +39,7 @@ workers/temporal-worker → domain, workflow, agent-gateway, capability-broker, 
 ## Package removed: `@awb/observability`
 
 The original scaffolding included an empty `packages/observability` (runtime/
-token/event telemetry schema, per product spec's Milestone 10 scope). It was
+token/event telemetry schema). It was
 never populated: token/usage aggregation ended up living directly in
 `@awb/agent-gateway` (`UsageAggregator`, since usage is inherently a property
 of an agent session, not a separate concern), and runtime-breakdown-by-phase

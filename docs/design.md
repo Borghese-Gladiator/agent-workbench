@@ -16,8 +16,9 @@ v4's archival notes:
 
 1. **QA evidence was optional/RNG.** A video or trace might or might not get
    produced depending on model behavior. This design makes QA evidence
-   mandatory and structurally verified (§23 of the product spec): a video
-   alone never passes QA — structured assertions gate the phase.
+   mandatory and structurally verified: a video alone never passes QA —
+   structured assertions gate the phase, decided by `deriveQaStatus()` in
+   `packages/qa/src/shared.ts`.
 2. **Lifecycle gates were not structurally enforced.** Tasks could creep
    toward "done" without satisfying every phase's completion criteria. This
    design makes `evaluatePhaseCompletion` the only path to advance a phase,
@@ -30,8 +31,8 @@ v4's archival notes:
 
 ## Architecture
 
-Local modular monolith. See the product spec §3 for the full component
-diagram. In short:
+Local modular monolith (component diagram: `AGENTS.md` › Architecture). In
+short:
 
 - **CLI + Web UI** are thin clients over the daemon's HTTP/WebSocket API.
 - **Daemon** (Fastify) owns the workbench SQLite database, the content
@@ -55,8 +56,8 @@ inspectable Workflow rather than an implicit convention enforced by discipline.
 ## Why deterministic completion policies, not agent judgment
 
 An agent session can be wrong about whether it succeeded — it can hallucinate
-a passing test, or simply not run one. `evaluatePhaseCompletion` (product spec
-§10–11) is pure TypeScript that inspects a `CompletionCandidate` (evidence IDs,
+a passing test, or simply not run one. `evaluatePhaseCompletion`
+(`packages/workflow`) is pure TypeScript that inspects a `CompletionCandidate` (evidence IDs,
 open finding IDs, exact candidate SHA, environment digest) and returns a
 decision. Agents never call an API that says "mark this phase done" — they can
 only produce evidence, and the workbench decides whether that evidence is
@@ -73,8 +74,9 @@ consume directly.
 
 ## What is explicitly out of scope for the MVP
 
-See product spec §2. Notably: no multi-user platform, no Kubernetes, no
-automatic PR merge, no vector database, no `container-isolated` execution
-profile beyond an interface stub. `native-trusted` is the only fully
+See `AGENTS.md` › "Things NOT to do" for the standing constraints. Notably: no
+multi-user platform, no Kubernetes, no automatic PR merge, no vector database,
+no `container-isolated` execution profile beyond an interface stub.
+`native-trusted` is the only fully
 implemented execution profile — this is not a hardened hostile-code sandbox,
 and that is documented explicitly in `docs/security.md`.

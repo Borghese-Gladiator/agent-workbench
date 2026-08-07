@@ -25,7 +25,8 @@ This also directly targets the second archival reason — "QA artifacts were
 different every time... it was RNG if it produced something I could use to
 actually verify functionality." Exercise-phase completion requires a
 recorded video/trace *and* passing structured assertions tied to the exact
-candidate SHA; a video alone is explicitly insufficient (product spec §23).
+candidate SHA; a video alone is explicitly insufficient — `deriveQaStatus()`
+in `packages/qa/src/shared.ts` is the single place that pass/fail is decided.
 
 ## Alternatives considered
 
@@ -38,8 +39,8 @@ candidate SHA; a video alone is explicitly insufficient (product spec §23).
 
 ## Consequences
 
-- Every phase needs an explicit, enumerable completion checklist (product
-  spec §11) that can be expressed as boolean/count checks over a
+- Every phase needs an explicit, enumerable completion checklist that can be
+  expressed as boolean/count checks over a
   `CompletionContext` snapshot — see `packages/workflow/src/completion-context.ts`
   and `evaluate-completion.ts`. Adding a new completion requirement means
   editing that pure function and its test table, not adjusting a prompt.

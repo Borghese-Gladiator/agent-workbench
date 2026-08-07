@@ -9,12 +9,12 @@ it depends on — the core of the whole system's lifecycle enforcement.
 
 - `evaluate-completion.ts` — `evaluatePhaseCompletion(candidate, context)`,
   the only function permitted to decide a `TaskPhase` is complete. Pure,
-  exhaustively tested per-phase (product spec §11).
+  exhaustively tested per-phase.
 - `loop-routing.ts` — `routeLoop`/`shouldEscalateToHuman`, the loop-routing
-  table (product spec §12) and human-gate escalation policy.
+  table and human-gate escalation policy.
 - `failure-fingerprint.ts` — deterministic failure fingerprinting and
-  no-progress detection for the builder loop (product spec §21).
-- `invalidation.ts` — the evidence invalidation cascade (product spec §11):
+  no-progress detection for the builder loop.
+- `invalidation.ts` — the evidence invalidation cascade:
   which phases' evidence goes stale when contract/plan/candidate-SHA/QA
   scenario versions change.
 - `task-workflow.ts` — the `TaskWorkflow` function itself: Updates

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Four real QA executors (product spec §23): browser, CLI, HTTP API, and
+Four real QA executors: browser, CLI, HTTP API, and
 library. Consumer-level QA, not just automated unit tests — every executor
 produces both a real recording/trace artifact AND structured, typed
 assertion results; **a video alone never passes QA**.
@@ -38,7 +38,7 @@ assertion results; **a video alone never passes QA**.
 - Library QA only runs JS/TS consumer scripts via `node`; Python consumer
   execution is out of scope for the MVP.
 - HTTP QA redaction covers Authorization/Cookie/Set-Cookie header values
-  only — not the full secret-scanning sweep described in product spec §28
+  only — not the full secret-scanning sweep
   (that's `@awb/github`'s job before PR upload).
 
 ## Does NOT

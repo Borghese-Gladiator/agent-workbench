@@ -3,7 +3,7 @@
 ## Purpose
 
 Scoped command execution, process supervision, and environment-digest
-computation (product spec §17, §22).
+computation.
 
 ## Responsibilities
 

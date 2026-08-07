@@ -3,8 +3,8 @@
 ## Purpose
 
 Runs repository-defined deterministic verification commands and produces
-structured `Evidence` (product spec §22), plus the freshness/waiver checks
-that back the Verify-phase completion criteria (product spec §11).
+structured `Evidence`, plus the freshness/waiver checks
+that back the Verify-phase completion criteria.
 
 ## Responsibilities
 
@@ -24,14 +24,14 @@ that back the Verify-phase completion criteria (product spec §11).
   `CompletionCandidate.artifactManifestHash`.
 - `waivers.ts` — `isWaiverValidForCandidate`/`allWaiversValid`: a waiver
   only counts if it is both human-approved AND scoped to the exact current
-  candidate SHA (product spec §11) — approval alone is not enough once the
+  candidate SHA — approval alone is not enough once the
   candidate has moved on.
 
 ## Does NOT
 
 - Let the builder redefine what commands run — callers must pass
   `ValidatedCommand` rows with `status: "validated"`; this package doesn't
-  enforce that itself; it's a caller contract from spec §22.
+  enforce that itself; it's a caller contract.
 - Decide phase completion — its outputs (`allRequiredCommandsPass`,
   `anyEvidenceStale`, `allWaiversValid`) feed
   `@awb/workflow`'s `evaluatePhaseCompletion`, they don't replace it.

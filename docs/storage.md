@@ -61,11 +61,11 @@ workbench SQLite.
 
 ## Why not Postgres/Redis/a message broker/a vector database
 
-Per product spec §1 and §2 — this is explicitly a single-developer-machine
-tool. SQLite (two independent files, one per subsystem) plus a
+This is explicitly a single-developer-machine tool (see `AGENTS.md` › "Things
+NOT to do" and ADR 002). SQLite (two independent files, one per subsystem) plus a
 content-addressed filesystem covers every storage need in this spec without
 introducing operational surface area (a server process to start/stop/monitor,
 a schema migration story across services, network calls where a function
 call would do). Retrieval uses SQLite FTS5 plus structural signals (exact
 path, symbol name, changed-path proximity, Git history) rather than
-embeddings — see product spec §16, "Do not add embeddings in the MVP."
+embeddings (embeddings are an explicit non-goal for the MVP — ADR 002).

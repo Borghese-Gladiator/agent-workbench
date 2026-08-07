@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Deterministic scaffolding around the adversarial-review phase (product spec
-§24): review-input assembly, the single-fresh-session review runner, the
+Deterministic scaffolding around the adversarial-review phase:
+review-input assembly, the single-fresh-session review runner, the
 Challenge-phase completion-gate predicates, finding lifecycle transitions,
 and the probe-request shape.
 
@@ -17,7 +17,7 @@ and the probe-request shape.
   back-and-forth loop. The caller supplies a `runReviewer` callback that
   owns the actual `adapter.createSession`/`execute` calls (same pattern as
   `@awb/planning`'s planner-critic loop). Also exports the four Challenge
-  completion-gate predicates from spec §11:
+  completion-gate predicates consumed by `evaluatePhaseCompletion`:
   `reviewerSessionDiffersFromBuilder`, `noBlockerOrHighFindingOpen`,
   `everyFindingResolvedInvalidatedOrWaived`,
   `reviewerExaminedAllRequiredInputs` (a documented non-empty/presence
@@ -27,7 +27,7 @@ and the probe-request shape.
   reason)/`waiveFinding` (requires human approval), mirroring
   `@awb/verification`'s waiver-validity pattern.
 - `probe.ts` — `ProbeRequest`: structurally has no patch/edit field, so a
-  probe request cannot represent a code change by construction (spec §24:
+  probe request cannot represent a code change by construction (the reviewer
   "may request deterministic probes but may not edit code").
 
 ## Does NOT

@@ -26,8 +26,8 @@ shallow import/dependency edges, using tree-sitter.
   Uses `web-tree-sitter` (WASM) + `tree-sitter-wasms` (prebuilt grammars)
   instead. Revisit if/when the native package fixes this upstream.
 - Build a full call graph or resolve types — flat per-file symbol extraction
-  is deliberately the ceiling for this MVP (product spec: "does not need to
-  be a full call-graph or type-resolution system").
+  is deliberately the ceiling for this MVP (not a full call-graph or
+  type-resolution system).
 - Persist anything — callers decide whether/how to cache or store the map.
 
 ## Dependencies

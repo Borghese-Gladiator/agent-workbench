@@ -13,10 +13,9 @@ signatures).
 
 ## Why
 
-Product-spec §19 and §34 call for this explicitly ("Implement a mock
-adapter for automated tests" / "Fake agent adapter... deterministic and
-scriptable"), but the reason it matters this much for *this specific
-rebuild* is direct: v4's archival notes state "QA artifacts were different
+A mock adapter for automated tests was a founding requirement (a "deterministic
+and scriptable" fake agent adapter), but the reason it matters this much for
+*this specific rebuild* is direct: v4's archival notes state "QA artifacts were different
 every time... it was RNG if it produced something I could use to actually
 verify functionality." Any test suite that depends on what a real model
 happens to output on a given run inherits that same non-determinism. A

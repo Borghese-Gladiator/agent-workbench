@@ -7,7 +7,7 @@ against *accidental* scope creep and *unintentional* destructive actions by a
 well-behaved agent, not against a deliberately adversarial or compromised
 model/tool chain escaping its intended scope. If that threat model matters
 for a given repository, do not register it with `trusted: true`, and treat
-`container-isolated` (interface-only in this MVP — see product spec §37) as
+`container-isolated` (interface-only in this MVP — see ADR 004) as
 the prerequisite for stronger isolation, not yet implemented here.
 
 ## What is enforced in the MVP
@@ -34,8 +34,9 @@ the prerequisite for stronger isolation, not yet implemented here.
   to its own worktree plus targeted test/command execution; the verifier can
   run configured checks but not edit code; QA executors get browser/terminal/
   HTTP interaction but no source writes; the reviewer is read-only plus
-  finding writes. See product spec §18 for the full per-role table and
-  `packages/capability-broker` for the enforcement code.
+  finding writes. See `packages/capability-broker/src/capability-table.ts`
+  for the full per-role table and `packages/capability-broker/src/broker.ts`
+  for the enforcement code.
 - **Process supervision.** Every spawned process is tracked by PID/process
   group; cleanup kills the full tree rather than leaving orphans running
   after a task is cancelled or completes.
@@ -51,12 +52,12 @@ the prerequisite for stronger isolation, not yet implemented here.
   the GitHub API/web UI, package registries required by the repository's own
   lockfiles, localhost, and repository-approved development services.
   General web search and arbitrary external websites are not available to
-  any agent role in this MVP (product spec §30).
+  any agent role in this MVP.
 
 ## Human gates as a security control, not just a UX nicety
 
-Several of the "conditional" human gates in product spec §14 exist
-specifically because the action they gate is security-relevant even under a
+Several of the "conditional" human gates (`packages/policy/src/human-gates.ts`)
+exist specifically because the action they gate is security-relevant even under a
 well-behaved agent: a new dependency (supply-chain surface), an
 authentication/authorization change, anything touching payments/secrets/
 destructive migrations, a request for host access outside the worktree, or a
@@ -76,5 +77,5 @@ matching Temporal Update.
   it yet.
 - The uploader for GitHub PR video attachments (`packages/github`) drives a
   real browser profile via Playwright and assumes the developer is already
-  logged into GitHub in that profile — this is a deliberate MVP simplification
-  (product spec §37), not a security boundary.
+  logged into GitHub in that profile — this is a deliberate MVP simplification,
+  not a security boundary.

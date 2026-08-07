@@ -3,7 +3,7 @@
 ## Purpose
 
 Stores, retrieves, and invalidates `RepositoryFact`s across repository
-accesses — the "incremental project memory" behavior in product spec §16.
+accesses — the incremental project-memory behavior.
 
 ## Responsibilities
 

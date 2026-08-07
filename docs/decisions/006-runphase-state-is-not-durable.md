@@ -62,7 +62,7 @@ data layer at all).
 claude runtime. It reads persisted lifecycle rows through a read-only DB handle
 and writes exclusively through the daemon's internal routes
 (`/internal/run-state`), so the daemon remains the single application writer
-(spec §8 / `docs/storage.md`, TASK-21). A worker restart mid-task now resumes
+(the single-writer invariant — `docs/storage.md`, TASK-21). A worker restart mid-task now resumes
 with the real contract/plan/candidate-SHA/evidence intact rather than a fresh
 empty state, closing the "lifecycle moved forward on a lie" gap Decision 003
 guards against. The mock runtime keeps `InMemoryRunStateStore` (deterministic

@@ -51,10 +51,12 @@ source is authoritative for exact field shapes.
   `policyVersion`. Evidence is keyed to *exact* commits and environments
   deliberately — evidence about `candidateSha` A does not carry over to
   `candidateSha` B, which is what forces re-verification after any code
-  change (see the invalidation cascade in product spec §11).
+  change (see the invalidation cascade in `packages/workflow/src/invalidation.ts`
+  and `docs/temporal-workflows.md`).
 - **Finding** — something a builder, verifier, QA session, or reviewer
-  flagged as wrong. Findings route the lifecycle backward (product spec
-  §12) based on `category` — a `correctness` finding goes back to
+  flagged as wrong. Findings route the lifecycle backward
+  (`packages/workflow/src/loop-routing.ts`) based on `category` — a
+  `correctness` finding goes back to
   `implement`, an `architecture` finding goes back to `plan`, a
   `requirements` finding goes back to `specify`.
 - **ArtifactRecord** — metadata for a piece of content stored in the

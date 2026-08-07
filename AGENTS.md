@@ -154,7 +154,7 @@ Global output contract (all commands): `-q/--quiet` (results only), `--json`
 - Don't treat project memory as more authoritative than current repository
   contents — memory is invalidated against the repo, never the reverse.
 - Don't add a vector database, Kubernetes, Postgres, Redis, or a message
-  broker — this is a single-developer-machine tool by design (spec §2).
+  broker — this is a single-developer-machine tool by design.
 - Don't skip required verification, QA, review, or video upload, and don't
   silently resolve command ambiguity — surface it (`status: "ambiguous"`).
 - Don't assume `native-trusted` is a hostile-code sandbox — it isn't; see

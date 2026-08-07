@@ -42,7 +42,8 @@ Each phase in `TaskPhase` runs through the same shape inside the Workflow:
        - not complete → increment attempt, loop within the same phase
          (bounded by policy; see budget exhaustion below).
    - "repair" | "replan": route to `target` phase per the loop-routing
-     table (spec §12), carrying `findings` into that phase's next attempt.
+     table (`packages/workflow/src/loop-routing.ts`), carrying `findings` into
+     that phase's next attempt.
    - "await-human": persist a HumanGate row, block on the corresponding
      Update (approveX/rejectX) via a Temporal signal/update wait.
    - "blocked": surface reason, condition = "blocked", await human/signal.
@@ -84,7 +85,8 @@ Queries must be side-effect-free and fast.
 ## Invalidation cascade
 
 Implemented as an explicit dependency check inside the relevant phase
-activities before trusting existing evidence (spec §11):
+activities before trusting existing evidence
+(`packages/workflow/src/invalidation.ts`):
 
 ```
 contract change   → invalidate plan, implementation mapping, verification, QA, review, release

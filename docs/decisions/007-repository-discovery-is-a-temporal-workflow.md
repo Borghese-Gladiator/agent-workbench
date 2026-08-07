@@ -3,8 +3,8 @@
 ## Decision
 
 `RepositoryDiscoveryWorkflow` (`packages/workflow/src/discovery-workflow.ts`) is
-a first-class Temporal workflow, matching product spec §9/§15's intent that the
-worker host both `TaskWorkflow` and `RepositoryDiscoveryWorkflow`. The public
+a first-class Temporal workflow: the worker hosts both `TaskWorkflow` and
+`RepositoryDiscoveryWorkflow`. The public
 daemon route `POST /api/repositories/:id/refresh` starts the workflow and returns
 its result; the workflow calls a single `discoverRepository` activity that does
 the real snapshot write daemon-side (via `POST /internal/repositories/:id/discover`
@@ -13,15 +13,15 @@ entrypoint (`packages/workflow/src/workflows.ts`).
 
 ## Why
 
-- **Spec alignment (§9/§15).** The spec names `RepositoryDiscoveryWorkflow` as one
-  of the two workflows the Temporal worker hosts. Before this change discovery ran
+- **Architectural alignment.** `RepositoryDiscoveryWorkflow` is one of the two
+  workflows the Temporal worker is meant to host. Before this change discovery ran
   as synchronous daemon-route logic (`refreshRepositorySnapshot` inline in the
   refresh route) — functional and already persisted, but an architecture deviation
-  flagged by the 2026-07-21 spec-vs-code audit (TASK-26).
+  flagged by the 2026-07-21 audit (TASK-26).
 - **Durability + retries for free.** As an activity behind a workflow, discovery
   gets Temporal's retry policy (transient git/filesystem failures retry) and a
   durable execution record, the same guarantees the task lifecycle relies on.
-- **Single-writer invariant preserved (spec §8, ADR 006 sibling).** The discovery
+- **Single-writer invariant preserved (ADR 006 sibling).** The discovery
   activity does not open its own writer handle; it calls the daemon's internal
   discover route, so the snapshot write stays on the daemon — the single
   application writer. The public `/refresh` route only *starts* the workflow; the
@@ -50,5 +50,5 @@ entrypoint (`packages/workflow/src/workflows.ts`).
 ## Status
 
 Resolved (TASK-26). Implemented alongside the `TaskWorkflow` continue-as-new guard
-(spec §34) in the same milestone; both are covered by workflow tests using
+in the same milestone; both are covered by workflow tests using
 `TestWorkflowEnvironment.createLocal()`.

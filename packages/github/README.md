@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Deterministic GitHub delivery (product spec §28-29): push, draft PR create/
+Deterministic GitHub delivery: push, draft PR create/
 update, evidence-matrix comment, PR-feedback classification, and the
 interfaces for merge/close tracking and video upload.
 
@@ -23,14 +23,14 @@ interfaces for merge/close tracking and video upload.
 - `evidence-matrix.ts` — `renderEvidenceMatrix()`: pure Markdown table
   formatting from `Evidence[]` + candidate SHA.
 - `feedback-classification.ts` — `classifyFeedback()`: the six categories
-  from spec §29 (question/implementation-defect/plan-defect/contract-
+  (question/implementation-defect/plan-defect/contract-
   clarification/non-blocking-suggestion/out-of-scope), plus
   `feedbackRequiresHumanGate()`/`canAutoLoop()` implementing "only a clear,
   unambiguous implementation defect with no routing signal may auto-loop."
 - `pre-upload-checks.ts` — `runPreUploadChecks()`: hash verification, size
   limit, a likely-secret pattern scan (private keys, cloud/GitHub/Slack/
   OpenAI-style tokens, DSNs with embedded credentials), and a public-repo
-  warning flag (warns, does not block) — the spec §28 pre-upload checklist.
+  warning flag (warns, does not block) — the pre-upload checklist.
 - `media-uploader.ts` — `GitHubMediaUploader` **interface only**. GitHub's
   public API has no general binary-attachment endpoint for PR comments, so
   the real implementation (narrow Playwright automation against an

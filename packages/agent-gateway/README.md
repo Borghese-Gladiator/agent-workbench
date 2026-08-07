@@ -2,9 +2,8 @@
 
 ## Purpose
 
-The provider-neutral interface every coding-agent backend implements
-(product spec §19), plus a fully deterministic mock adapter and supporting
-event/usage normalization.
+The provider-neutral interface every coding-agent backend implements, plus a
+fully deterministic mock adapter and supporting event/usage normalization.
 
 ## Responsibilities
 

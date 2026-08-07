@@ -2,8 +2,8 @@
 
 ## Purpose
 
-The single enforcement point for per-role tool access (product spec §18) —
-no agent role gets a generic unrestricted shell.
+The single enforcement point for per-role tool access — no agent role gets a
+generic unrestricted shell.
 
 ## Responsibilities
 
