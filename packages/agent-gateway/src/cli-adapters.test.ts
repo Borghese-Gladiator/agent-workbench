@@ -105,6 +105,27 @@ describe('PiAgentAdapter', () => {
     expect(invocations[0]!.args).not.toContain('--session');
     expect(invocations[1]!.args).toEqual(expect.arrayContaining(['--session', 'pi-session-1']));
   });
+
+  it('enforces the capability boundary structurally via --tools/--exclude-tools', async () => {
+    const { run, invocations } = fakeRunner(piLines);
+    const adapter = new PiAgentAdapter({ runCliStreaming: run });
+    // A read-only role: read/search granted, mutation NOT.
+    const session = await adapter.createSession({
+      role: 'adversarial-reviewer',
+      taskId: 't',
+      cwd: '/tmp/w',
+      contextPayload: {},
+      allowedTools: ['repository.read', 'repository.search'],
+    });
+    await adapter.execute(session, { instruction: 'review' }, () => {}, new AbortController().signal);
+    const args = invocations[0]!.args;
+    const toolsArg = args[args.indexOf('--tools') + 1] ?? '';
+    const excludeArg = args[args.indexOf('--exclude-tools') + 1] ?? '';
+    expect(toolsArg.split(',')).toEqual(expect.arrayContaining(['read', 'grep']));
+    expect(toolsArg).not.toContain('edit');
+    // The complement is denied explicitly — a read-only Pi run provably cannot mutate.
+    expect(excludeArg.split(',')).toEqual(expect.arrayContaining(['edit', 'write', 'bash']));
+  });
 });
 
 describe('OpenCodeAgentAdapter', () => {

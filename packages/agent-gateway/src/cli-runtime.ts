@@ -123,11 +123,22 @@ export interface CliArgvContext {
   resumeSessionId?: string;
   /** Turn budget, if the caller set one. */
   maxTurns?: number;
+  /**
+   * The session's granted capabilities (the abstract `@awb/capability-broker` strings, e.g.
+   * `repository.read`, `worktree.write`), for the subclass to map onto its own tool-restriction
+   * surface (Pi `--tools`/`--exclude-tools`). The base doesn't interpret them — a runtime with no
+   * tool-restriction surface simply ignores this.
+   */
+  allowedTools: readonly string[];
+  /** The complement the caller wants denied, if it computed one (unused by runtimes that derive deny from allow). */
+  disallowedTools: readonly string[];
 }
 
 interface CliSessionState {
   cwd: string;
   contextPayload: unknown;
+  allowedTools: readonly string[];
+  disallowedTools: readonly string[];
   resumeSessionId?: string;
   abort?: AbortController;
 }
@@ -209,6 +220,8 @@ export abstract class CliStreamAdapter implements CodingAgentAdapter {
     this.state.set(session.id, {
       cwd: input.cwd,
       contextPayload: input.contextPayload,
+      allowedTools: input.allowedTools,
+      disallowedTools: input.disallowedTools ?? [],
       resumeSessionId: input.resumeSessionId,
     });
     return session;
@@ -233,6 +246,8 @@ export abstract class CliStreamAdapter implements CodingAgentAdapter {
       prompt,
       resumeSessionId: state.resumeSessionId,
       maxTurns: assignment.stopConditions?.maxTurns,
+      allowedTools: state.allowedTools,
+      disallowedTools: state.disallowedTools,
     });
 
     const acc = newCliAccumulator();

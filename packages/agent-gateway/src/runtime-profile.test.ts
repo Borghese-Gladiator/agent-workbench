@@ -50,4 +50,28 @@ describe('runtime-profile registry', () => {
     expect(runtimeProfile('pi').createAdapter({ model: 'ollama/qwen3-coder:30b', binary: 'pi' })).toBeInstanceOf(PiAgentAdapter);
     expect(runtimeProfile('opencode').createAdapter({ model: 'anthropic/claude-sonnet-4-5' })).toBeInstanceOf(OpenCodeAgentAdapter);
   });
+
+  it('local-model runtimes get the recipes tool-doc tier; frontier ones get full', () => {
+    expect(runtimeProfile('pi').toolDocTier).toBe('recipes');
+    expect(runtimeProfile('mock').toolDocTier).toBe('recipes');
+    for (const runtime of ['claude', 'codex', 'opencode'] as const) {
+      expect(runtimeProfile(runtime).toolDocTier).toBe('full');
+    }
+  });
+
+  it('pi routes the heavy challenge phase to a fast model and keeps the capable default elsewhere', () => {
+    const pi = runtimeProfile('pi');
+    expect(pi.modelForPhase('challenge', {})).toBe('ollama/llama3.2:latest');
+    expect(pi.modelForPhase('implement', {})).toBe('ollama/qwen3-coder:30b');
+    expect(pi.modelForPhase('plan', {})).toBe('ollama/qwen3-coder:30b');
+    // A project-configured model overrides the per-phase table for every phase.
+    expect(pi.modelForPhase('challenge', { model: 'ollama/custom' })).toBe('ollama/custom');
+  });
+
+  it('one-model runtimes return the configured model (or undefined) for every phase', () => {
+    for (const runtime of ['claude', 'codex', 'opencode'] as const) {
+      expect(runtimeProfile(runtime).modelForPhase('challenge', {})).toBeUndefined();
+      expect(runtimeProfile(runtime).modelForPhase('implement', { model: 'm' })).toBe('m');
+    }
+  });
 });
