@@ -8,8 +8,9 @@ import {
 } from './transcode.js';
 
 /** A runner that records every ffmpeg invocation and returns a scripted output size per encode. */
-function fakeRunner(sizes: number[]): { runner: TranscodeRunner; calls: string[][] } {
+function fakeRunner(sizes: number[]): { runner: TranscodeRunner; calls: string[][]; cleaned: string[] } {
   const calls: string[][] = [];
+  const cleaned: string[] = [];
   let encode = -1; // each encode = two runs (palettegen + paletteuse); statSize advances the encode.
   const runner: TranscodeRunner = {
     async run(_file, args) {
@@ -19,13 +20,16 @@ function fakeRunner(sizes: number[]): { runner: TranscodeRunner; calls: string[]
       encode += 1;
       return sizes[encode] ?? sizes[sizes.length - 1] ?? 0;
     },
+    async cleanup(path) {
+      cleaned.push(path);
+    },
   };
-  return { runner, calls };
+  return { runner, calls, cleaned };
 }
 
 describe('transcodeWebmToGif', () => {
   it('encodes at the full budget (640px/10fps) and stops when within budget', async () => {
-    const { runner, calls } = fakeRunner([GIF_MAX_BYTES - 1]);
+    const { runner, calls, cleaned } = fakeRunner([GIF_MAX_BYTES - 1]);
     const result = await transcodeWebmToGif('in.webm', 'out.gif', runner);
 
     expect(result.width).toBe(GIF_MAX_WIDTH);
@@ -33,6 +37,8 @@ describe('transcodeWebmToGif', () => {
     expect(result.withinBudget).toBe(true);
     // Two ffmpeg passes (palettegen + paletteuse), no step-down.
     expect(calls).toHaveLength(2);
+    // The palette-PNG intermediate is cleaned up so it never ships in the PR branch.
+    expect(cleaned).toContain('out.gif.palette.png');
     // The width cap is present in the scale filter of every pass.
     for (const args of calls) {
       expect(args.join(' ')).toContain(`min(${GIF_MAX_WIDTH}`);

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { stat } from 'node:fs/promises';
+import { stat, rm } from 'node:fs/promises';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -30,6 +30,8 @@ export interface TranscodeRunner {
   run(file: string, args: string[]): Promise<void>;
   /** Byte size of a produced file, used to decide whether to step down. */
   statSize(path: string): Promise<number>;
+  /** Best-effort removal of an intermediate file (the palette PNG). */
+  cleanup(path: string): Promise<void>;
 }
 
 const defaultRunner: TranscodeRunner = {
@@ -39,13 +41,21 @@ const defaultRunner: TranscodeRunner = {
   async statSize(path) {
     return (await stat(path)).size;
   },
+  async cleanup(path) {
+    await rm(path, { force: true });
+  },
 };
+
+/** The palette-PNG intermediate ffmpeg writes for a given GIF destination. */
+function palettePath(dest: string): string {
+  return `${dest}.palette.png`;
+}
 
 /** ffmpeg args for a single two-pass palettegen/paletteuse GIF encode at a given width + fps. */
 function gifPassArgs(src: string, dest: string, width: number, fps: number): string[][] {
   // `min(width,iw)` never upscales; lanczos keeps the downscale crisp.
   const filters = `fps=${fps},scale=min(${width}\\,iw):-1:flags=lanczos`;
-  const palette = `${dest}.palette.png`;
+  const palette = palettePath(dest);
   return [
     ['-y', '-i', src, '-vf', `${filters},palettegen`, palette],
     ['-y', '-i', src, '-i', palette, '-lavfi', `${filters}[x];[x][1:v]paletteuse`, dest],
@@ -76,14 +86,19 @@ export async function transcodeWebmToGif(
   runner: TranscodeRunner = defaultRunner,
 ): Promise<TranscodeResult> {
   let last: TranscodeResult | undefined;
-  for (const { width, fps } of GIF_STEP_DOWN) {
-    for (const args of gifPassArgs(src, dest, width, fps)) {
-      await runner.run('ffmpeg', args);
+  try {
+    for (const { width, fps } of GIF_STEP_DOWN) {
+      for (const args of gifPassArgs(src, dest, width, fps)) {
+        await runner.run('ffmpeg', args);
+      }
+      const byteSize = await runner.statSize(dest);
+      last = { width, fps, byteSize, withinBudget: byteSize <= GIF_MAX_BYTES };
+      if (last.withinBudget) return last;
     }
-    const byteSize = await runner.statSize(dest);
-    last = { width, fps, byteSize, withinBudget: byteSize <= GIF_MAX_BYTES };
-    if (last.withinBudget) return last;
+    // Every step-down was still over budget — return the smallest encode we reached (last rung).
+    return last!;
+  } finally {
+    // Drop the palette-PNG intermediate so it is never swept into the PR branch alongside the GIF.
+    await runner.cleanup(palettePath(dest));
   }
-  // Every step-down was still over budget — return the smallest encode we reached (last rung).
-  return last!;
 }
