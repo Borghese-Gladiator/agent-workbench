@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import type { WorkbenchDatabase } from '@awb/database';
+import { initDataDir } from '@awb/config';
 import { openWorkbenchDatabase } from './db.js';
 import { SemanticEventBus } from './event-bus.js';
 import { registerRepositoryRoutes } from './routes/repositories.js';
@@ -8,6 +9,7 @@ import { registerTaskRoutes } from './routes/tasks.js';
 import { registerWebSocketRoute } from './routes/websocket.js';
 import { registerInternalRoutes } from './routes/internal.js';
 import { registerStatusRoute } from './routes/status.js';
+import { registerMediaRoutes } from './routes/media.js';
 
 export interface DaemonServer {
   app: FastifyInstance;
@@ -21,6 +23,7 @@ export async function buildServer(): Promise<DaemonServer> {
   await app.register(fastifyWebsocket);
 
   const database = openWorkbenchDatabase();
+  const { layout } = initDataDir();
   const eventBus = new SemanticEventBus();
 
   app.get('/api/health', async () => ({ status: 'ok' }));
@@ -30,6 +33,7 @@ export async function buildServer(): Promise<DaemonServer> {
   registerTaskRoutes(app, database);
   registerWebSocketRoute(app, eventBus, database);
   registerInternalRoutes(app, database, eventBus);
+  registerMediaRoutes(app, database, layout.artifactsDir);
 
   return {
     app,

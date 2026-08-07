@@ -77,6 +77,7 @@ export type Finding = z.infer<typeof FindingSchema>;
 
 export const ArtifactKindSchema = z.enum([
   'qa-video',
+  'qa-video-gif',
   'browser-trace',
   'terminal-recording',
   'screenshot',
