@@ -22,6 +22,74 @@ iterations fell short (see `archive/README.md` for the full v1–v4 history and
   crash mid-task resumes rather than restarting, and a failed phase loops back
   carrying only the relevant findings instead of resetting the whole context.
 
+## Architecture at a glance
+
+The runtime is a set of local processes around a durable state machine. The CLI
+and web dashboard are clients of the daemon; the daemon owns SQLite, the
+artifact store, and the Temporal client; Temporal drives the worker, and the
+worker is the *only* place I/O happens — it calls into the `packages/*` that do
+the real work (agent sessions, planning, QA, review, GitHub).
+
+```mermaid
+flowchart TB
+    subgraph clients [Clients]
+        cli["apps/cli<br/>(awb)"]
+        web["apps/web<br/>(React dashboard)"]
+    end
+
+    daemon["apps/daemon<br/>Fastify API — composition root<br/>owns SQLite · artifact store · Temporal client"]
+
+    subgraph durable [Durable orchestration]
+        temporal["Temporal dev server<br/>lifecycle state machine"]
+        workflow["@awb/workflow<br/>evaluatePhaseCompletion<br/>(pure, deterministic — depends only on @awb/domain)"]
+        worker["workers/temporal-worker<br/>Activities — the ONLY place I/O happens<br/>hosts runPhase"]
+    end
+
+    subgraph work [Work packages — called by Activities]
+        gateway["@awb/agent-gateway<br/>real + mock agent adapters"]
+        planning["@awb/planning"]
+        qa["@awb/qa<br/>recording/trace + deriveQaStatus"]
+        review["@awb/review<br/>adversarial challenge"]
+        github["@awb/github"]
+    end
+
+    db[("SQLite<br/>+ artifact store")]
+
+    cli -->|"HTTP"| daemon
+    web -->|"HTTP + WS /api"| daemon
+    daemon --> db
+    daemon -->|"start / signal"| temporal
+    temporal -->|"schedules Activities"| worker
+    worker -->|"hosts + queries"| workflow
+    worker --> gateway
+    worker --> planning
+    worker --> qa
+    worker --> review
+    worker --> github
+```
+
+The task lifecycle is a fixed sequence of phases. Every transition is decided by
+`evaluatePhaseCompletion` (workbench-owned policy), never by an agent's
+self-report; a failed phase loops back carrying only the relevant findings.
+
+```mermaid
+flowchart LR
+    specify --> plan --> prepare --> implement --> verify --> exercise --> challenge --> release --> assimilate
+
+    verify -.->|failing evidence| implement
+    exercise -.->|QA fails| implement
+    challenge -.->|findings| implement
+
+    style exercise fill:#1f6feb,color:#fff
+    style challenge fill:#1f6feb,color:#fff
+```
+
+Agents produce **candidates and evidence**; the workbench decides whether a
+phase is done. The two highlighted phases are the gates that can't be
+rubber-stamped: **exercise** requires a real recording/trace *and* passing
+assertions tied to the exact candidate SHA, and **challenge** is an adversarial
+review that loops back on any blocking finding.
+
 ## Where to start
 
 - **Agents** working in this repo: read `AGENTS.md` first — it is the single
