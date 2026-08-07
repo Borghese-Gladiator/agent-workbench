@@ -130,6 +130,7 @@ describe('ClaudeAgentAdapter', () => {
             inputTokens: 1200,
             outputTokens: 340,
             cacheReadInputTokens: 50,
+            cacheCreationInputTokens: 30,
             costUSD: 0.42,
           },
         },
@@ -146,6 +147,7 @@ describe('ClaudeAgentAdapter', () => {
       inputTokens: 1200,
       outputTokens: 340,
       cachedInputTokens: 50,
+      cacheCreationInputTokens: 30,
       costUsd: 0.42,
     });
     expect(events).toContainEqual({ type: 'usage', usage: result.usage });

@@ -132,6 +132,23 @@ export type ClaudeQueryFn = (params: { prompt: string; options?: ClaudeSdkQueryO
 /** Default query function: the real SDK. */
 const realQuery: ClaudeQueryFn = (params) => query(params) as unknown as ClaudeSdkQueryHandle;
 
+/**
+ * Single-turn text completion over the SDK — no tools, no session, just prompt → text. For synthesis
+ * steps that are not the full agent loop (e.g. the repository-memory compile/lint passes, TASK-50).
+ * Drains the query stream and returns the final `result` message's text. The `queryFn` seam lets a
+ * test supply a scripted generator instead of spawning Claude Code. Returns '' if no result text.
+ */
+export async function completeOnce(prompt: string, queryFn: ClaudeQueryFn = realQuery): Promise<string> {
+  const handle = queryFn({ prompt, options: { permissionMode: 'bypassPermissions', maxTurns: 1 } });
+  let text = '';
+  for await (const message of handle) {
+    if (message.type === 'result') {
+      text = (message as ClaudeSdkResultMessage).result ?? '';
+    }
+  }
+  return text;
+}
+
 interface ClaudeSessionState {
   cwd: string;
   allowedTools: string[];
@@ -183,6 +200,7 @@ function toDomainUsage(model: string, usage: ClaudeSdkModelUsage): ModelUsage {
     inputTokens: usage.inputTokens,
     outputTokens: usage.outputTokens,
     cachedInputTokens: usage.cacheReadInputTokens,
+    cacheCreationInputTokens: usage.cacheCreationInputTokens,
     costUsd: usage.costUSD,
   };
 }

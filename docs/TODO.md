@@ -407,7 +407,7 @@ The Karpathy "Graph Engineering" cluster. TASK-46's measurement decides whether
 the fix is caching/subgraph-retrieval (→ TASK-47) or output compression. TASK-50
 depends on TASK-47's graph-vs-md call.
 
-### [ ] TASK-46: Token cost — investigate high `cached_tokens` / call count
+### [x] TASK-46: Token cost — investigate high `cached_tokens` / call count
 
 **What's wrong.** Reported symptom: runs are slow, expensive, and burn a *lot* of
 `cached_tokens`, which suggests we re-send a large near-identical prompt prefix on
@@ -441,7 +441,7 @@ output compression wins), the run's evidence/metrics.
 phase, % preamble vs. % tool-output, and a ranked list of the top reducible
 costs — then a targeted task for the biggest one.
 
-### [ ] TASK-47: The "graph plane" — spike a queryable lineage/memory graph (Graph Engineering + Agent Memory)
+### [x] TASK-47: The "graph plane" — spike a queryable lineage/memory graph (Graph Engineering + Agent Memory)
 
 **Read first (implementer).** The source PDF — "Graph Engineering Systems"
 (Karpathy synthesis):
@@ -507,7 +507,7 @@ missing, (b) picks the one proof-query, (c) gives a clear adopt/integrate/declin
 call on AgentMemory with reasoning, and (d) either defers the build or spins out a
 scoped follow-up task for the single proof-query. No graph DB adopted on spec.
 
-### [ ] TASK-50: `repository-memory` compile + lint passes (Karpathy KB workflow) — depends on TASK-47
+### [x] TASK-50: `repository-memory` compile + lint passes (Karpathy KB workflow) — depends on TASK-47
 
 **What's wrong.** Separate from the graph-plane spike (TASK-47), Karpathy's other
 memory idea is the **knowledge-base workflow**: ingest → **compile** (an LLM
@@ -726,6 +726,75 @@ stopping at the PR-readiness gate. Capture friction as new TODO items.
 
 **How we'll know it's done.** A branch + draft PR on this repo produced by the
 workbench, with a short writeup of what was awkward.
+
+### [ ] TASK-59: `awb up` can't run two stacks at once — hard-coded ports + worktree-broken `repoRoot()`
+
+**What's wrong.** Trying to drive a live task from a git worktree while other
+worktree sessions were running (the normal state when several groups are in flight)
+surfaced a cluster of related defects that make a second, isolated stack effectively
+un-runnable — found live while doing the TASK-46 dogfood:
+
+1. **All service ports are hard-coded single-instance constants** — `DAEMON_PORT =
+   4417`, `TEMPORAL_PORT = 7233`, the OTel collector's `4318`/`3000`, and the
+   fixed container name `awb-otel-lgtm` (`apps/cli/src/services.ts`), plus the
+   task queue name `awb-task-queue` (duplicated in
+   `workers/temporal-worker/src/index.ts` and
+   `apps/daemon/src/temporal-worker-constants.ts`). Two checkouts' `awb up` therefore
+   collide on every port, share one Temporal server, and — worst — share one task
+   queue, so a workflow task can be executed by *another worktree's worker running
+   different code*.
+2. **`awb up`'s health check treats "port open" as "my service is healthy."** When a
+   peer already holds 4417/7233, `up` reports `runtime ready` against the *foreign*
+   daemon while this checkout's own daemon has actually crashed on `EADDRINUSE` — a
+   false green that then fails confusingly at `task create` (Internal Server Error
+   against a daemon using a different DB/queue).
+3. **`repoRoot()` is wrong for nested worktrees.** It resolves a fixed
+   `../../../..` from `apps/cli/src/services.ts`
+   (`apps/cli/src/services.ts:39-41`), which climbs past the checkout root when the
+   repo is a worktree nested under `LOCAL_worktrees/<repo>/<branch>/`. Pinned mode
+   then sets the worker/daemon `cwd` to a directory that doesn't exist → `spawn …
+   ENOENT`; dev mode's `pnpm --filter` resolves `@awb/daemon` to a *sibling
+   worktree's* package and boots the wrong code (observed: a group-E `up` importing
+   `group-a-opencode/apps/daemon`).
+4. **Pinned mode spawns bare `node`.** `command: 'node'` (not `process.execPath`) in
+   the pinned service defs `ENOENT`s when the detached spawn's PATH lacks the active
+   node (e.g. fnm), and — if PATH is forced — can pick up a *different* node whose
+   ABI mismatches the compiled `better-sqlite3` (`NODE_MODULE_VERSION` error).
+
+Net effect: a clean isolated worktree run needs an isolated `AWB_DATA_DIR` **and**
+non-default ports **and** a unique task queue **and** its own Temporal — none of
+which are configurable today. The TASK-46 dogfood only completed after local
+throwaway edits (env-driven ports/queue/temporal-address, a `repoRoot()` walk-up to
+the nearest `pnpm-workspace.yaml`, and `process.execPath` for the spawn); those were
+reverted as out-of-scope, and this ticket captures the real fix.
+
+**What to do.** Make a stack fully parameterizable and self-isolating so N worktrees
+can run concurrently:
+- Env-drive every port + the OTel container name + the task queue, with the current
+  values as defaults (single source of truth; the daemon/worker/CLI/vite/worker
+  daemon-URL all read the same resolved values). An `awb up` with no overrides
+  behaves exactly as today.
+- Fix `repoRoot()` to find the checkout root robustly (walk up to the nearest
+  `pnpm-workspace.yaml`/`.git`), so pinned cwd and dev `--filter` both target *this*
+  worktree. Use `process.execPath` for the pinned `node` spawn.
+- Make the health check verify it's *our* service (e.g. a pid/identity check or a
+  data-dir-scoped health URL), not merely that the port is occupied — so a foreign
+  daemon on the port fails loudly instead of a false "ready".
+- Consider an `awb up --isolated` (or deriving a deterministic port block + queue +
+  data dir from the branch name) so the multi-worktree case is one flag, not five
+  env vars.
+
+**Where.** `apps/cli/src/services.ts` (ports, container name, `repoRoot`,
+`process.execPath`), `apps/cli/src/process-control.ts` + `apps/cli/src/health.ts`
+(identity-aware health), `apps/cli/src/daemon-client.ts` + `apps/web/vite.config.ts`
++ `workers/temporal-worker/src/daemon-client.ts` (daemon URL), the two `TASK_QUEUE`
+definitions, `apps/daemon/src/temporal-client.ts` + `workers/temporal-worker/src/index.ts`
+(Temporal address). Relates to TASK-43 (dogfooding this repo is what surfaced it).
+
+**How we'll know it's done.** Two `awb up` stacks from two different worktrees run
+simultaneously without collision (distinct ports, queues, Temporal, data dirs), each
+drives a task end to end against its own code, and a foreign process on a default
+port makes `up` fail with a clear message instead of a false "ready".
 
 ---
 

@@ -60,6 +60,7 @@ export const ModelUsageSchema = z.object({
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
   cachedInputTokens: z.number().int().nonnegative().optional(),
+  cacheCreationInputTokens: z.number().int().nonnegative().optional(),
   costUsd: z.number().nonnegative().optional(),
 });
 export type ModelUsage = z.infer<typeof ModelUsageSchema>;

@@ -36,6 +36,7 @@ export const modelInvocations = sqliteTable('model_invocations', {
   inputTokens: integer('input_tokens').notNull(),
   outputTokens: integer('output_tokens').notNull(),
   cachedInputTokens: integer('cached_input_tokens'),
+  cacheCreationInputTokens: integer('cache_creation_input_tokens'),
   costUsd: real('cost_usd'),
   startedAt: text('started_at').notNull(),
   endedAt: text('ended_at'),

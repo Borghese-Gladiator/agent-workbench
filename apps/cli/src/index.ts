@@ -10,6 +10,7 @@ import { registerUiCommands } from './commands/ui.js';
 import { registerConfigCommands } from './commands/config.js';
 import { registerCompletionCommand } from './commands/completion.js';
 import { registerResetCommands } from './commands/reset.js';
+import { registerMemoryCommands } from './commands/memory.js';
 import { configureOutput } from './output.js';
 
 const program = new Command();
@@ -47,6 +48,7 @@ registerTaskCommands(program);
 registerConfigCommands(program);
 registerCompletionCommand(program);
 registerResetCommands(program);
+registerMemoryCommands(program);
 
 // `pnpm --filter @awb/cli cli -- <args>` forwards a leading `--` into our argv. Commander treats
 // `--` as the options terminator, so it would swallow subcommand options like `--prompt`

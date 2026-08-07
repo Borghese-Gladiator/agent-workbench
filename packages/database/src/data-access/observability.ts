@@ -64,6 +64,7 @@ export function persistPhaseObservability(db: DrizzleDb, payload: PhaseObservabi
           inputTokens: inv.inputTokens,
           outputTokens: inv.outputTokens,
           cachedInputTokens: inv.cachedInputTokens ?? null,
+          cacheCreationInputTokens: inv.cacheCreationInputTokens ?? null,
           costUsd: inv.costUsd ?? null,
           startedAt: inv.startedAt,
           endedAt: inv.endedAt ?? null,
@@ -101,6 +102,7 @@ export function getTokenBreakdown(db: DrizzleDb, taskId: string): TokenBreakdown
       inputTokens: modelInvocations.inputTokens,
       outputTokens: modelInvocations.outputTokens,
       cachedInputTokens: modelInvocations.cachedInputTokens,
+      cacheCreationInputTokens: modelInvocations.cacheCreationInputTokens,
       costUsd: modelInvocations.costUsd,
     })
     .from(modelInvocations)
@@ -109,11 +111,18 @@ export function getTokenBreakdown(db: DrizzleDb, taskId: string): TokenBreakdown
     .all();
 
   const byModel: TokenBreakdown['byModel'] = {};
-  const totals = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, costUsd: 0 };
+  const totals = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cachedInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    costUsd: 0,
+  };
   for (const r of rows) {
     totals.inputTokens += r.inputTokens;
     totals.outputTokens += r.outputTokens;
     totals.cachedInputTokens += r.cachedInputTokens ?? 0;
+    totals.cacheCreationInputTokens += r.cacheCreationInputTokens ?? 0;
     totals.costUsd += r.costUsd ?? 0;
     const m = (byModel[r.model] ??= { inputTokens: 0, outputTokens: 0, costUsd: 0 });
     m.inputTokens += r.inputTokens;
