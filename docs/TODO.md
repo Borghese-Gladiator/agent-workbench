@@ -156,6 +156,57 @@ triggers a checkpoint/split instead of proceeding; under the threshold it procee
 untouched. *Manual:* a large feature run pauses for human review at the cap rather
 than dumping one giant diff.
 
+### [ ] TASK-60: Route `architecture` loop-backs to `program-design`, not `plan` (L tasks)
+
+**What's wrong.** `program-design` (TASK-52) is in the *forward* pass (plan →
+program-design → prepare, L only) but absent from the *loop*. `routeLoop`
+(`packages/workflow/src/loop-routing.ts`) sends a `challenge` finding of category
+`architecture` — and an `exercise` design-misunderstanding — back to `plan`. That is
+exactly a "the structure is wrong" finding, i.e. the thing program-design exists to
+own, yet the redirect skips the program-design phase and re-derives structure as
+prose in `plan`. So the phase that reviews structure runs once and never again, even
+when a downstream phase proves the structure was wrong.
+
+**What to do.** For an L run (phase set includes `program-design`), route
+`architecture` challenge findings (and `exercise` design-misunderstanding) to
+`program-design` instead of `plan`; keep `plan` for M/S (which have no
+program-design phase). This is a `routeLoop` table change conditioned on the run's
+phase set — no new phase, no schema change. The forward-pass reject at the
+program-design gate already works (fails the completion gate → blocked → human
+redirects); this closes the *loop-back* side.
+
+**Where.** `packages/workflow/src/loop-routing.ts` (`routeChallengeFinding`, the
+`exercise-design-misunderstanding` case), the workflow's routing call site (needs
+the run's `phaseSet`/`size` to choose the target), tests.
+
+**How we'll know it's done.** *Unit:* an L run's `architecture` challenge finding
+routes to `program-design`; the same finding on an M/S run still routes to `plan`.
+
+### [ ] TASK-61: Evaluate whether L + program-design actually helps (measure, don't assume)
+
+**What's wrong.** We shipped the program-design phase (TASK-52) for L tasks on the
+WSFF thesis that cheap structural review before code catches expensive mistakes —
+but we have **not** shown it catches anything on real runs, only that it runs. The
+open question (raised in review): does the extra phase earn its cost, or would "plan
+less, implement in one session" do as well? This must be answered by measurement,
+not intuition.
+
+**What to do.** Instrument program-design runs and compare against a counterfactual:
+rework/loop-back rate (repair/replan iterations), reviewed-vs-total diff ratio, and
+review-comment / maintainability-annotation density (TASK-53) for L-with-program-design
+runs vs. L-classified runs with the phase disabled (a flag). Fold into the decay
+metrics (TASK-55) and cost instrumentation (TASK-46) rather than a bespoke pipeline.
+Output a short writeup: keep program-design as-is, collapse it into a richer `plan`
+artifact, or drop it. Do NOT expand the phase further until this call is made.
+
+**Where.** `packages/observability/` (run attributes, via TASK-55), a config flag to
+disable program-design for A/B, the evaluation writeup in `docs/`. Depends on
+TASK-55/TASK-46 for the metric plumbing; evaluates TASK-51/TASK-52.
+
+**How we'll know it's done.** A writeup over several real L runs (with/without
+program-design) with a keep/collapse/drop recommendation backed by the rework +
+reviewed-ratio numbers.
+
 ---
 
 ## Group C — Quality gates: QA correctness, maintainability & pre-work alignment
