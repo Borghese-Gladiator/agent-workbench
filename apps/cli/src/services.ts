@@ -1,5 +1,6 @@
-import { join, resolve } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { resolveLayout } from '@awb/config';
 
 export const DAEMON_PORT = 4417;
@@ -36,8 +37,24 @@ export interface ServiceDefinition {
   ui: boolean;
 }
 
+/**
+ * The workspace root, found by walking UP from this module to the directory holding
+ * `pnpm-workspace.yaml`. A fixed `../../../..` hop is fragile: the depth differs between the built
+ * `dist/` layout and the buildless `tsx src/` path the `awb` CLI actually runs under, and when it
+ * overshoots it lands on the PARENT of a worktree (e.g. `LOCAL_worktrees/agent-workbench`), whose
+ * `workers/temporal-worker` does not exist — so `awb up` spawns the worker with a non-existent cwd
+ * and fails with a misleading `spawn … ENOENT`. Anchoring on the workspace marker is correct for
+ * src, dist, and any worktree location.
+ */
 function repoRoot(): string {
-  return resolve(new URL('../../../..', import.meta.url).pathname);
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 10; i++) {
+    if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`repoRoot: could not locate pnpm-workspace.yaml above ${fileURLToPath(import.meta.url)}`);
 }
 
 /**
@@ -59,11 +76,16 @@ export function serviceDefinitions(mode: RuntimeMode = resolveRuntimeMode()): Re
   const root = repoRoot();
   const layout = resolveLayout();
   const pinned = mode === 'pinned';
+  // Spawn pinned services with the SAME node binary running this CLI (`process.execPath`) rather than
+  // a bare `'node'`: under pnpm/fnm the child's PATH does not always include the active node (fnm's
+  // shim is an ephemeral per-shell dir), so `spawn('node', …)` fails with ENOENT when booting from a
+  // worktree. `process.execPath` is an absolute path and always resolves.
+  const nodeBin = process.execPath;
   const workerService: ServiceDefinition = pinned
     ? {
         key: 'worker',
         label: 'Temporal worker',
-        command: 'node',
+        command: nodeBin,
         args: ['dist/index.js'],
         cwd: join(root, 'workers', 'temporal-worker'),
         env: { OTEL_EXPORTER_OTLP_ENDPOINT: OTEL_ENDPOINT },
@@ -82,7 +104,7 @@ export function serviceDefinitions(mode: RuntimeMode = resolveRuntimeMode()): Re
     ? {
         key: 'daemon',
         label: 'Daemon (Fastify API)',
-        command: 'node',
+        command: nodeBin,
         args: ['dist/index.js'],
         cwd: join(root, 'apps', 'daemon'),
         port: DAEMON_PORT,
