@@ -46,7 +46,7 @@ export class OpenCodeAgentAdapter extends CliStreamAdapter {
   }
 }
 
-/** OpenCode's `part.tokens` on a `step_finish` event → a single ModelUsage (last step wins the total). */
+/** OpenCode's `part.tokens` on a single `step_finish` event → a ModelUsage for that one step. */
 function openCodeUsage(part: Record<string, unknown>): ModelUsage | undefined {
   const tokens = part.tokens as { input?: number; output?: number; cache?: { read?: number } } | undefined;
   if (!tokens) return undefined;
@@ -109,8 +109,17 @@ export function consumeOpenCodeStreamLine(line: string, acc: CliStreamAccumulato
       return;
     }
     case 'step_finish': {
-      const usage = openCodeUsage(part);
-      if (usage) acc.usage = usage;
+      const step = openCodeUsage(part);
+      if (step) {
+        // OpenCode reports per-step tokens: `output` is that step alone (sum it), but `input`
+        // re-counts the accumulated context each step (already cumulative), so keep the latest.
+        const prev = acc.usage;
+        acc.usage = {
+          ...step,
+          inputTokens: step.inputTokens,
+          outputTokens: (prev?.outputTokens ?? 0) + step.outputTokens,
+        };
+      }
       if (part.reason === 'error') acc.errorMessage = acc.errorMessage ?? 'step finished with error';
       return;
     }

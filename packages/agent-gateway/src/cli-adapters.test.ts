@@ -135,6 +135,19 @@ describe('OpenCodeAgentAdapter', () => {
     expect(events).toContainEqual({ type: 'file-changed', path: '/tmp/hello.txt' });
   });
 
+  it('sums per-step output tokens across steps but keeps the latest (cumulative) input', async () => {
+    // Token shape from a real 2-step opencode 1.15.3 run: output is per-step (119, then 7 → 126);
+    // input re-counts the accumulated context each step (17410 → 17650 → keep the latest).
+    const multiStep = [
+      JSON.stringify({ type: 'text', sessionID: 'ses_2', part: { type: 'text', text: 'hi' } }),
+      JSON.stringify({ type: 'step_finish', sessionID: 'ses_2', part: { reason: 'tool-calls', tokens: { input: 17410, output: 119, cache: { read: 0 } } } }),
+      JSON.stringify({ type: 'step_finish', sessionID: 'ses_2', part: { reason: 'stop', tokens: { input: 17650, output: 7, cache: { read: 0 } } } }),
+    ];
+    const { run } = fakeRunner(multiStep);
+    const { result } = await drive(new OpenCodeAgentAdapter({ runCliStreaming: run }));
+    expect(result.usage).toMatchObject({ inputTokens: 17650, outputTokens: 126 });
+  });
+
   it('builds opencode run --format json argv with the prompt last, --model when set', async () => {
     const { run, invocations } = fakeRunner(ocLines);
     await drive(new OpenCodeAgentAdapter({ runCliStreaming: run, model: 'anthropic/claude-sonnet-4-5' }));
