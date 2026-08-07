@@ -70,7 +70,9 @@ import { createDaemonClient } from '../daemon-client.js';
 import { createControlPlaneEmitter } from './control-plane-events.js';
 import { isResumableTransportError } from '@awb/agent-gateway';
 import { withSpan } from '@awb/telemetry';
+import { getDiffLineStats } from '@awb/repository';
 import { runIdForTask } from '@awb/database';
+import { computeDecaySignals, decaySpanAttributes } from './decay-metrics.js';
 import {
   drivePhase,
   blockedResult,
@@ -983,6 +985,29 @@ const challengeHandler: PhaseHandler = {
 
     runState.reviewerSessionId = review.reviewerSessionId;
     runState.reviewFindings = review.findings;
+
+    // WSFF decay signals (TASK-55): the challenge phase is the one place both the reviewed diff and
+    // the findings are in hand. Emit them as a nested run.decay span (auto-parents to the phase's run
+    // trace). Best-effort — telemetry is diagnostics-only and must never fail the phase.
+    if (ctx.strategy === 'claude' && runState.worktreePath && runState.candidateSha) {
+      try {
+        const diffLineStats = await getDiffLineStats(
+          runState.worktreePath,
+          resolveBaseSha(runState),
+          resolveCandidateSha(runState),
+        );
+        const signals = computeDecaySignals({ diffLineStats, reviewedDiffText: finalDiff, findings: review.findings });
+        await withSpan(
+          'run.decay',
+          { run_id: `${state.taskId}-run`, task_id: state.taskId, phase: 'challenge' },
+          async (span) => {
+            span.setAttributes(decaySpanAttributes(signals));
+          },
+        );
+      } catch {
+        // decay metrics are advisory diagnostics; never let them block the run
+      }
+    }
 
     return {
       kind: 'evaluate',

@@ -8,6 +8,12 @@ const POLL_INTERVAL_MS = 2000;
 
 const TERMINAL_CONDITIONS = new Set(['failed', 'cancelled', 'completed']);
 
+const EVENT_STREAM_LABEL: Record<string, string> = {
+  connecting: '(connecting…)',
+  connected: '(live)',
+  reconnecting: '(reconnecting…)',
+};
+
 /**
  * Control-plane lifecycle event types (TASK-34), rendered distinctly from agent-produced events so a
  * phase failing / retrying / a transport drop stands out on the timeline. The value is a CSS modifier
@@ -28,7 +34,7 @@ export function TaskDetailPage() {
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   // Live semantic-event timeline over the WebSocket, with reconnect catch-up (TASK-23).
-  const { events, connected } = useEventStream(taskId);
+  const { events, status } = useEventStream(taskId);
 
   async function refresh(): Promise<void> {
     if (!repositoryId || !taskId) return;
@@ -98,9 +104,9 @@ export function TaskDetailPage() {
         </ul>
       )}
 
-      <h3>Live event timeline {connected ? '(live)' : '(reconnecting…)'}</h3>
+      <h3>Live event timeline {EVENT_STREAM_LABEL[status]}</h3>
       {events.length === 0 ? (
-        <p>No events yet.</p>
+        <p>{status === 'reconnecting' ? 'No events yet (showing history when the stream reconnects).' : 'No events yet.'}</p>
       ) : (
         <ol className="event-timeline">
           {events.map((e) => {

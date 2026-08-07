@@ -117,6 +117,34 @@ export async function getChangedPaths(cwd: string, fromSha: string, toSha: strin
   return stdout.split('\n').filter(Boolean);
 }
 
+export interface DiffLineStats {
+  added: number;
+  removed: number;
+  filesChanged: number;
+}
+
+/** Parses `git diff --numstat` output. Binary files report `-\t-` — counted as a changed file with
+ * zero line deltas. Exported for unit testing without a git repo. */
+export function parseNumstat(stdout: string): DiffLineStats {
+  let added = 0;
+  let removed = 0;
+  let filesChanged = 0;
+  for (const line of stdout.split('\n')) {
+    if (!line.trim()) continue;
+    const [a, r] = line.split('\t');
+    filesChanged += 1;
+    added += Number(a) || 0;
+    removed += Number(r) || 0;
+  }
+  return { added, removed, filesChanged };
+}
+
+/** Added/removed line counts and changed-file count between two revisions (`git diff --numstat`). */
+export async function getDiffLineStats(cwd: string, fromSha: string, toSha: string): Promise<DiffLineStats> {
+  const { stdout } = await runGit(cwd, ['diff', '--numstat', `${fromSha}..${toSha}`]);
+  return parseNumstat(stdout);
+}
+
 export async function isGitRepository(cwd: string): Promise<boolean> {
   try {
     const { stdout } = await runGit(cwd, ['rev-parse', '--is-inside-work-tree']);

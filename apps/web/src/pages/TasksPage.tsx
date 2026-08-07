@@ -20,6 +20,7 @@ import { deriveTaskStatus, STATUS_FILTER_OPTIONS } from '@/lib/task-status';
 import { relativeTime, shortId } from '@/lib/format';
 import { api, type Repository } from '../api/client.js';
 import { tasksApi, type TaskSummary } from '../api/tasks.js';
+import { useTaskListLiveRefresh } from '../hooks/useTaskListLiveRefresh.js';
 
 const POLL_INTERVAL_MS = 4000;
 
@@ -62,6 +63,10 @@ export function TasksPage() {
     const interval = setInterval(() => void refresh(), POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [refresh]);
+
+  // Live status: refresh the list when the event stream reports activity, so rows advance without a
+  // manual refresh (TASK-49). The poll above stays as a fallback if the socket is down.
+  useTaskListLiveRefresh(() => void refresh());
 
   const repoLabel = (task: TaskSummary) => task.repositoryName ?? shortId(task.repositoryId);
 

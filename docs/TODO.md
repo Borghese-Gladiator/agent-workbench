@@ -549,7 +549,20 @@ still traceable to sources.
 TASK-55's decay metrics reuse the one-trace-per-run layer and draw on TASK-53's
 annotations; TASK-49 surfaces the already-streaming status on the list.
 
-### [ ] TASK-55: Track WSFF decay metrics on our own runs
+### [x] TASK-55: Track WSFF decay metrics on our own runs
+
+**Done** (buildable subset). Added `getDiffLineStats`/`parseNumstat` (`git diff
+--numstat`) to `packages/repository/src/git.ts`; a pure `decay-metrics.ts`
+(`computeDecaySignals` + `decaySpanAttributes`) in the worker; and a best-effort
+`run.decay` span emitted from `challengeHandler` (real path only) carrying
+`awb.decay.*` attributes (diff_lines, files_changed, reviewed_diff_lines,
+reviewed_ratio, finding_count, blocker_high_count, maintainability_finding_count,
+finding_density_per_kloc) — auto-nested under the phase's one-trace-per-run.
+**Duplication-delta deferred**: it needs a prior-run baseline / duplication probe
+that doesn't exist yet (and TASK-53's maintainability annotations aren't built);
+finding-density uses the adversarial `reviewFindings` count instead. Tested:
+`parseNumstat`/`getDiffLineStats` (repository), `computeDecaySignals`/attrs
+(worker), and a `span.setAttributes`-in-body case (telemetry).
 
 **What's wrong.** WSFF's point is that maintainability decay is *invisible on the
 fast loop* — it shows up weeks later as incidents. We have observability
@@ -572,7 +585,18 @@ sliding toward the +242%-incidents outcome.
 reviewed-ratio attributes on its trace. *Manual:* the metrics trend across several
 runs in Grafana/Tempo (or the UI), visibly moving when a run introduces duplication.
 
-### [ ] TASK-57: Task-detail "Live event timeline" stays empty + fake "reconnecting…"
+### [x] TASK-57: Task-detail "Live event timeline" stays empty + fake "reconnecting…"
+
+**Done.** `useEventStream` now runs the initial `catchUp()` on mount / `runId`
+change, independent of the WebSocket (history renders even if the socket never
+opens), and `openEventStream` has a real capped-backoff reconnect loop that
+re-runs catch-up (deduped by `sequence`) on every (re)connect. The hook exposes a
+3-state `status` (`connecting`/`connected`/`reconnecting`) and `TaskDetailPage`
+labels each distinctly, so a dead socket with backfilled events reads as
+"reconnecting" with history, never "no events". Live-verified in a real browser
+(WS deliberately down): all stored events rendered + header read "(reconnecting…)".
+Unit-tested (jsdom): backfill-on-mount with no socket, reconnect without dup
+sequences, status transitions.
 
 **What's wrong.** On the task-detail page the **Live event timeline** shows "No
 events yet" and a permanent "(reconnecting…)" header even for a task with
@@ -617,7 +641,14 @@ open the task-detail page for a completed run — the timeline shows the full or
 event list immediately, and killing/restoring the daemon flips the header through
 reconnecting→connected without losing or duplicating events.
 
-### [ ] TASK-49: Propagate live status to the list/overview, not just task detail
+### [x] TASK-49: Propagate live status to the list/overview, not just task detail
+
+**Done.** Added `useTaskListLiveRefresh`, which reuses `openEventStream` (the
+same reconnect-capable client, no second realtime mechanism — the WS is not
+run-scoped, so any event means some task advanced) to debounce-refresh the tasks
+list off the stream; the 4s poll stays as a fallback. Wired into `TasksPage`.
+Unit-tested: burst debounced into one refresh, refresh-on-(re)connect, closes on
+unmount.
 
 The live event stream backfills via `GET /api/events?afterSequence=N` (TASK-23,
 done) and drives `TaskDetailPage` via the daemon **WebSocket** — but the backfill/

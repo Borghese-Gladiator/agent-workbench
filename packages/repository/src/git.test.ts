@@ -7,6 +7,8 @@ import {
   getRemotes,
   getStatus,
   getChangedPaths,
+  getDiffLineStats,
+  parseNumstat,
   isGitRepository,
 } from './git.js';
 import { makeTempRepo, writeFileEnsuringDir, commitAll } from './test-helpers.js';
@@ -70,5 +72,32 @@ describe('git inspection', () => {
     await writeFileEnsuringDir(dir, 'b.txt', 'b');
     const second = await commitAll(dir, 'second');
     expect(await getChangedPaths(dir, first, second)).toEqual(['b.txt']);
+  });
+
+  it('computes added/removed line counts between two revisions', async () => {
+    await writeFileEnsuringDir(dir, 'a.txt', 'one\ntwo\n');
+    const first = await commitAll(dir, 'first');
+    await writeFileEnsuringDir(dir, 'a.txt', 'one\ntwo\nthree\n');
+    await writeFileEnsuringDir(dir, 'b.txt', 'new\n');
+    const second = await commitAll(dir, 'second');
+    expect(await getDiffLineStats(dir, first, second)).toEqual({ added: 2, removed: 0, filesChanged: 2 });
+  });
+});
+
+describe('parseNumstat', () => {
+  it('sums added/removed and counts files', () => {
+    expect(parseNumstat('3\t1\tsrc/a.ts\n0\t5\tsrc/b.ts')).toEqual({ added: 3, removed: 6, filesChanged: 2 });
+  });
+
+  it('treats a binary file (-\\t-) as a changed file with zero line deltas', () => {
+    expect(parseNumstat('-\t-\tassets/logo.png\n2\t0\tREADME.md')).toEqual({
+      added: 2,
+      removed: 0,
+      filesChanged: 2,
+    });
+  });
+
+  it('returns zeros for an empty diff', () => {
+    expect(parseNumstat('')).toEqual({ added: 0, removed: 0, filesChanged: 0 });
   });
 });
