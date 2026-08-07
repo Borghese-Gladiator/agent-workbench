@@ -989,7 +989,7 @@ const challengeHandler: PhaseHandler = {
     // WSFF decay signals (TASK-55): the challenge phase is the one place both the reviewed diff and
     // the findings are in hand. Emit them as a nested run.decay span (auto-parents to the phase's run
     // trace). Best-effort — telemetry is diagnostics-only and must never fail the phase.
-    if (ctx.strategy === 'claude' && runState.worktreePath && runState.candidateSha) {
+    if (ctx.profile.usesRealAgent && runState.worktreePath && runState.candidateSha) {
       try {
         const diffLineStats = await getDiffLineStats(
           runState.worktreePath,
