@@ -27,7 +27,6 @@ describe('evaluatePhaseCompletion — specify', () => {
       nonGoalsArrayPresent: true,
       noUnresolvedAmbiguity: true,
       problemStatementPresent: true,
-      successCriteriaPresentForBehavioralClaims: true,
       contractStatus: 'approved',
     },
   };
@@ -74,15 +73,6 @@ describe('evaluatePhaseCompletion — specify', () => {
     const result = evaluatePhaseCompletion(candidateFor('specify'), ctx);
     expect(result.complete).toBe(false);
     expect(result.missing).toContain('problem statement is empty');
-  });
-
-  it('is not complete when a behavioral claim has no measurable success criterion', () => {
-    const ctx: CompletionContext = {
-      specify: { ...completeContext.specify!, successCriteriaPresentForBehavioralClaims: false },
-    };
-    const result = evaluatePhaseCompletion(candidateFor('specify'), ctx);
-    expect(result.complete).toBe(false);
-    expect(result.missing).toContain('a behavioral claim has no measurable success criterion');
   });
 });
 

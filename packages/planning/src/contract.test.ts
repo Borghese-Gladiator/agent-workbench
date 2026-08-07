@@ -35,25 +35,20 @@ describe('draftContract', () => {
     expect(new Set(ids).size).toBe(2);
   });
 
-  // TASK-54: problem statement + measurable success criteria.
-  it('defaults the problem statement to the objective and success criteria to empty', () => {
+  // TASK-54: problem statement.
+  it('defaults the problem statement to the objective', () => {
     const contract = draftContract({ taskId: 'task-1', objective: 'Add dark mode', claims: [baseClaim] });
     expect(contract.problemStatement).toBe('Add dark mode');
-    expect(contract.successCriteria).toEqual([]);
   });
 
-  it('populates and ids the supplied success criteria', () => {
+  it('uses the supplied problem statement when given', () => {
     const contract = draftContract({
       taskId: 'task-1',
       objective: 'Add dark mode',
       problemStatement: 'no dark mode exists',
-      successCriteria: [{ description: 'toggling switches theme', measurable: true }],
       claims: [baseClaim],
     });
     expect(contract.problemStatement).toBe('no dark mode exists');
-    expect(contract.successCriteria).toHaveLength(1);
-    expect(contract.successCriteria[0]?.id).toBeTruthy();
-    expect(contract.successCriteria[0]?.measurable).toBe(true);
   });
 });
 
@@ -123,37 +118,18 @@ describe('contractCompletionInputs', () => {
   });
 
   // TASK-54: reviewer-alignment before implementation.
-  it('requires a measurable success criterion when a behavioral claim is present', () => {
-    const withBehavioral = draftContract({ taskId: 'task-1', objective: 'Add dark mode', claims: [baseClaim] });
-    expect(
-      contractCompletionInputs(withBehavioral, true).successCriteriaPresentForBehavioralClaims,
-    ).toBe(false);
-
-    const satisfied = draftContract({
-      taskId: 'task-1',
-      objective: 'Add dark mode',
-      successCriteria: [{ description: 'theme toggles', measurable: true }],
-      claims: [baseClaim],
-    });
-    expect(contractCompletionInputs(satisfied, true).successCriteriaPresentForBehavioralClaims).toBe(true);
+  it('reports the problem statement present for a drafted contract', () => {
+    const contract = draftContract({ taskId: 'task-1', objective: 'Add dark mode', claims: [baseClaim] });
+    expect(contractCompletionInputs(contract, true).problemStatementPresent).toBe(true);
   });
 
-  it('does not require success criteria for a non-behavioral contract', () => {
-    const nonBehavioral = draftContract({
+  it('flags an empty problem statement', () => {
+    const contract = draftContract({
       taskId: 'task-1',
-      objective: 'Refactor internals',
-      claims: [
-        {
-          description: 'internals refactored',
-          category: 'correctness',
-          deterministicEvidenceRequired: true,
-          qaEvidenceRequired: false,
-          humanJudgmentRequired: false,
-        },
-      ],
+      objective: 'Add dark mode',
+      problemStatement: '   ',
+      claims: [baseClaim],
     });
-    const inputs = contractCompletionInputs(nonBehavioral, true);
-    expect(inputs.successCriteriaPresentForBehavioralClaims).toBe(true);
-    expect(inputs.problemStatementPresent).toBe(true);
+    expect(contractCompletionInputs(contract, true).problemStatementPresent).toBe(false);
   });
 });

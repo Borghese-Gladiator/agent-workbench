@@ -16,7 +16,6 @@ describe('adversarial-review runner wired to the real MockAgentAdapter', () => {
       version: 1,
       objective: 'add currency conversion to reports',
       problemStatement: 'reports do not support currency conversion',
-      successCriteria: [],
       constraints: [],
       nonGoals: [],
       risk: 'medium',

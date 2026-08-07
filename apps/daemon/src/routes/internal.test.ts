@@ -80,7 +80,6 @@ describe('internal worker→daemon routes', () => {
         version: 1,
         objective: 'obj',
         problemStatement: 'problem',
-        successCriteria: [],
         constraints: [],
         nonGoals: [],
         risk: 'low',

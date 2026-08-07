@@ -8,7 +8,6 @@ import type {
   Finding,
   WorkspaceLease,
   ArtifactRecord,
-  SuccessCriterion,
   ExpectedAssertion,
 } from '@awb/domain';
 import type {
@@ -35,11 +34,6 @@ function parseArray(json: string): string[] {
   return Array.isArray(value) ? value : [];
 }
 
-function parseSuccessCriteria(json: string): SuccessCriterion[] {
-  const value = JSON.parse(json);
-  return Array.isArray(value) ? (value as SuccessCriterion[]) : [];
-}
-
 function parseExpectedAssertions(json: string): ExpectedAssertion[] {
   const value = JSON.parse(json);
   return Array.isArray(value) ? (value as ExpectedAssertion[]) : [];
@@ -54,7 +48,6 @@ export function contractToRow(contract: TaskContract): TaskContractRow {
     version: contract.version,
     objective: contract.objective,
     problemStatement: contract.problemStatement,
-    successCriteriaJson: JSON.stringify(contract.successCriteria),
     constraintsJson: JSON.stringify(contract.constraints),
     nonGoalsJson: JSON.stringify(contract.nonGoals),
     risk: contract.risk,
@@ -92,7 +85,6 @@ export function rowToContract(row: TaskContractRow, claims: AcceptanceClaimRow[]
     version: row.version,
     objective: row.objective,
     problemStatement: row.problemStatement,
-    successCriteria: parseSuccessCriteria(row.successCriteriaJson),
     constraints: parseArray(row.constraintsJson),
     nonGoals: parseArray(row.nonGoalsJson),
     risk: row.risk,

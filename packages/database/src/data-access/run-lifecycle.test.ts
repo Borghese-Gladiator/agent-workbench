@@ -69,7 +69,6 @@ const sampleContract = (): TaskContract => ({
   version: 1,
   objective: 'Add a feature',
   problemStatement: 'The button does not exist yet',
-  successCriteria: [{ id: 'sc-1', description: 'the button works', measurable: true }],
   constraints: ['no new deps', 'keep tests green'],
   nonGoals: ['no refactor'],
   risk: 'medium',

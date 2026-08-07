@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AcceptanceClaim, SuccessCriterion, TaskContract, TaskRisk } from '@awb/domain';
+import type { AcceptanceClaim, TaskContract, TaskRisk } from '@awb/domain';
 
 export interface DraftContractInput {
   taskId: string;
@@ -9,12 +9,6 @@ export interface DraftContractInput {
    * spend. Defaults to the objective when the drafting agent supplies nothing.
    */
   problemStatement?: string;
-  /**
-   * TASK-54: measurable success criteria the human approves at the specify gate. These
-   * become the reference the QA rubric is held to (a behavioral claim's criteria feed the
-   * expected per-claim assertions in TASK-42).
-   */
-  successCriteria?: Omit<SuccessCriterion, 'id'>[];
   constraints?: string[];
   nonGoals?: string[];
   risk?: TaskRisk;
@@ -34,7 +28,6 @@ export function draftContract(input: DraftContractInput, version = 1): TaskContr
     version,
     objective: input.objective,
     problemStatement: input.problemStatement ?? input.objective,
-    successCriteria: (input.successCriteria ?? []).map((c) => ({ ...c, id: randomUUID() })),
     constraints: input.constraints ?? [],
     nonGoals: input.nonGoals ?? [],
     risk: input.risk ?? 'low',
@@ -69,9 +62,6 @@ export function supersedeContract(contract: TaskContract): TaskContract {
  * TaskContract so it can feed `@awb/workflow`'s CompletionContext.specify shape directly.
  */
 export function contractCompletionInputs(contract: TaskContract, noUnresolvedAmbiguity: boolean) {
-  const hasBehavioralClaim = contract.claims.some(
-    (c) => c.category === 'behavior' && c.qaEvidenceRequired,
-  );
   return {
     objectiveNonEmpty: contract.objective.trim().length > 0,
     claimCount: contract.claims.length,
@@ -81,13 +71,10 @@ export function contractCompletionInputs(contract: TaskContract, noUnresolvedAmb
     constraintsArrayPresent: Array.isArray(contract.constraints),
     nonGoalsArrayPresent: Array.isArray(contract.nonGoals),
     noUnresolvedAmbiguity,
-    // TASK-54: reviewer-alignment before implementation. The problem statement is always
-    // required; measurable success criteria are mandatory only when the task carries a
-    // behavioral claim (mirrors everyBehavioralClaimHasQaScenario, so non-behavioral / mock
-    // tasks are unaffected).
+    // TASK-54: reviewer-alignment before implementation — the human aligns on the problem at the
+    // specify gate before any planning spend. What must be true is captured by the acceptance
+    // claims (which QA is already held to); this is the human-facing "why".
     problemStatementPresent: contract.problemStatement.trim().length > 0,
-    successCriteriaPresentForBehavioralClaims:
-      !hasBehavioralClaim || contract.successCriteria.some((c) => c.measurable),
     contractStatus: contract.status,
   };
 }

@@ -28,19 +28,17 @@ describe('draftContractInputFromPrompt (Fix 9: real contract from prompt)', () =
     expect(contract.version).toBe(1);
   });
 
-  // TASK-54: the prompt-derived contract clears the specify gate's problem/success-criteria checks.
-  it('supplies a problem statement and a measurable success criterion for its behavioral claim', () => {
+  // TASK-54: the prompt-derived contract clears the specify gate's problem-statement check.
+  it('supplies a problem statement', () => {
     const contract = draftContract(draftContractInputFromPrompt('task-1', prompt));
-    const inputs = contractCompletionInputs(contract, true);
-    expect(inputs.problemStatementPresent).toBe(true);
-    expect(inputs.successCriteriaPresentForBehavioralClaims).toBe(true);
+    expect(contractCompletionInputs(contract, true).problemStatementPresent).toBe(true);
   });
 
-  it('renders the problem statement and success criteria into the gate summary', () => {
+  it('renders the problem statement and acceptance claims into the gate summary', () => {
     const contract = draftContract(draftContractInputFromPrompt('task-1', prompt));
     const summary = formatContractGateSummary(contract);
     expect(summary).toContain('Problem:');
-    expect(summary).toContain('Success criteria:');
-    expect(summary).toContain(contract.successCriteria[0]!.description);
+    expect(summary).toContain('Acceptance claims:');
+    expect(summary).toContain(contract.claims[0]!.description);
   });
 });
