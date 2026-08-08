@@ -3,6 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createDatabase, type WorkbenchDatabase } from '@awb/database';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { repositoryFacts } from '@awb/database';
+import { eq } from 'drizzle-orm';
+import type { RepositoryFact } from '@awb/domain';
 import {
   registerRepository,
   approveRepository,
@@ -10,6 +13,7 @@ import {
   listRepositories,
   refreshRepositorySnapshot,
   getLatestSnapshot,
+  persistDiscoveryFacts,
 } from './persist.js';
 import { makeTempRepo, writeFileEnsuringDir, commitAll } from './test-helpers.js';
 
@@ -78,5 +82,37 @@ describe('repository persistence', () => {
 
     const latest = await getLatestSnapshot(database.db, repo.id);
     expect(latest?.headSha).toBe(snapshot.headSha);
+  });
+
+  it('persistDiscoveryFacts replaces prior discovery facts but preserves compiled concepts', async () => {
+    await writeFileEnsuringDir(repoDir, 'package.json', JSON.stringify({ name: 'demo' }));
+    await commitAll(repoDir, 'init');
+    const repo = await registerRepository(database.db, { canonicalPath: repoDir });
+
+    const mkFact = (over: Partial<RepositoryFact> & Pick<RepositoryFact, 'id' | 'kind'>): RepositoryFact => ({
+      repositoryId: repo.id,
+      statement: 's',
+      confidence: 'inferred',
+      observedAtSha: 'sha',
+      sourcePaths: ['README.md'],
+      sourceHashes: ['h'],
+      invalidatedByPaths: [],
+      ...over,
+    });
+
+    // Seed: one discovery fact + one compiled concept.
+    await persistDiscoveryFacts(database.db, repo.id, [
+      mkFact({ id: 'd1', kind: 'architecture', statement: 'old discovery fact' }),
+      mkFact({ id: 'c1', kind: 'concept', statement: 'compiled concept' }),
+    ]);
+
+    // Re-run discovery with a NEW fact set (no d1). The concept must survive; d1 must be gone.
+    await persistDiscoveryFacts(database.db, repo.id, [
+      mkFact({ id: 'd2', kind: 'architecture', statement: 'new discovery fact' }),
+    ]);
+
+    const rows = await database.db.select().from(repositoryFacts).where(eq(repositoryFacts.repositoryId, repo.id));
+    const ids = rows.map((r) => r.id).sort();
+    expect(ids).toEqual(['c1', 'd2']);
   });
 });

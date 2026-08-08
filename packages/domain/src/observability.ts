@@ -63,6 +63,7 @@ export const AgentSessionRecordSchema = z.object({
       inputTokens: z.number().int().nonnegative(),
       outputTokens: z.number().int().nonnegative(),
       cachedInputTokens: z.number().int().nonnegative().optional(),
+      cacheCreationInputTokens: z.number().int().nonnegative().optional(),
       costUsd: z.number().nonnegative().optional(),
       startedAt: z.string(),
       endedAt: z.string().optional(),
@@ -90,6 +91,7 @@ export const TokenBreakdownSchema = z.object({
     inputTokens: z.number().int().nonnegative(),
     outputTokens: z.number().int().nonnegative(),
     cachedInputTokens: z.number().int().nonnegative(),
+    cacheCreationInputTokens: z.number().int().nonnegative(),
     costUsd: z.number().nonnegative(),
   }),
   byModel: z.record(
@@ -97,6 +99,8 @@ export const TokenBreakdownSchema = z.object({
     z.object({
       inputTokens: z.number().int().nonnegative(),
       outputTokens: z.number().int().nonnegative(),
+      cachedInputTokens: z.number().int().nonnegative(),
+      cacheCreationInputTokens: z.number().int().nonnegative(),
       costUsd: z.number().nonnegative(),
     }),
   ),

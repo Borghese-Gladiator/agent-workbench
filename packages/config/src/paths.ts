@@ -55,6 +55,11 @@ export function repositoryMapsDir(layout: DataDirLayout, repositoryId: string): 
   return join(layout.repositoriesDir, repositoryId, 'maps');
 }
 
+/** Per-repo project-memory file projection (TASK-50): a human/skill-readable md mirror of repository_facts. */
+export function repositoryMemoryDir(layout: DataDirLayout, repositoryId: string): string {
+  return join(layout.repositoriesDir, repositoryId, 'memory');
+}
+
 export function worktreeDir(layout: DataDirLayout, repositoryId: string, taskId: string): string {
   return join(layout.worktreesDir, repositoryId, taskId);
 }

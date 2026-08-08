@@ -203,12 +203,63 @@ export async function refreshRepositorySnapshot(
     });
   }
 
+  // Persist the discovery facts (previously computed on `snapshot.facts` then discarded — the missing
+  // memory write). Refresh semantics: replace this repo's prior DISCOVERY facts (re-derived every
+  // discovery), but PRESERVE compiled `concept` facts (TASK-50) so accumulated synthesis survives a
+  // re-scan. Facts remain traceable via their sourcePaths/sourceHashes provenance.
+  await persistDiscoveryFacts(db, repository.id, snapshot.facts);
+
   await db
     .update(repositories)
     .set({ updatedAt: new Date().toISOString() })
     .where(eq(repositories.id, repository.id));
 
   return snapshot;
+}
+
+/**
+ * Replaces a repository's discovery-derived facts with a fresh set, preserving compiled `concept`
+ * facts. Writes the `repository_fact_sources` provenance join alongside each fact. Extracted so the
+ * refresh path and tests share one implementation.
+ */
+export async function persistDiscoveryFacts(
+  db: DrizzleDb,
+  repositoryId: string,
+  facts: RepositorySnapshot['facts'],
+): Promise<void> {
+  const stale = await db
+    .select({ id: repositoryFacts.id, kind: repositoryFacts.kind })
+    .from(repositoryFacts)
+    .where(eq(repositoryFacts.repositoryId, repositoryId));
+  const staleIds = stale.filter((r) => r.kind !== 'concept').map((r) => r.id);
+  if (staleIds.length > 0) {
+    await db.delete(repositoryFactSources).where(inArray(repositoryFactSources.factId, staleIds));
+    await db.delete(repositoryFacts).where(inArray(repositoryFacts.id, staleIds));
+  }
+
+  for (const fact of facts) {
+    await db.insert(repositoryFacts).values({
+      id: fact.id,
+      repositoryId,
+      kind: fact.kind,
+      statement: fact.statement,
+      confidence: fact.confidence,
+      observedAtSha: fact.observedAtSha,
+      sourcePathsJson: JSON.stringify(fact.sourcePaths),
+      sourceHashesJson: JSON.stringify(fact.sourceHashes),
+      invalidatedByPathsJson: JSON.stringify(fact.invalidatedByPaths),
+      supersededBy: fact.supersededBy ?? null,
+    });
+    if (fact.sourcePaths.length > 0) {
+      await db.insert(repositoryFactSources).values(
+        fact.sourcePaths.map((path, index) => ({
+          factId: fact.id,
+          path,
+          sha256: fact.sourceHashes[index] ?? null,
+        })),
+      );
+    }
+  }
 }
 
 export async function getLatestSnapshot(

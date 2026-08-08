@@ -95,6 +95,9 @@ export class ObservabilityAccumulator {
               ...(input.usage.cachedInputTokens !== undefined
                 ? { cachedInputTokens: input.usage.cachedInputTokens }
                 : {}),
+              ...(input.usage.cacheCreationInputTokens !== undefined
+                ? { cacheCreationInputTokens: input.usage.cacheCreationInputTokens }
+                : {}),
               ...(input.usage.costUsd !== undefined ? { costUsd: input.usage.costUsd } : {}),
               startedAt: now,
               endedAt: now,

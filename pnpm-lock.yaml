@@ -32,6 +32,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@awb/agent-gateway':
+        specifier: workspace:*
+        version: link:../../packages/agent-gateway
       '@awb/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -44,6 +47,9 @@ importers:
       '@awb/repository':
         specifier: workspace:*
         version: link:../../packages/repository
+      '@awb/repository-memory':
+        specifier: workspace:*
+        version: link:../../packages/repository-memory
       commander:
         specifier: ^12.1.0
         version: 12.1.0
@@ -672,6 +678,9 @@ importers:
       '@awb/repository':
         specifier: workspace:*
         version: link:../../packages/repository
+      '@awb/repository-memory':
+        specifier: workspace:*
+        version: link:../../packages/repository-memory
       '@awb/review':
         specifier: workspace:*
         version: link:../../packages/review

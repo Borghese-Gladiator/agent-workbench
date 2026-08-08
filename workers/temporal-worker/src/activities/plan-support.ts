@@ -16,7 +16,14 @@ interface PlannerPlanJson {
 }
 
 /** The instruction handed to the planner session, telling it exactly what JSON to emit. */
-export function plannerInstruction(contract: TaskContract): string {
+export function plannerInstruction(contract: TaskContract, hasMemory = false): string {
+  // When project memory was injected into the context payload (read side of TASK-50), point the
+  // planner at it so accumulated pitfalls/conventions/commands actually inform the plan.
+  const memoryLine = hasMemory
+    ? 'The context includes a "memory" array of facts prior runs learned about this repository ' +
+      '(pitfalls, invariants, conventions, build/test commands). Use it: avoid known pitfalls, respect ' +
+      'invariants/conventions, and prefer the recorded commands over guessing.'
+    : '';
   const behavioralClaimIds = contract.claims
     .filter((c) => c.category === 'behavior' && c.qaEvidenceRequired)
     .map((c) => c.id);
@@ -42,6 +49,7 @@ export function plannerInstruction(contract: TaskContract): string {
     'independent units (e.g. separate packages/files that can be built and checked on their own).',
     'Do NOT create separate "investigate/discover" or "verify/validate" slices: exploring the repo',
     'and running the checks are part of implementing the change, so put them in the same slice.',
+    memoryLine,
     qaLine,
   ]
     .filter(Boolean)

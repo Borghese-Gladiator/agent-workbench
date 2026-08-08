@@ -20,6 +20,7 @@ import {
 import { materializeWorktree } from './worktree-support.js';
 import { runRealBuilderAttempt } from './builder-support.js';
 import { plannerInstruction, parsePlannerOutput } from './plan-support.js';
+import { loadProjectMemoryForContext } from './memory-support.js';
 import {
   resolveVerificationCommands,
   resolveReviewDiff,
@@ -305,6 +306,14 @@ const planHandler: PhaseHandler = {
 
     const realPlanner = ctx.profile.usesRealAgent;
 
+    // Read side of project memory: inject what prior runs learned about this repo into the planner's
+    // context so the next implementation is better-informed (pitfalls, invariants, build/test commands).
+    // Real path only — the mock runtime has no meaningful accumulated memory. Setting the `memory` key
+    // is also what lights up the observability `memoryTokens` bucket. Bounded so it can't bloat context.
+    const projectMemory = realPlanner
+      ? await loadProjectMemoryForContext(state.repositoryId).catch(() => [])
+      : [];
+
     const loopResult = await runPlannerCriticLoop({
       taskId: state.taskId,
       cwd: planCwd,
@@ -314,7 +323,11 @@ const planHandler: PhaseHandler = {
           role: 'planner',
           taskId: state.taskId,
           cwd: planCwd,
-          contextPayload: { contract, priorFindings },
+          contextPayload: {
+            contract,
+            priorFindings,
+            ...(projectMemory.length > 0 ? { memory: projectMemory } : {}),
+          },
           allowedTools: allowedToolsForBrokerRole('planner', ctx.profile),
           disallowedTools: deniedToolsForBrokerRole('planner', ctx.profile),
         });
@@ -327,7 +340,7 @@ const planHandler: PhaseHandler = {
           durable: ctx.profile.usesDurableRunState,
         });
         const plannerStart = Date.now();
-        const plannerInstr = realPlanner ? plannerInstruction(contract) : 'Produce an implementation plan for the approved contract';
+        const plannerInstr = realPlanner ? plannerInstruction(contract, projectMemory.length > 0) : 'Produce an implementation plan for the approved contract';
         const execution = await adapter.execute(
           session,
           { instruction: plannerInstr },
@@ -346,7 +359,10 @@ const planHandler: PhaseHandler = {
           runtime: ctx.strategy,
           usage: execution.usage,
           runtimeMs: plannerMs,
-          contextComposition: estimateContextComposition({ contract, priorFindings }, plannerInstr),
+          contextComposition: estimateContextComposition(
+            { contract, priorFindings, ...(projectMemory.length > 0 ? { memory: projectMemory } : {}) },
+            plannerInstr,
+          ),
         });
         await flush();
         // A behavioral claim requiring QA evidence must be covered by a QA scenario, or the plan gate

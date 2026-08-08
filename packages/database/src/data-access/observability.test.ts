@@ -72,6 +72,7 @@ const payload = (over: Partial<PhaseObservability> = {}): PhaseObservability => 
           inputTokens: 500,
           outputTokens: 120,
           cachedInputTokens: 50,
+          cacheCreationInputTokens: 30,
           costUsd: 0.01,
           startedAt: new Date().toISOString(),
         },
@@ -115,8 +116,20 @@ describe('phase observability persistence (§27)', () => {
     expect(ra[0]?.modelWaitMs).toBe(100);
 
     const breakdown = getTokenBreakdown(database.db, TASK_ID);
-    expect(breakdown.totals).toEqual({ inputTokens: 500, outputTokens: 120, cachedInputTokens: 50, costUsd: 0.01 });
-    expect(breakdown.byModel['claude-opus']).toEqual({ inputTokens: 500, outputTokens: 120, costUsd: 0.01 });
+    expect(breakdown.totals).toEqual({
+      inputTokens: 500,
+      outputTokens: 120,
+      cachedInputTokens: 50,
+      cacheCreationInputTokens: 30,
+      costUsd: 0.01,
+    });
+    expect(breakdown.byModel['claude-opus']).toEqual({
+      inputTokens: 500,
+      outputTokens: 120,
+      cachedInputTokens: 50,
+      cacheCreationInputTokens: 30,
+      costUsd: 0.01,
+    });
   });
 
   it('is idempotent per phase attempt (no duplicate attribution/session rows on re-run)', () => {

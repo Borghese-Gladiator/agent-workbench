@@ -120,4 +120,10 @@ describe('parsePlannerOutput', () => {
     expect(plannerInstruction(behavioralContract)).toContain('qaScenarioIds');
     expect(plannerInstruction(behavioralContract)).toContain('b1');
   });
+
+  it('plannerInstruction points at injected project memory only when present (TASK-50 read side)', () => {
+    expect(plannerInstruction(contract, false)).not.toMatch(/memory/i);
+    expect(plannerInstruction(contract, true)).toMatch(/"memory" array/);
+    expect(plannerInstruction(contract, true)).toMatch(/pitfalls|invariants/i);
+  });
 });

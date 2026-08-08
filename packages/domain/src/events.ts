@@ -54,12 +54,23 @@ export const SemanticEventSchema = z.object({
 });
 export type SemanticEvent = z.infer<typeof SemanticEventSchema>;
 
+// The three input-token counts are the halves of provider prompt caching and are billed at very
+// different rates; keep them distinct rather than summing. Cache fields are OPTIONAL because only
+// runtimes that report caching populate them: the Claude adapter fills all five, the mock adapter
+// supplies whatever a test script sets (usually nothing), and a future runtime that reports no cache
+// data simply leaves them undefined — consumers coalesce with `?? 0`, so a non-reporting runtime
+// contributes zero rather than breaking. There is no third runtime in-tree today.
 export const ModelUsageSchema = z.object({
   provider: z.string(),
   model: z.string(),
+  /** Fresh (uncached) input tokens — billed at the base input rate. */
   inputTokens: z.number().int().nonnegative(),
+  /** Output (generated) tokens — the most expensive per-token rate. */
   outputTokens: z.number().int().nonnegative(),
+  /** Cache READ: a previously-cached prompt prefix re-sent this turn and served from cache (~0.1× input). */
   cachedInputTokens: z.number().int().nonnegative().optional(),
+  /** Cache WRITE: tokens written INTO the cache this turn, the first time a prefix is seen (~1.25× input). */
+  cacheCreationInputTokens: z.number().int().nonnegative().optional(),
   costUsd: z.number().nonnegative().optional(),
 });
 export type ModelUsage = z.infer<typeof ModelUsageSchema>;

@@ -13,10 +13,12 @@
     "cli": "tsx src/index.ts"
   },
   "dependencies": {
+    "@awb/agent-gateway": "workspace:*",
     "@awb/config": "workspace:*",
     "@awb/database": "workspace:*",
     "@awb/domain": "workspace:*",
     "@awb/repository": "workspace:*",
+    "@awb/repository-memory": "workspace:*",
     "commander": "^12.1.0"
   },
   "devDependencies": {
