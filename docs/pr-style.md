@@ -11,7 +11,8 @@ Source: distilled from the `/pr-draft` skill + the live PRs that surfaced TASK-3
 
 A good title is a **short sentence describing the change**, not the whole prompt.
 
-- **No `[AWB]` / bot prefix.** GitHub already shows the author; the tag is noise.
+- **No `[AWB]` / bot prefix in the title.** GitHub already shows the author; a tag in the
+  title is noise. (This is title-scoped — message *bodies* carry a signature, see Body below.)
 - **Drop the scope when it's just the repo name.** GitHub shows the repo, so
   `Wip-Browser-Games: add a note` is redundant — use the bare action, `Add a note`. Keep a scope
   only when it names a *sub-area* (`Portal header: show the game count`).
@@ -43,10 +44,15 @@ summary + touched files), **Test plan** (evidence rows).
 - **Evidence, not a matrix comment.** The Test plan folds the evidence in as readable rows
   (`✅ **unit-test** — …`); there is no separate "evidence matrix" comment.
 - **Keep the footer honest.** The `candidate <sha>` footer is provenance, not decoration.
+- **Every posted message opens with the signature.** `renderPrBody` (and every other message the
+  workbench posts — the QA-media comment, the QA prerelease body) leads with a bold
+  `**Claude Code says**` line, via `withClaudeCodeSignature` in `pr-content.ts`. This is a message
+  body attribution, deliberately distinct from the no-tag-in-the-title rule above; titles are never
+  signed. An empty body stays empty (no bare, contentless signature).
 
 ## QA media
 
-Rendered by `renderQaMediaSection` as one consolidated comment.
+Rendered by `renderQaMediaSection` as one consolidated comment — also signature-led (see Body).
 
 - **Recording embeds as an inline GIF.** GitHub renders an animated GIF via image markdown but does
   **not** play a committed `.webm` on its blob page. Embed
