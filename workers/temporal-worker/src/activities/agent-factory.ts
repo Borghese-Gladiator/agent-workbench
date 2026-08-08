@@ -29,14 +29,28 @@ export function resolveRuntimeProfile(runtime: AgentRuntime = resolveAgentRuntim
 }
 
 /**
+ * The runtime config assembled from the environment. Per-project config isn't persisted yet (runtime
+ * is global via `AWB_AGENT_RUNTIME`), so the model/binary come from env vars: `AWB_AGENT_MODEL`
+ * (a runtime-native model id, e.g. `ollama/qwen3-coder:30b` for opencode) and `AWB_AGENT_BINARY`.
+ * Unset → empty config → the profile/adapter default. This is the seam per-project config slots into.
+ */
+export function resolveRuntimeConfig(): RuntimeConfig {
+  const config: RuntimeConfig = {};
+  const model = process.env.AWB_AGENT_MODEL;
+  const binary = process.env.AWB_AGENT_BINARY;
+  if (model) config.model = model;
+  if (binary) config.binary = binary;
+  return config;
+}
+
+/**
  * Build the adapter for the selected runtime. `phase` lets a profile pick a phase-appropriate model
  * (Pi routes the heavy `challenge` review phase to a fast local model); omit it for the runtime
- * default. `config` is empty today (runtime is global via `AWB_AGENT_RUNTIME`) but is the seam for
- * per-project model/binary later.
+ * default. `config` defaults to {@link resolveRuntimeConfig} (env-sourced model/binary).
  */
 export function createAgentAdapter(
   runtime: AgentRuntime = resolveAgentRuntime(),
-  config: RuntimeConfig = {},
+  config: RuntimeConfig = resolveRuntimeConfig(),
   phase?: TaskPhase,
 ): CodingAgentAdapter {
   return runtimeProfile(runtime).createAdapter(config, phase);

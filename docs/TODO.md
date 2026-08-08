@@ -64,6 +64,60 @@ conformance tests. *Manual:* a real (draft) PR produced under at least one
 non-claude runtime, as previously proven for Pi on `wip-browser-games`.
 
 
+## Group C — Quality gates
+
+### [ ] TASK-63: `exercise` QA gate is inconsistent — passed an EMPTY change (Pi) yet blocked a real one (OpenCode), same model
+
+**What's wrong.** Driving the *identical* trivial task ("add a one-line note to
+README.md stating how many games are available") on `wip-browser-games` under two
+runtimes, both on the same local model `ollama/qwen3-coder:30b`, produced opposite
+QA outcomes that were both wrong:
+
+- **Pi run (`878058b7`, 2026-08-07):** the builder committed **only
+  `package-lock.json` — no README change at all** (`git diff base..HEAD -- README.md`
+  empty). `exercise` nonetheless **cleared on attempt 1**, the run reached `release`,
+  and opened draft PR `browser-games__ai#13`. QA green on a **no-op**.
+- **OpenCode run (`082de7e9`, 2026-08-08):** the builder made a **real (off-target)
+  README edit** and `exercise` **looped `implement→verify→exercise` 3× → parked at
+  `repeated-failure-no-progress`**, never reaching a PR.
+
+Same gate passed the empty candidate and blocked the non-empty one. Both runs
+produced `terminal-recording | passed` evidence, so the divergence is in
+`evaluateExercise`'s other conditions and/or the plan/contract each planner emitted
+— NOT in the QA recording. This is TASK-42's rubber-stamp thesis reproduced: the gate
+doesn't verify the behavioral claim's *content* (Pi's empty change passed), and what
+does trip it isn't tied to artifact correctness (OpenCode's real change blocked). It
+also invalidates the earlier "Pi live-proven end-to-end" claim — PR #13 was empty.
+
+**Two candidate contributors (confirm, don't assume).** (1) Rubber-stamp:
+`evaluateExercise` clears without asserting the contract's behavioral claim is
+satisfied by the candidate diff, so an empty/no-op candidate passes. (2) Gate skew:
+TASK-42's QA-strength hardening landed on `main` *between* the Pi and OpenCode runs,
+so the two may have been judged by different gate code. Either way an empty candidate
+should never pass.
+
+**What to do.** Instrument `evaluateExercise` to log the exact `missing[]` per attempt,
+re-run one OpenCode task, capture the failing condition. Then make the gate reject a
+candidate whose committed diff doesn't touch the artifact the behavioral claim is
+about, and confirm the CLI-QA path (not just browser QA) enforces the TASK-42
+strong-assertion requirement. Runtime-independent — a workbench QA-gate bug, not an
+adapter defect; the OpenCode/Pi adapters have full feature parity (both drive the same
+`runBuilderSession` git-candidate path).
+
+**Where.** `packages/workflow/src/evaluate-completion.ts` (`evaluateExercise` + temp
+`missing[]` logging), `packages/workflow/src/completion-context.ts` (`exercise` fields),
+`packages/qa/` (CLI-QA assertion strength), plan→contract claim wiring. Relates to
+TASK-42 and the `qa-static-checks-miss-runtime-bugs` / `qa-cold-reentry-nonconvergence`
+learnings.
+
+**How we'll know it's done.** *Unit:* an `evaluateExercise` test where the committed
+diff does NOT touch the claim's target artifact leaves `missing` non-empty (a no-op
+candidate like Pi's fails). *Manual:* re-drive the README task under OpenCode and
+confirm it either produces a real note that passes QA, or is blocked with a *correct*
+reason (missing note) — never the current split where empty passes and real-but-wrong
+loops forever.
+
+
 ## Group G — Legibility, DX & dogfooding
 
 Lower-risk, mostly-docs/skills work + the honest self-dogfood.
@@ -178,3 +232,58 @@ definitions, `apps/daemon/src/temporal-client.ts` + `workers/temporal-worker/src
 simultaneously without collision (distinct ports, queues, Temporal, data dirs), each
 drives a task end to end against its own code, and a foreign process on a default
 port makes `up` fail with a clear message instead of a false "ready".
+
+### [x] TASK-64: Web UI renders unstyled — layout/semantic CSS classes are used but never defined
+
+**What's wrong.** `apps/web` renders with no layout — the nav collapses to a run of
+concatenated text (`RepositoriesTasksApprovalsEvidenceSettings`), repository rows
+stack as raw text, no shell/sidebar. The page is *not* entirely style-less: the
+`:root`/`.dark` design tokens from `styles.css` apply (dark background, light
+foreground), which is what makes this deceptive. The cause is that the app's
+structural classes are **referenced in JSX but defined nowhere**:
+
+- `App.tsx` uses `className="app-shell"`, `app-nav`, `app-main`
+  (`apps/web/src/App.tsx:13,14,23`) — grep for a definition returns **zero** matches;
+  `styles.css` is 120 lines of Tailwind imports + theme tokens only, with no
+  component/layout rules.
+- The pages/components mix Tailwind utilities (`flex`, `text-sm`,
+  `text-muted-foreground`, `gap-2`, `rounded-md`, …) with a second set of **orphaned
+  semantic classes** that are likewise undefined: `error`, `note`, `actions`,
+  `repository-path`, `task-facts`, `align-top`, etc. The utilities style themselves;
+  the semantic classes render as nothing.
+
+This reads as a **half-finished migration**: styling was moved to Tailwind utilities
+but a stylesheet's worth of hand-authored layout/semantic classes (an old
+`App.css`/`index.css` or component CSS) was removed or never committed, while the JSX
+still references those class names. Restarting vite, clearing caches, reinstalling
+`@tailwindcss/vite`, and adding `@source` do **not** fix it — those address Tailwind
+utility generation, which is a different subsystem from the missing named classes.
+
+**Open thread to resolve first (don't skip).** There is an unexplained
+served-vs-applied contradiction: the dev server *serves* a `styles.css` module that
+contains utility rules (`.flex`, `.gap-2` present when fetched directly and in the
+injected `<style>` per a headless browser), yet the real Chrome tab renders as if no
+utilities apply either. Confirm in the *actual* browser (devtools → Elements →
+Computed on `.app-nav`, and Sources for the `styles.css` module) whether utilities are
+truly absent there too, so the fix targets the real gap and not a headless-vs-real
+discrepancy. Do not declare this fixed from a scripted `document.styleSheets` check —
+that undercounts modern `@layer`/`@property` CSS and gave false readings here.
+
+**What to do.** (1) Decide the intended styling system for the shell and the orphaned
+semantic classes — either author the missing CSS (a real `app-shell`/`app-nav`/
+`app-main` layout + the semantic classes) or migrate those JSX references to Tailwind
+utilities/components so there are no used-but-undefined class names. (2) Add a guard
+so this can't silently regress: a lint/test that fails when a `className` token is
+neither a known Tailwind utility nor a defined project class. (3) Resolve the
+served-vs-applied thread above before closing.
+
+**Where.** `apps/web/src/App.tsx` (`app-shell`/`app-nav`/`app-main`),
+`apps/web/src/styles.css` (missing layout + semantic rules), `apps/web/src/pages/**`
+and `apps/web/src/components/**` (orphaned `error`/`note`/`actions`/`repository-path`/
+`task-facts`/`align-top`), `apps/web/vite.config.ts` (Tailwind plugin).
+
+**How we'll know it's done.** In a real browser hard-load of `localhost:5317`, the app
+has its shell/nav layout (nav is a laid-out bar, not concatenated text) and the
+repository list renders as styled rows. *Test:* a check that every `className` token
+used in `src/**` resolves to either a Tailwind utility or a defined project class
+fails on an undefined name and passes once the shell classes exist.

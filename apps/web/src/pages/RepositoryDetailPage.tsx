@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Panel, PanelBody, PanelHeader, StatTile } from '@/components/ui/panel';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { api, type Repository, type RepositorySnapshotSummary } from '../api/client.js';
 
 export function RepositoryDetailPage() {
@@ -24,11 +27,11 @@ export function RepositoryDetailPage() {
     void refresh();
   }, [id]);
 
-  async function handleRefresh(): Promise<void> {
+  async function withBusy(fn: () => Promise<unknown>): Promise<void> {
     if (!id) return;
     setBusy(true);
     try {
-      await api.refreshRepository(id);
+      await fn();
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -37,43 +40,77 @@ export function RepositoryDetailPage() {
     }
   }
 
-  async function handleApprove(): Promise<void> {
-    if (!id) return;
-    setBusy(true);
-    try {
-      await api.approveRepository(id);
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
+  if (error && !repository) {
+    return (
+      <div>
+        <PageHeader title="Repository" back={{ to: '/', label: 'Repositories' }} />
+        <div className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {error}
+        </div>
+      </div>
+    );
   }
-
-  if (error) return <p className="error">{error}</p>;
-  if (!repository) return <p>Loading…</p>;
+  if (!repository) {
+    return (
+      <div>
+        <PageHeader title="Repository" back={{ to: '/', label: 'Repositories' }} />
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      </div>
+    );
+  }
 
   return (
     <div>
-      <h1>{repository.name}</h1>
-      <p>{repository.canonicalPath}</p>
-      <p>Default branch: {repository.defaultBranch}</p>
-      <p>Status: {repository.trusted ? 'trusted' : 'untrusted'}</p>
-      {snapshot && (
-        <p>
-          Last indexed at <code>{snapshot.headSha.slice(0, 12)}</code>
-        </p>
+      <PageHeader
+        title={repository.name}
+        back={{ to: '/', label: 'Repositories' }}
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => void withBusy(() => api.refreshRepository(id!))}
+            >
+              Refresh
+            </Button>
+            {!repository.trusted && (
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => void withBusy(() => api.approveRepository(id!))}
+              >
+                Approve
+              </Button>
+            )}
+          </>
+        }
+      />
+
+      {error && (
+        <div className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {error}
+        </div>
       )}
-      <div className="actions">
-        <button type="button" disabled={busy} onClick={() => void handleRefresh()}>
-          Refresh
-        </button>
-        {!repository.trusted && (
-          <button type="button" disabled={busy} onClick={() => void handleApprove()}>
-            Approve
-          </button>
-        )}
+
+      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <StatTile label="Default branch" value={repository.defaultBranch} />
+        <StatTile
+          label="Trust"
+          value={repository.trusted ? 'trusted' : 'untrusted'}
+          tone={repository.trusted ? 'ok' : 'warn'}
+        />
+        <StatTile label="Indexed head" value={snapshot ? snapshot.headSha.slice(0, 12) : '—'} />
       </div>
+
+      <Panel>
+        <PanelHeader title="Path" />
+        <PanelBody>
+          <code className="font-mono text-sm text-muted-foreground">
+            {repository.canonicalPath}
+          </code>
+        </PanelBody>
+      </Panel>
     </div>
   );
 }
