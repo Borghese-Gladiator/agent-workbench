@@ -1,4 +1,8 @@
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Panel, PanelBody, PanelHeader } from '@/components/ui/panel';
+import { PageHeader } from '@/components/layout/PageHeader';
 import { tasksApi, type TaskWorkflowState } from '../api/tasks.js';
 import { GatePanel } from './GatePanel.js';
 
@@ -38,25 +42,43 @@ export function ApprovalsPage() {
 
   return (
     <div>
-      <h1>Human Approvals</h1>
-      <p className="note">
+      <PageHeader title="Approvals" />
+
+      <div className="mb-5 rounded-md border bg-card px-3 py-2 text-sm text-muted-foreground">
         There is no daemon route yet that lists every pending gate across all tasks, so this is not
-        a global aggregated view. Enter a specific repository id and task id to view and act on that
+        a global aggregated view. Enter a repository id and task id to view and act on that
         task&apos;s pending gate.
-      </p>
-      <div className="form-row">
-        <input
-          type="text"
-          placeholder="repository id"
-          value={repositoryId}
-          onChange={(e) => setRepositoryId(e.target.value)}
-        />
-        <input type="text" placeholder="task id" value={taskId} onChange={(e) => setTaskId(e.target.value)} />
-        <button type="button" disabled={busy} onClick={() => void handleLookup()}>
-          Look up
-        </button>
       </div>
-      {error && <p className="error">{error}</p>}
+
+      <Panel>
+        <PanelHeader title="Look up task" />
+        <PanelBody className="flex flex-wrap items-center gap-2">
+          <Input
+            placeholder="repository id"
+            aria-label="Repository id"
+            value={repositoryId}
+            onChange={(e) => setRepositoryId(e.target.value)}
+            className="w-64"
+          />
+          <Input
+            placeholder="task id"
+            aria-label="Task id"
+            value={taskId}
+            onChange={(e) => setTaskId(e.target.value)}
+            className="w-64"
+          />
+          <Button disabled={busy} onClick={() => void handleLookup()}>
+            Look up
+          </Button>
+        </PanelBody>
+      </Panel>
+
+      {error && (
+        <div className="mt-4 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {error}
+        </div>
+      )}
+
       {state &&
         (state.pendingHumanGate ? (
           <GatePanel
@@ -67,21 +89,31 @@ export function ApprovalsPage() {
             busy={busy}
             onApproveContract={() =>
               void withBusy(() =>
-                tasksApi.approveContract(repositoryId.trim(), taskId.trim(), state.attemptNumber || 1),
+                tasksApi.approveContract(
+                  repositoryId.trim(),
+                  taskId.trim(),
+                  state.attemptNumber || 1,
+                ),
               )
             }
             onRejectContract={() =>
-              void withBusy(() => tasksApi.rejectContract(repositoryId.trim(), taskId.trim(), 'rejected from UI'))
+              void withBusy(() =>
+                tasksApi.rejectContract(repositoryId.trim(), taskId.trim(), 'rejected from UI'),
+              )
             }
             onApprovePlan={() =>
-              void withBusy(() => tasksApi.approvePlan(repositoryId.trim(), taskId.trim(), state.attemptNumber || 1))
+              void withBusy(() =>
+                tasksApi.approvePlan(repositoryId.trim(), taskId.trim(), state.attemptNumber || 1),
+              )
             }
             onRejectPlan={() =>
-              void withBusy(() => tasksApi.rejectPlan(repositoryId.trim(), taskId.trim(), 'rejected from UI'))
+              void withBusy(() =>
+                tasksApi.rejectPlan(repositoryId.trim(), taskId.trim(), 'rejected from UI'),
+              )
             }
           />
         ) : (
-          <p>No pending human gate for this task.</p>
+          <p className="mt-4 text-sm text-muted-foreground">No pending human gate for this task.</p>
         ))}
     </div>
   );

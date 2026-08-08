@@ -233,7 +233,7 @@ simultaneously without collision (distinct ports, queues, Temporal, data dirs), 
 drives a task end to end against its own code, and a foreign process on a default
 port makes `up` fail with a clear message instead of a false "ready".
 
-### [ ] TASK-64: Web UI renders unstyled — layout/semantic CSS classes are used but never defined
+### [x] TASK-64: Web UI renders unstyled — layout/semantic CSS classes are used but never defined
 
 **What's wrong.** `apps/web` renders with no layout — the nav collapses to a run of
 concatenated text (`RepositoriesTasksApprovalsEvidenceSettings`), repository rows
