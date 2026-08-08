@@ -85,6 +85,10 @@ export function TaskDetailPage() {
         <dd>{state.condition}</dd>
         <dt>Delivery state</dt>
         <dd>{state.deliveryState}</dd>
+        <dt>Size</dt>
+        <dd>{state.size ?? '—'}</dd>
+        <dt>Planned phases</dt>
+        <dd>{state.phaseSet && state.phaseSet.length > 0 ? state.phaseSet.join(' → ') : '—'}</dd>
         <dt>Attempt number</dt>
         <dd>{state.attemptNumber}</dd>
         <dt>Token usage (input / output)</dt>
@@ -159,12 +163,13 @@ export function TaskDetailPage() {
           taskId={taskId}
           phase={state.phase}
           gate={state.pendingHumanGate}
+          size={state.size}
           busy={busy}
           // TaskWorkflowState does not expose contractVersion/planVersion directly (only
           // CompletionCandidate does, which isn't part of this response) — attemptNumber is used
           // as the best available stand-in, defaulting to 1 for the first attempt.
-          onApproveContract={() =>
-            void withBusy(() => tasksApi.approveContract(repositoryId, taskId, state.attemptNumber || 1))
+          onApproveContract={(sizeOverride) =>
+            void withBusy(() => tasksApi.approveContract(repositoryId, taskId, state.attemptNumber || 1, sizeOverride))
           }
           onRejectContract={() => void withBusy(() => tasksApi.rejectContract(repositoryId, taskId, 'rejected from UI'))}
           onApprovePlan={() => void withBusy(() => tasksApi.approvePlan(repositoryId, taskId, state.attemptNumber || 1))}

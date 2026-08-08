@@ -48,6 +48,13 @@ function readPromptFrom(promptArg: string | undefined, promptFile: string | unde
   throw new Error('Provide a prompt as an argument or via --prompt-file.');
 }
 
+function normalizeSize(size: string | undefined): 'S' | 'M' | 'L' | undefined {
+  if (size === undefined) return undefined;
+  const upper = size.toUpperCase();
+  if (upper === 'S' || upper === 'M' || upper === 'L') return upper;
+  throw new Error(`Invalid --size "${size}": expected S, M, or L.`);
+}
+
 async function resolveRepo(repoOpt: string | undefined, fallback: string | undefined): Promise<string> {
   if (repoOpt !== undefined) return resolveRepoRef(repoOpt);
   return resolveRepositoryId(fallback);
@@ -62,15 +69,21 @@ export function registerTaskCommands(program: Command): void {
     .option('--repo <repo>', 'Repository path or id (defaults to the last one used)')
     .option('--prompt <prompt>', 'Task prompt (alternative to the positional argument)')
     .option('--prompt-file <path>', 'Read the prompt from a file, or "-" for stdin')
+    .option('--size <size>', 'Task size hint: S, M, or L (the classifier still decides; overridable at the gate)')
     .action(
       async (
         promptArg: string | undefined,
-        opts: { repo?: string; prompt?: string; promptFile?: string },
+        opts: { repo?: string; prompt?: string; promptFile?: string; size?: string },
       ) => {
         try {
           const repoId = await resolveRepo(opts.repo, undefined);
           const prompt = readPromptFrom(opts.prompt ?? promptArg, opts.promptFile);
-          const result = await daemonClient.post<CreatedTask>('/api/tasks', { repositoryId: repoId, prompt });
+          const size = normalizeSize(opts.size);
+          const result = await daemonClient.post<CreatedTask>('/api/tasks', {
+            repositoryId: repoId,
+            prompt,
+            ...(size ? { size } : {}),
+          });
           rememberTaskId(result.taskId);
           if (outputOptions().json) emitJson(result);
           else {

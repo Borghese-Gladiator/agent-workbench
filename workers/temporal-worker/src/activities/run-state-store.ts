@@ -1,7 +1,7 @@
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { TaskContract, ImplementationPlan, Evidence } from '@awb/domain';
+import type { TaskContract, ImplementationPlan, ProgramDesign, TaskSize, Evidence } from '@awb/domain';
 import { ArtifactStore, InMemoryArtifactMetadataStore } from '@awb/evidence';
 
 /**
@@ -12,8 +12,12 @@ import { ArtifactStore, InMemoryArtifactMetadataStore } from '@awb/evidence';
 export interface TaskRunState {
   /** The repository this task belongs to; threaded so the durable store can key persisted rows. */
   repositoryId?: string;
+  /** Task size class (TASK-51), classified in the specify phase; drives the run's phase set. */
+  size?: TaskSize;
   contract?: TaskContract;
   plan?: ImplementationPlan;
+  /** Program-design artifact (TASK-52), produced for L tasks and fed to the builder as slice context. */
+  programDesign?: ProgramDesign;
   builderSessionId?: string;
   /**
    * Provider resume tokens for the builder, keyed by plan-slice id (TASK-32). Persisted durably so a

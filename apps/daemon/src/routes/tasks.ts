@@ -23,6 +23,7 @@ import {
   getRuntimeAttribution,
   listFindingsByTask,
 } from '@awb/database';
+import type { TaskSize } from '@awb/domain';
 import { routeFeedback, NO_ROUTING_SIGNAL, type FeedbackRoutingSignal } from '@awb/github';
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
 import { TASK_QUEUE } from '../temporal-worker-constants.js';
@@ -36,26 +37,29 @@ export interface CreatedTaskRecord {
   phase: string;
   condition: string;
   deliveryState: string;
+  /** Task size class (TASK-51); null until the specify classifier sets it. */
+  size: TaskSize | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchDatabase): void {
-  app.post<{ Body: { repositoryId: string; prompt: string } }>('/api/tasks', async (request, reply) => {
+  app.post<{ Body: { repositoryId: string; prompt: string; size?: TaskSize } }>('/api/tasks', async (request, reply) => {
     const client = await getTemporalClient();
     const taskId = randomUUID();
-    const { repositoryId, prompt } = request.body;
+    const { repositoryId, prompt, size } = request.body;
     const workflowId = workflowIdFor(repositoryId, taskId);
 
     await client.workflow.start(TaskWorkflow, {
       taskQueue: TASK_QUEUE,
       workflowId,
-      args: [{ taskId, repositoryId, prompt }],
+      // An optional intake size hint (CLI --size) seeds the classifier (TASK-51); it still decides.
+      args: [{ taskId, repositoryId, prompt, ...(size ? { size } : {}) }],
     });
 
     // Persist the task row so it survives a daemon restart and `task show` reads lifecycle state
     // from SQLite (TASK-27), replacing the previous session-scoped in-memory array.
-    upsertTask(database.db, { id: taskId, repositoryId, prompt });
+    upsertTask(database.db, { id: taskId, repositoryId, prompt, ...(size ? { size } : {}) });
 
     reply.code(201);
     return { taskId, repositoryId, workflowId };
@@ -72,6 +76,7 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
         phase: t.phase,
         condition: t.condition,
         deliveryState: t.deliveryState,
+        size: t.size ?? null,
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
       }),
@@ -111,13 +116,16 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
     },
   );
 
-  app.post<{ Params: { repositoryId: string; taskId: string }; Body: { contractVersion: number } }>(
+  app.post<{ Params: { repositoryId: string; taskId: string }; Body: { contractVersion: number; size?: TaskSize } }>(
     '/api/tasks/:repositoryId/:taskId/approve-contract',
     async (request, reply) => {
       const client = await getTemporalClient();
       const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
       try {
-        await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion: request.body.contractVersion }] });
+        // A human may override the classified size at the gate (TASK-51); it wins over the classifier.
+        const { contractVersion, size } = request.body;
+        await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion, ...(size ? { size } : {}) }] });
+        if (size) upsertTask(database.db, { id: request.params.taskId, repositoryId: request.params.repositoryId, prompt: '', size });
         return { ok: true };
       } catch (err) {
         reply.code(409);

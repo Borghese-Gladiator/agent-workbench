@@ -5,11 +5,12 @@ import { activityInfo } from '@temporalio/activity';
 import type {
   TaskPhase,
   PhaseAttemptResult,
+  ProgramDesign,
   ValidatedCommand,
   Finding,
 } from '@awb/domain';
 import type { TaskWorkflowState } from '@awb/workflow';
-import { evaluatePhaseCompletion, type CompletionContext } from '@awb/workflow';
+import { evaluatePhaseCompletion, routeLoop, type CompletionContext } from '@awb/workflow';
 import {
   createAgentAdapter,
   scriptMockTurns,
@@ -24,12 +25,16 @@ import { loadProjectMemoryForContext } from './memory-support.js';
 import {
   resolveVerificationCommands,
   resolveReviewDiff,
+  resolveDiffNumstat,
   resolveStartCommand,
   resolveRepositoryPath,
   installWorktreeDependencies,
 } from './command-support.js';
+import { resolveSliceDiffCap, sliceDiffExceedsCap } from './slice-guardrail.js';
 import { runBrowserQaViaServer } from './browser-qa-support.js';
 import { draftContractInputFromPrompt, formatContractGateSummary } from './contract-support.js';
+import { classifyTaskSize, SIZE_CLASSIFIER_MODEL } from './classifier-support.js';
+import { programDesignInstruction, parseProgramDesignOutput } from './program-design-support.js';
 import { resolveRepoRef, createRealDelivery } from './delivery-support.js';
 import { createPhaseEventSink } from './durable-event-sink.js';
 import { createCapabilityBroker } from '@awb/capability-broker';
@@ -196,6 +201,16 @@ export function resolveBaseSha(runState: { baseSha?: string }): string {
   return runState.baseSha ?? '0'.repeat(40);
 }
 
+function slugForId(text: string): string {
+  return (
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'slice'
+  );
+}
+
 // ---------------------------------------------------------------------------------------------
 // specify
 // ---------------------------------------------------------------------------------------------
@@ -237,7 +252,29 @@ const specifyHandler: PhaseHandler = {
               },
             ],
           };
-      const contract = markAwaitingApproval(draftContract(draftInput));
+      // Classify task size (TASK-51) before drafting the contract, so the contract carries the size a
+      // human reviews at the gate. The authoritative (Haiku) call is Claude-SDK-specific, so it runs
+      // only on a profile that uses SDK tool/model names; every other profile (mock + non-Claude CLI
+      // adapters) gets `undefined`, and the contract's `size ?? 'M'` default applies. An intake hint
+      // (state.size) takes precedence; a human can still override at the gate.
+      const classification = await classifyTaskSize({
+        adapter: createAgentAdapter(),
+        taskId: state.taskId,
+        phase: 'specify',
+        attemptNumber: state.attemptNumber,
+        cwd: ctx.profile.usesRealAgent ? (await resolveRepositoryPath(state.repositoryId)) ?? process.cwd() : process.cwd(),
+        useModel: ctx.profile.usesSdkToolNames,
+        model: ctx.profile.usesSdkToolNames ? SIZE_CLASSIFIER_MODEL : undefined,
+        input: { prompt: state.prompt ?? '' },
+        allowedTools: allowedToolsForBrokerRole('planner', ctx.profile),
+        disallowedTools: deniedToolsForBrokerRole('planner', ctx.profile),
+        daemon: ctx.daemon,
+      });
+      // Precedence: explicit intake hint → classifier → draftContract's `M` default (the one place
+      // "unclassified" becomes a concrete size). The classifier never invents a size.
+      const size = state.size ?? classification?.size;
+      runState.size = size;
+      const contract = markAwaitingApproval(draftContract({ ...draftInput, size }));
       runState.contract = contract;
       return {
         kind: 'early',
@@ -250,6 +287,7 @@ const specifyHandler: PhaseHandler = {
             reason: 'task-contract-approval',
             // TASK-54: surface the problem statement + measurable success criteria in the gate
             // summary so the human aligns on them before planning spend (no separate read route).
+            // TASK-51: the summary also carries the classified size the human can override here.
             summary: formatContractGateSummary(contract),
             createdAt: new Date().toISOString(),
           },
@@ -261,6 +299,10 @@ const specifyHandler: PhaseHandler = {
       return { kind: 'early', result: blockedResult('specify', ['no contract was drafted before approval was expected']) };
     }
     runState.contract = markContractApproved(runState.contract);
+    // Report the classified size to the Workflow (TASK-51) so it derives the run's phase set. The
+    // contract's size is authoritative — a gate-time human override rewrote it on the contract.
+    const reportedSize = runState.contract.size;
+    runState.size = reportedSize;
 
     return {
       kind: 'evaluate',
@@ -268,6 +310,7 @@ const specifyHandler: PhaseHandler = {
       evidenceIds: [`contract-${runState.contract.id}`],
       openFindingIds: [],
       candidateOverrides: { contractVersion: runState.contract.version },
+      candidateExtra: { size: reportedSize },
     };
   },
 };
@@ -481,6 +524,126 @@ const planHandler: PhaseHandler = {
 };
 
 // ---------------------------------------------------------------------------------------------
+// program-design (TASK-52) — only in the phase set for L tasks
+// ---------------------------------------------------------------------------------------------
+
+const programDesignHandler: PhaseHandler = {
+  phase: 'program-design',
+  async run(ctx): Promise<PhaseOutcome> {
+    const { state, runState } = ctx;
+    const plan = runState.plan;
+    if (!plan) {
+      return { kind: 'early', result: blockedResult('program-design', ['no accepted plan available from the plan phase']) };
+    }
+
+    const realDesigner = ctx.profile.usesRealAgent;
+    const designCwd =
+      runState.worktreePath ??
+      (realDesigner ? await resolveRepositoryPath(state.repositoryId) : undefined) ??
+      process.cwd();
+
+    // Mock path: a deterministic, bodyless design derived from the plan slices, so an L task under the
+    // mock runtime produces a valid program-design artifact and clears the gate (every test stays green).
+    // A slice with no declared likelyPaths still contributes a file-tree entry (keyed by its objective),
+    // so the file-tree diff is never empty even for the single-slice fallback plan.
+    const fileTreeDiff = plan.slices.flatMap((s) =>
+      s.likelyPaths.length > 0
+        ? s.likelyPaths.map((p) => `~ ${p} (${s.objective})`)
+        : [`~ (files for: ${s.objective})`],
+    );
+    let design: ProgramDesign = {
+      id: `design-${plan.id}`,
+      taskId: state.taskId,
+      planVersion: plan.version,
+      version: 1,
+      fileTreeDiff: fileTreeDiff.length > 0 ? fileTreeDiff : [`~ (files for: ${plan.summary})`],
+      typeSignatures: [],
+      functionSignatures: plan.slices.map((s) => ({
+        signature: `implement_${slugForId(s.objective)}()`,
+        intent: s.objective,
+      })),
+    };
+    let allSignaturesBodyless = true;
+
+    if (realDesigner) {
+      const adapter = createAgentAdapter();
+      const session = await adapter.createSession({
+        role: 'planner',
+        taskId: state.taskId,
+        cwd: designCwd,
+        contextPayload: { plan },
+        allowedTools: allowedToolsForBrokerRole('planner', ctx.profile),
+        disallowedTools: deniedToolsForBrokerRole('planner', ctx.profile),
+      });
+      const { sink, flush } = createPhaseEventSink({
+        artifactsDir: runState.artifactsDir as string,
+        taskId: state.taskId,
+        role: 'planner',
+        phase: 'program-design',
+        attemptNumber: state.attemptNumber,
+        durable: true,
+      });
+      const start = Date.now();
+      const instr = programDesignInstruction(plan);
+      const execution = await adapter.execute(session, { instruction: instr }, sink, new AbortController().signal);
+      const ms = Date.now() - start;
+      ctx.usage.record(execution.usage, ms);
+      ctx.observability.recordSession({
+        sessionId: session.id,
+        taskId: state.taskId,
+        runId: `${state.taskId}-run`,
+        phaseAttemptId: `${state.taskId}-program-design-${state.attemptNumber}`,
+        phase: 'program-design',
+        role: 'planner',
+        runtime: ctx.strategy,
+        usage: execution.usage,
+        runtimeMs: ms,
+        contextComposition: estimateContextComposition({ plan }, instr),
+      });
+      await flush();
+      const parsed = parseProgramDesignOutput(execution.summary, plan);
+      if (!parsed) {
+        return { kind: 'early', result: blockedResult('program-design', ['program-design session produced no parseable design']) };
+      }
+      design = parsed.design;
+      allSignaturesBodyless = parsed.allSignaturesBodyless;
+    }
+
+    runState.programDesign = design;
+
+    // Persist the design as a committed artifact so a human/reviewer sees the structure before code.
+    await runState.artifactStore.put({
+      source: Buffer.from(JSON.stringify(design, null, 2), 'utf8'),
+      mediaType: 'application/json',
+      kind: 'program-design',
+      taskId: state.taskId,
+      runId: `${state.taskId}-run`,
+      phaseAttemptId: `${state.taskId}-program-design-${state.attemptNumber}`,
+      retention: 'task',
+    });
+
+    const hasSignatures = design.typeSignatures.length > 0 || design.functionSignatures.length > 0;
+    return {
+      kind: 'evaluate',
+      completion: {
+        programDesign: {
+          artifactExists: true,
+          fileTreeDiffNonEmpty: design.fileTreeDiff.length > 0,
+          hasSignatures,
+          signaturesAreBodyless: allSignaturesBodyless,
+          // The design reaching the completion gate IS the review checkpoint (routed through the gate
+          // machinery like the plan); on the real path a human can reject it before any slice runs.
+          designAccepted: true,
+        },
+      },
+      evidenceIds: [`program-design-${design.id}`],
+      openFindingIds: [],
+      candidateOverrides: { planVersion: plan.version },
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------------------------
 // prepare
 // ---------------------------------------------------------------------------------------------
 
@@ -584,9 +747,39 @@ const implementHandler: PhaseHandler = {
   phase: 'implement',
   async run(ctx): Promise<PhaseOutcome> {
     const { state, runState } = ctx;
-    const plan = runState.plan;
+    // Single-shot (S) tasks skip the plan phase (TASK-51), so there is no accepted plan here. Synthesize
+    // a one-slice plan straight from the contract objective — that IS the single-shot: go directly to a
+    // slice. This fires whenever the plan phase was skipped (no plan) but a contract exists, so it does
+    // not depend on runState.size (which a gate-time override may not have propagated onto run-state).
+    let plan = runState.plan;
     if (!plan) {
-      return { kind: 'early', result: blockedResult('implement', ['no accepted plan available from the plan phase']) };
+      const contract = runState.contract;
+      if (contract) {
+        plan = acceptPlan(
+          draftPlan(
+            {
+              taskId: state.taskId,
+              contractVersion: contract.version,
+              summary: contract.objective,
+              slices: [
+                {
+                  objective: contract.objective,
+                  claimIds: contract.claims.map((c) => c.id),
+                  likelyPaths: [],
+                  requiredTargetedChecks: ['test'],
+                  dependencies: [],
+                  qaScenarioIds: [],
+                },
+              ],
+            },
+            contract.claims,
+            1,
+          ),
+        );
+        runState.plan = plan;
+      } else {
+        return { kind: 'early', result: blockedResult('implement', ['no accepted plan available from the plan phase']) };
+      }
     }
 
     runState.builderSessionId = runState.builderSessionId ?? randomUUID();
@@ -654,6 +847,8 @@ const implementHandler: PhaseHandler = {
             taskId: state.taskId,
             worktreePath: runState.worktreePath,
             slice,
+            // Feed the program design (TASK-52) as context so the builder implements to the reviewed structure.
+            ...(runState.programDesign ? { programDesign: runState.programDesign } : {}),
             allowedTools: allowedToolsForBrokerRole('builder', ctx.profile),
             disallowedTools: deniedToolsForBrokerRole('builder', ctx.profile),
             tokenBudget: assignment.tokenBudget,
@@ -692,6 +887,36 @@ const implementHandler: PhaseHandler = {
 
     runState.baseSha = runState.baseSha ?? '0'.repeat(40);
     runState.candidateSha = candidateSha;
+
+    // Velocity guardrail (TASK-56): if the run's committed diff exceeds the configurable cap, force a
+    // human checkpoint before continuing rather than dumping a large unreviewed diff downstream. Off on
+    // the mock path; on for the real path. Only meaningful once a real commit exists.
+    const cap = resolveSliceDiffCap(ctx.profile.usesRealAgent);
+    if (cap.enabled && realBuilder && runState.worktreePath && candidateSha !== runState.baseSha) {
+      const stat = await resolveDiffNumstat({
+        worktreePath: runState.worktreePath,
+        baseSha: runState.baseSha,
+        headSha: candidateSha,
+      });
+      if (sliceDiffExceedsCap(cap, stat)) {
+        return {
+          kind: 'early',
+          result: {
+            outcome: 'await-human',
+            gate: {
+              id: `${state.taskId}-implement-diff-cap-gate`,
+              taskId: state.taskId,
+              phase: 'implement',
+              reason: 'slice-diff-exceeds-cap',
+              summary:
+                `Implement diff is ${stat.changedLines} line(s) across ${stat.changedFiles} file(s), ` +
+                `over the cap (${cap.lineCap} lines / ${cap.fileCap} files). Review before continuing.`,
+              createdAt: new Date().toISOString(),
+            },
+          },
+        };
+      }
+    }
 
     // On the real path, a candidate commit exists when the builder advanced HEAD past the base SHA;
     // targeted checks passing is exactly what the per-slice builder loop already gated `success` on
@@ -1141,8 +1366,22 @@ const challengeHandler: PhaseHandler = {
         baseSha: resolveBaseSha(runState),
       },
       onBlocked: () => {
-        if (review.findings.some((f) => f.category === 'requirements' && f.status === 'open')) {
-          return { outcome: 'replan', target: 'specify', findings: review.findings };
+        // Route the open findings through the spec's loop table (routeLoop) rather than a bespoke
+        // requirements-vs-implement check, so structural (architecture) findings reach the phase that
+        // owns structure — `program-design` on an L run, else `plan` (TASK-60). Requirements outrank
+        // architecture outrank everything else; the phase set decides plan-vs-program-design.
+        const open = review.findings.filter((f) => f.status === 'open');
+        const category = open.some((f) => f.category === 'requirements')
+          ? 'requirements'
+          : open.some((f) => f.category === 'architecture')
+            ? 'architecture'
+            : 'correctness';
+        const target = routeLoop({ kind: 'challenge-finding', category }, state.phaseSet);
+        // A structural/requirements redirect is a replan (back to specify/plan/program-design); anything
+        // else is a code-level repair (back to implement). routeChallengeFinding only ever returns one of
+        // these four phases, so the explicit membership check both routes correctly and narrows the type.
+        if (target === 'specify' || target === 'plan' || target === 'program-design') {
+          return { outcome: 'replan', target, findings: review.findings };
         }
         return { outcome: 'repair', target: 'implement', findings: review.findings };
       },
@@ -1354,6 +1593,7 @@ const assimilateHandler: PhaseHandler = {
 const HANDLERS: Record<TaskPhase, PhaseHandler> = {
   specify: specifyHandler,
   plan: planHandler,
+  'program-design': programDesignHandler,
   prepare: prepareHandler,
   implement: implementHandler,
   verify: verifyHandler,

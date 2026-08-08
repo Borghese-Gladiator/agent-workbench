@@ -9,8 +9,8 @@ import {
   continueAsNew,
   workflowInfo,
 } from '@temporalio/workflow';
-import type { TaskPhase, HumanGateReason, PhaseAttemptResult } from '@awb/domain';
-import { TASK_PHASE_ORDER } from './phase-order.js';
+import type { TaskPhase, TaskSize, HumanGateReason, PhaseAttemptResult } from '@awb/domain';
+import { nextPhaseIn, phaseSetForSize } from './phase-order.js';
 import type { TaskWorkflowInput, TaskWorkflowState } from './workflow-types.js';
 import { shouldEscalateToHuman } from './loop-routing.js';
 
@@ -31,7 +31,9 @@ const activities = proxyActivities<TaskActivities>({
 });
 
 // Updates — synchronous, validated against current state before applying.
-export const approveContractUpdate = defineUpdate<void, [{ contractVersion: number }]>('approveContract');
+export const approveContractUpdate = defineUpdate<void, [{ contractVersion: number; size?: TaskSize }]>(
+  'approveContract',
+);
 export const rejectContractUpdate = defineUpdate<void, [{ reason: string }]>('rejectContract');
 export const approvePlanUpdate = defineUpdate<void, [{ planVersion: number }]>('approvePlan');
 export const rejectPlanUpdate = defineUpdate<void, [{ reason: string }]>('rejectPlan');
@@ -90,6 +92,9 @@ function initialState(input: TaskWorkflowInput): TaskWorkflowState {
     openFindingIds: [],
     tokenUsageTotal: { inputTokens: 0, outputTokens: 0 },
     runtimeMsByPhase: {},
+    // An intake size hint (CLI --size) seeds the classifier's prior; the classifier/gate can still
+    // change it. phaseSet stays undefined until specify completes and derives it.
+    size: input.size,
   };
 }
 
@@ -122,11 +127,19 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
     paused = false;
   });
 
-  setHandler(approveContractUpdate, (_args) => {
+  setHandler(approveContractUpdate, (args) => {
     if (state.phase !== 'specify' || state.pendingHumanGate?.reason !== 'task-contract-approval') {
       throw ApplicationFailure.nonRetryable('No pending contract approval gate for this task');
     }
-    state = { ...state, condition: 'running', pendingHumanGate: undefined };
+    // A human may override the classifier's size at the gate (TASK-51). When they do, it wins over
+    // whatever specify's candidate later reports: pin the size + derived phase set and mark them human-set.
+    const override = args?.size;
+    state = {
+      ...state,
+      condition: 'running',
+      pendingHumanGate: undefined,
+      ...(override ? { size: override, phaseSet: phaseSetForSize(override), sizeHumanOverridden: true } : {}),
+    };
   });
   setHandler(rejectContractUpdate, () => {
     state = { ...state, condition: 'running', pendingHumanGate: undefined };
@@ -226,8 +239,13 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
           latestCandidateEvidenceIds: result.candidate.evidenceIds,
           openFindingIds: result.candidate.openFindingIds,
         };
+        // The specify candidate reports the classified size (TASK-51). Adopt it to derive the run's
+        // phase set — UNLESS a human already overrode it at the contract gate, which wins.
+        if (phaseThatRan === 'specify' && result.size && !state.sizeHumanOverridden) {
+          state = { ...state, size: result.size, phaseSet: phaseSetForSize(result.size) };
+        }
         failureStreak.delete(state.phase);
-        state = { ...state, phase: nextPhase(state.phase), attemptNumber: 0 };
+        state = { ...state, phase: nextPhase(state.phase, state.phaseSet), attemptNumber: 0 };
         break;
       }
       case 'repair': {
@@ -277,10 +295,8 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
   return state;
 }
 
-function nextPhase(phase: TaskPhase): TaskPhase {
-  const idx = TASK_PHASE_ORDER.indexOf(phase);
-  const next = TASK_PHASE_ORDER[idx + 1];
-  return next ?? 'assimilate';
+function nextPhase(phase: TaskPhase, phaseSet: TaskPhase[] | undefined): TaskPhase {
+  return nextPhaseIn(phaseSet, phase);
 }
 
 function makeGate(taskId: string, phase: TaskPhase, reason: HumanGateReason) {

@@ -70,3 +70,33 @@ export const ImplementationPlanSchema = z.object({
   status: ImplementationPlanStatusSchema,
 });
 export type ImplementationPlan = z.infer<typeof ImplementationPlanSchema>;
+
+/**
+ * A single type/interface or function declared in the program-design phase (TASK-52 / WSFF): its
+ * signature and a one-line intent, deliberately WITHOUT a body. Reviewing this before implementation
+ * is the cheap structural review WSFF prescribes — architectural mistakes are caught while still free.
+ */
+export const DesignSignatureSchema = z.object({
+  /** e.g. a type name, interface name, or `functionName(args): ReturnType` signature. */
+  signature: z.string(),
+  /** One-line statement of what it is for. No implementation. */
+  intent: z.string(),
+});
+export type DesignSignature = z.infer<typeof DesignSignatureSchema>;
+
+/**
+ * The program-design artifact (TASK-52): the projected structure of an L task's change, decided and
+ * reviewed BEFORE any slice runs. `fileTreeDiff` is a human-readable list of files added/changed;
+ * `typeSignatures`/`functionSignatures` are signatures-only (no bodies). Gated like the plan.
+ */
+export const ProgramDesignSchema = z.object({
+  id: z.string(),
+  taskId: z.string(),
+  planVersion: z.number().int().positive(),
+  version: z.number().int().positive(),
+  /** Files this change adds or modifies (paths + a short note), no diff bodies. */
+  fileTreeDiff: z.array(z.string()),
+  typeSignatures: z.array(DesignSignatureSchema),
+  functionSignatures: z.array(DesignSignatureSchema),
+});
+export type ProgramDesign = z.infer<typeof ProgramDesignSchema>;

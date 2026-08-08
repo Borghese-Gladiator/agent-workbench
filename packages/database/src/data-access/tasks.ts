@@ -1,9 +1,10 @@
 import { eq, inArray } from 'drizzle-orm';
-import type { TaskPhase, RunCondition, DeliveryState } from '@awb/domain';
+import type { TaskPhase, RunCondition, DeliveryState, TaskSize } from '@awb/domain';
 import {
   tasks,
   runs,
   phaseAttempts,
+  programDesigns,
   agentSessions,
   modelInvocations,
   toolInvocations,
@@ -56,6 +57,8 @@ export interface UpsertTaskInput {
   phase?: TaskPhase;
   condition?: RunCondition;
   deliveryState?: DeliveryState;
+  /** Task size class (TASK-51); set at intake as a hint or once the classifier decides. */
+  size?: TaskSize;
 }
 
 export function upsertTask(db: DrizzleDb, input: UpsertTaskInput): void {
@@ -69,6 +72,7 @@ export function upsertTask(db: DrizzleDb, input: UpsertTaskInput): void {
     phase: input.phase ?? existing?.phase ?? 'specify',
     condition: input.condition ?? existing?.condition ?? 'running',
     deliveryState: input.deliveryState ?? existing?.deliveryState ?? 'not-started',
+    size: input.size ?? existing?.size ?? null,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -81,6 +85,8 @@ export function upsertTask(db: DrizzleDb, input: UpsertTaskInput): void {
         phase: row.phase,
         condition: row.condition,
         deliveryState: row.deliveryState,
+        // Only advance size, never clear it — a later sync without a size must not wipe the classifier's decision.
+        ...(input.size ? { size: input.size } : {}),
         updatedAt: row.updatedAt,
       },
     })
@@ -108,6 +114,7 @@ export function listTasksWithRepository(db: DrizzleDb): TaskWithRepository[] {
       phase: tasks.phase,
       condition: tasks.condition,
       deliveryState: tasks.deliveryState,
+      size: tasks.size,
       createdAt: tasks.createdAt,
       updatedAt: tasks.updatedAt,
       repositoryName: repositories.name,
@@ -275,6 +282,9 @@ export function deleteTask(db: DrizzleDb, taskId: string): boolean {
       tx.delete(planSlices).where(inArray(planSlices.planId, planIds)).run();
     }
     tx.delete(plans).where(eq(plans.taskId, taskId)).run();
+
+    // program-design artifacts (FK → tasks, TASK-52)
+    tx.delete(programDesigns).where(eq(programDesigns.taskId, taskId)).run();
 
     // 11-12. contract claims (FK → task_contracts) before contracts
     if (contractIds.length > 0) {

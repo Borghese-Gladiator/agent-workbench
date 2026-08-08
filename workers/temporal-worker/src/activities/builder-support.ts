@@ -2,7 +2,7 @@ import { runGit, getHeadSha, getStatus } from '@awb/repository';
 import { runIdForTask } from '@awb/database';
 import { withSpan } from '@awb/telemetry';
 import type { CodingAgentAdapter, AgentEventSink } from '@awb/agent-gateway';
-import type { PlanSlice, ModelUsage } from '@awb/domain';
+import type { PlanSlice, ProgramDesign, ModelUsage } from '@awb/domain';
 import type { SliceAttemptOutcome } from '@awb/planning';
 
 export interface RealBuilderAttemptInput {
@@ -10,6 +10,8 @@ export interface RealBuilderAttemptInput {
   taskId: string;
   worktreePath: string;
   slice: PlanSlice;
+  /** The program-design artifact (TASK-52), when one was produced (L tasks), fed as builder context. */
+  programDesign?: ProgramDesign;
   allowedTools: string[];
   /** Tools denied for the builder session; enforced via the adapter's `disallowedTools` (TASK-24). */
   disallowedTools?: string[];
@@ -58,7 +60,9 @@ async function runBuilderSession(input: RealBuilderAttemptInput): Promise<RealBu
     role: 'builder',
     taskId: input.taskId,
     cwd: input.worktreePath,
-    contextPayload: { slice: input.slice },
+    contextPayload: input.programDesign
+      ? { slice: input.slice, programDesign: input.programDesign }
+      : { slice: input.slice },
     allowedTools: input.allowedTools,
     disallowedTools: input.disallowedTools,
     resumeSessionId: input.resumeSessionId,

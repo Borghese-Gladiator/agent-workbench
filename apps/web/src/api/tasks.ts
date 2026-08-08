@@ -1,3 +1,5 @@
+export type TaskSize = 'S' | 'M' | 'L';
+
 export interface TaskWorkflowState {
   taskId: string;
   repositoryId: string;
@@ -5,6 +7,10 @@ export interface TaskWorkflowState {
   condition: string;
   deliveryState: string;
   attemptNumber: number;
+  /** Task size class (TASK-51); undefined until the specify classifier sets it. */
+  size?: TaskSize;
+  /** The ordered subset of phases this run walks (TASK-51); undefined before specify derives it. */
+  phaseSet?: string[];
   latestCandidateEvidenceIds: string[];
   openFindingIds: string[];
   pendingHumanGate?: {
@@ -62,6 +68,7 @@ export interface TaskSummary {
   phase: string;
   condition: string;
   deliveryState: string;
+  size: TaskSize | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -88,8 +95,8 @@ export const tasksApi = {
     request<TaskStateResponse>('GET', `/tasks/${repositoryId}/${taskId}`),
   listMedia: (repositoryId: string, taskId: string) =>
     request<TaskMediaArtifact[]>('GET', `/tasks/${repositoryId}/${taskId}/media`),
-  approveContract: (repositoryId: string, taskId: string, contractVersion: number) =>
-    request('POST', `/tasks/${repositoryId}/${taskId}/approve-contract`, { contractVersion }),
+  approveContract: (repositoryId: string, taskId: string, contractVersion: number, size?: TaskSize) =>
+    request('POST', `/tasks/${repositoryId}/${taskId}/approve-contract`, { contractVersion, ...(size ? { size } : {}) }),
   rejectContract: (repositoryId: string, taskId: string, reason: string) =>
     request('POST', `/tasks/${repositoryId}/${taskId}/reject-contract`, { reason }),
   approvePlan: (repositoryId: string, taskId: string, planVersion: number) =>

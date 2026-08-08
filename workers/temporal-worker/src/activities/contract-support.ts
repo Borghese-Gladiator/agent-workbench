@@ -51,7 +51,7 @@ export function formatContractGateSummary(contract: TaskContract): string {
       ? contract.claims.map((c) => `  - [${c.category}] ${c.description}`).join('\n')
       : '  (none)';
   return [
-    `Contract v${contract.version} for task ${contract.taskId} awaits human approval.`,
+    `Contract v${contract.version} (size ${contract.size}) for task ${contract.taskId} awaits human approval.`,
     '',
     `Problem: ${contract.problemStatement}`,
     'Acceptance claims:',

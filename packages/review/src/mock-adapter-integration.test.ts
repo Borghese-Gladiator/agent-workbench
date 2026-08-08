@@ -19,6 +19,7 @@ describe('adversarial-review runner wired to the real MockAgentAdapter', () => {
       constraints: [],
       nonGoals: [],
       risk: 'medium',
+      size: 'M',
       claims: [],
       status: 'approved',
     };

@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
-import type { TaskPhase, RunCondition, DeliveryState } from '@awb/domain';
+import type { TaskPhase, RunCondition, DeliveryState, TaskSize } from '@awb/domain';
 import { repositories } from './repository.js';
 
 export const tasks = sqliteTable('tasks', {
@@ -11,6 +11,8 @@ export const tasks = sqliteTable('tasks', {
   phase: text('phase').notNull().$type<TaskPhase>(),
   condition: text('condition').notNull().$type<RunCondition>(),
   deliveryState: text('delivery_state').notNull().$type<DeliveryState>(),
+  /** Task size class (TASK-51); nullable until the specify classifier sets it. */
+  size: text('size').$type<TaskSize>(),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });

@@ -83,6 +83,7 @@ describe('internal worker→daemon routes', () => {
         constraints: [],
         nonGoals: [],
         risk: 'low',
+        size: 'M',
         claims: [],
         status: 'approved',
       },

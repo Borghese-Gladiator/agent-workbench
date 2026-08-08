@@ -78,7 +78,7 @@ WSFF's 80/20 core: right-size the ceremony, review structure before code, and ca
 how much unreviewed diff a run can dump. TASK-51 gates when TASK-52 runs; TASK-56
 is the deliberate counterweight to the fewest-slices bias (TASK-19).
 
-### [ ] TASK-51: Phase-sizing router (the WSFF 80/20 rule)
+### [x] TASK-51: Phase-sizing router (the WSFF 80/20 rule)
 
 **What's wrong.** The pipeline runs one-size-fits-all — every task gets the same
 planning weight regardless of size. WSFF's central structural claim is that ~40%
@@ -106,7 +106,7 @@ workflow skips the heavy planning phases; a multi-package prompt classifies L an
 runs program-design. *Manual:* a trivial task finishes without the full plan
 ceremony; a large task shows all phases in the UI.
 
-### [ ] TASK-52: Program-design artifact (signatures / call-stack / file-tree diff) before code
+### [x] TASK-52: Program-design artifact (signatures / call-stack / file-tree diff) before code
 
 **What's wrong.** We go plan → build with nothing between. WSFF inserts an explicit
 "program design" phase — types, method signatures, projected file-tree diff, call
@@ -131,7 +131,7 @@ a file-tree diff + signatures and no implementation bodies, and it reaches the g
 before any slice runs. *Manual:* rejecting the program design redirects structure
 without a build ever happening.
 
-### [ ] TASK-56: "Amplify, don't automate" velocity guardrail
+### [x] TASK-56: "Amplify, don't automate" velocity guardrail
 
 **What's wrong.** Nothing caps how much unreviewed diff a single run can produce
 before a human sees it. WSFF's concrete anti-pattern is reviewing 2000+ lines of
@@ -155,6 +155,92 @@ human review WSFF requires.
 triggers a checkpoint/split instead of proceeding; under the threshold it proceeds
 untouched. *Manual:* a large feature run pauses for human review at the cap rather
 than dumping one giant diff.
+
+### [x] TASK-60: Route `architecture` loop-backs to `program-design`, not `plan` (L tasks)
+
+**What's wrong.** `program-design` (TASK-52) is in the *forward* pass (plan →
+program-design → prepare, L only) but absent from the *loop*. `routeLoop`
+(`packages/workflow/src/loop-routing.ts`) sends a `challenge` finding of category
+`architecture` — and an `exercise` design-misunderstanding — back to `plan`. That is
+exactly a "the structure is wrong" finding, i.e. the thing program-design exists to
+own, yet the redirect skips the program-design phase and re-derives structure as
+prose in `plan`. So the phase that reviews structure runs once and never again, even
+when a downstream phase proves the structure was wrong.
+
+**What to do.** For an L run (phase set includes `program-design`), route
+`architecture` challenge findings (and `exercise` design-misunderstanding) to
+`program-design` instead of `plan`; keep `plan` for M/S (which have no
+program-design phase). This is a `routeLoop` table change conditioned on the run's
+phase set — no new phase, no schema change. The forward-pass reject at the
+program-design gate already works (fails the completion gate → blocked → human
+redirects); this closes the *loop-back* side.
+
+**Where.** `packages/workflow/src/loop-routing.ts` (`routeChallengeFinding`, the
+`exercise-design-misunderstanding` case), the workflow's routing call site (needs
+the run's `phaseSet`/`size` to choose the target), tests.
+
+**How we'll know it's done.** *Unit:* an L run's `architecture` challenge finding
+routes to `program-design`; the same finding on an M/S run still routes to `plan`.
+
+### [ ] TASK-61: Evaluate whether L + program-design actually helps (measure, don't assume)
+
+**What's wrong.** We shipped the program-design phase (TASK-52) for L tasks on the
+WSFF thesis that cheap structural review before code catches expensive mistakes —
+but we have **not** shown it catches anything on real runs, only that it runs. The
+open question (raised in review): does the extra phase earn its cost, or would "plan
+less, implement in one session" do as well? This must be answered by measurement,
+not intuition.
+
+**What to do.** Instrument program-design runs and compare against a counterfactual:
+rework/loop-back rate (repair/replan iterations), reviewed-vs-total diff ratio, and
+review-comment / maintainability-annotation density (TASK-53) for L-with-program-design
+runs vs. L-classified runs with the phase disabled (a flag). Fold into the decay
+metrics (TASK-55) and cost instrumentation (TASK-46) rather than a bespoke pipeline.
+Output a short writeup: keep program-design as-is, collapse it into a richer `plan`
+artifact, or drop it. Do NOT expand the phase further until this call is made.
+
+**Where.** `packages/observability/` (run attributes, via TASK-55), a config flag to
+disable program-design for A/B, the evaluation writeup in `docs/`. Depends on
+TASK-55/TASK-46 for the metric plumbing; evaluates TASK-51/TASK-52.
+
+**How we'll know it's done.** A writeup over several real L runs (with/without
+program-design) with a keep/collapse/drop recommendation backed by the rework +
+reviewed-ratio numbers.
+
+### [ ] TASK-62: Evaluate a local shadow classifier as a Haiku replacement — bigger corpus, bigger models
+
+**What's wrong / the finding.** The size classifier (TASK-51) runs Haiku as the
+authoritative model with an opt-in local (Ollama) shadow. A first live shadow run
+(`AWB_CLASSIFIER_SHADOW=1`, model `llama3.2:latest` ≈ 3B) over a 6-prompt corpus
+scored **Haiku 6/6 vs. expected, local 4/6, agree 4/6**. The two local misses were
+informative: it over-sized a trivial README change (S→M, the *safe* error) AND
+under-sized a new-repo task (L→M, the *dangerous* under-planning error the sizing
+router exists to prevent). Conclusion so far: **`llama3.2:3b` is not promotable** to
+authoritative — keep it shadow-only, Haiku decides. But that call rests on n=6, a
+single run, non-deterministic models, and only ONE local model — directional, not a
+benchmark.
+
+**What to do.** Turn the one-off run into a real evaluation before making any
+promote/decline decision:
+- Build a curated prompt corpus (~30–50) spanning clear-S / clear-L / borderline
+  S-M and M-L, each with an expected label + rationale (extend the 6 seed cases).
+- Run each prompt N times (models are non-deterministic) and report per-model
+  accuracy, agreement, and — weighted heavier — the **cost-weighted error rate**
+  (under-sizing L→S/M penalized far more than over-sizing), per TASK-61's rubric.
+- Test the LARGER local models already pulled (`qwen3:30b`, `gemma4:26b`,
+  `qwen3-coder:30b`), not just the 3B, to see whether size closes the gap enough to
+  justify a local authoritative path (offline / zero-API-cost classification).
+- Fold results into TASK-61's shadow-mode trace collection rather than a bespoke
+  harness; the live harness used here lives in scratch only (not committed).
+
+**Where.** `workers/temporal-worker/src/activities/size-classifiers.ts` (the shadow
+path already exists), the eval corpus + runner (new, likely `docs/` + a scratch or
+`scripts/` harness), TASK-61's `PlanningEvaluationTrace`. Depends on nothing; informs
+whether the Haiku dependency can be dropped for classification.
+
+**How we'll know it's done.** A short writeup: per-model accuracy + cost-weighted
+error over the corpus, and a clear promote / keep-shadow / decline call for each
+candidate local model (with `llama3.2:3b` already declined on the seed evidence).
 
 ---
 

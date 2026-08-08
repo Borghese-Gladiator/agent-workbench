@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import type {
   TaskContract,
   ImplementationPlan,
+  ProgramDesign,
   Evidence,
   Finding,
   WorkspaceLease,
@@ -16,6 +17,7 @@ import {
   plans,
   planSlices,
   planClaimCoverage,
+  programDesigns,
   evidence as evidenceTable,
   evidenceClaims,
   findings,
@@ -31,6 +33,8 @@ import {
   sliceToRow,
   coverageToRow,
   rowToPlan,
+  programDesignToRow,
+  rowToProgramDesign,
   evidenceToRow,
   rowToEvidence,
   findingToRow,
@@ -101,6 +105,19 @@ export function getPlan(db: DrizzleDb, planId: string): ImplementationPlan | und
   const slices = db.select().from(planSlices).where(eq(planSlices.planId, planId)).all();
   const coverage = db.select().from(planClaimCoverage).where(eq(planClaimCoverage.planId, planId)).all();
   return rowToPlan(row, slices, coverage);
+}
+
+// --- ProgramDesign (TASK-52) ---
+
+export function upsertProgramDesign(db: DrizzleDb, design: ProgramDesign): void {
+  const row = programDesignToRow(design);
+  db.insert(programDesigns).values(row).onConflictDoUpdate({ target: programDesigns.id, set: row }).run();
+}
+
+export function getProgramDesignByTask(db: DrizzleDb, taskId: string): ProgramDesign | undefined {
+  const rows = db.select().from(programDesigns).where(eq(programDesigns.taskId, taskId)).all();
+  const row = rows[rows.length - 1];
+  return row ? rowToProgramDesign(row) : undefined;
 }
 
 // --- Evidence ---
@@ -204,6 +221,7 @@ export function persistRunStateSnapshot(db: DrizzleDb, snapshot: RunStateSnapsho
   db.transaction((tx) => {
     if (snapshot.contract) upsertContract(tx as unknown as DrizzleDb, snapshot.contract);
     if (snapshot.plan) upsertPlan(tx as unknown as DrizzleDb, snapshot.plan);
+    if (snapshot.programDesign) upsertProgramDesign(tx as unknown as DrizzleDb, snapshot.programDesign);
     if (snapshot.lease) upsertWorkspaceLease(tx as unknown as DrizzleDb, snapshot.lease);
 
     for (const record of snapshot.artifacts) {
@@ -269,6 +287,8 @@ export function loadRunStateSnapshot(
   const planRow = db.select().from(plans).where(eq(plans.taskId, task.taskId)).all();
   const plan = planRow[0] ? getPlan(db, planRow[0].id) : undefined;
 
+  const programDesign = getProgramDesignByTask(db, task.taskId);
+
   const leaseRow = db.select().from(workspaceLeases).where(eq(workspaceLeases.taskId, task.taskId)).all();
   const lease = leaseRow[0] ? rowToLease(leaseRow[0]) : undefined;
 
@@ -289,8 +309,9 @@ export function loadRunStateSnapshot(
     taskId: task.taskId,
     repositoryId: task.repositoryId,
     ...(task.prompt !== undefined ? { prompt: task.prompt } : {}),
-    ...(contract ? { contract } : {}),
+    ...(contract ? { contract, size: contract.size } : {}),
     ...(plan ? { plan } : {}),
+    ...(programDesign ? { programDesign } : {}),
     ...(lease ? { lease, worktreePath: lease.worktreePath, baseSha: lease.baseSha } : {}),
     ...(candidateSha ? { candidateSha } : {}),
     ...(builderResumeSessions ? { builderResumeSessions } : {}),

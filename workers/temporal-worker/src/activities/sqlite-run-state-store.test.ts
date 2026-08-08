@@ -57,6 +57,7 @@ const sampleContract = (): TaskContract => ({
   constraints: ['keep tests green'],
   nonGoals: [],
   risk: 'low',
+  size: 'M',
   claims: [
     {
       id: 'claim-1',

@@ -57,6 +57,23 @@ function evaluatePlan(ctx: CompletionContext['plan']): CompletionDecision {
   return decision(reasons, missing);
 }
 
+function evaluateProgramDesign(ctx: CompletionContext['programDesign']): CompletionDecision {
+  const missing: string[] = [];
+  const reasons: string[] = [];
+  if (!ctx) return decision(reasons, ['no program-design context provided']);
+
+  if (!ctx.artifactExists) missing.push('program-design artifact does not exist');
+  if (!ctx.fileTreeDiffNonEmpty) missing.push('projected file-tree diff is empty');
+  if (!ctx.hasSignatures) missing.push('no type or function signatures were declared');
+  if (!ctx.signaturesAreBodyless) missing.push('program design contains implementation bodies (design must be signatures only)');
+  if (!ctx.designAccepted) missing.push('program design is not accepted');
+
+  if (missing.length === 0) {
+    reasons.push('program design has a file-tree diff and bodyless signatures, and was accepted before code');
+  }
+  return decision(reasons, missing);
+}
+
 function evaluatePrepare(ctx: CompletionContext['prepare']): CompletionDecision {
   const missing: string[] = [];
   const reasons: string[] = [];
@@ -198,6 +215,8 @@ export function evaluatePhaseCompletion(
       return evaluateSpecify(context.specify);
     case 'plan':
       return evaluatePlan(context.plan);
+    case 'program-design':
+      return evaluateProgramDesign(context.programDesign);
     case 'prepare':
       return evaluatePrepare(context.prepare);
     case 'implement':

@@ -72,6 +72,7 @@ const sampleContract = (): TaskContract => ({
   constraints: ['no new deps', 'keep tests green'],
   nonGoals: ['no refactor'],
   risk: 'medium',
+  size: 'M',
   claims: [
     {
       id: 'claim-1',
@@ -234,8 +235,18 @@ describe('run-lifecycle data-access', () => {
       taskId: TASK_ID,
       repositoryId: REPO_ID,
       prompt: 'do the thing',
+      size: 'M',
       contract: sampleContract(),
       plan: samplePlan(),
+      programDesign: {
+        id: 'design-1',
+        taskId: TASK_ID,
+        planVersion: 1,
+        version: 1,
+        fileTreeDiff: ['+ src/foo.ts (new module)', '~ src/index.ts (export foo)'],
+        typeSignatures: [{ signature: 'interface Foo { id: string }', intent: 'the foo record' }],
+        functionSignatures: [{ signature: 'makeFoo(id: string): Foo', intent: 'construct a Foo' }],
+      },
       baseSha: 'a'.repeat(40),
       candidateSha: 'b'.repeat(40),
       worktreePath: '/tmp/worktree',
@@ -329,6 +340,8 @@ describe('run-lifecycle data-access', () => {
 
     expect(reloaded.contract).toEqual(snapshot.contract);
     expect(reloaded.plan).toEqual(snapshot.plan);
+    expect(reloaded.programDesign).toEqual(snapshot.programDesign);
+    expect(reloaded.size).toBe('M');
     expect(reloaded.lease).toEqual(snapshot.lease);
     expect(reloaded.candidateSha).toBe('b'.repeat(40));
     expect(reloaded.verificationEvidence).toEqual(snapshot.verificationEvidence);

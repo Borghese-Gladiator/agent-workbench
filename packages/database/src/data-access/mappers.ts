@@ -4,6 +4,7 @@ import type {
   ImplementationPlan,
   PlanSlice,
   ClaimCoverage,
+  ProgramDesign,
   Evidence,
   Finding,
   WorkspaceLease,
@@ -16,6 +17,7 @@ import type {
   PlanRow,
   PlanSliceRow,
   PlanClaimCoverageRow,
+  ProgramDesignRow,
   EvidenceRow,
   FindingRow,
   WorkspaceLeaseRow,
@@ -51,6 +53,7 @@ export function contractToRow(contract: TaskContract): TaskContractRow {
     constraintsJson: JSON.stringify(contract.constraints),
     nonGoalsJson: JSON.stringify(contract.nonGoals),
     risk: contract.risk,
+    size: contract.size,
     status: contract.status,
   };
 }
@@ -88,6 +91,7 @@ export function rowToContract(row: TaskContractRow, claims: AcceptanceClaimRow[]
     constraints: parseArray(row.constraintsJson),
     nonGoals: parseArray(row.nonGoalsJson),
     risk: row.risk,
+    size: row.size ?? 'M',
     claims: claims.map(rowToClaim),
     status: row.status,
   };
@@ -178,6 +182,32 @@ export function rowToPlan(
     risks: JSON.parse(row.risksJson),
     claimCoverage: coverageByClaim,
     status: row.status,
+  };
+}
+
+// --- ProgramDesign (TASK-52) ---
+
+export function programDesignToRow(design: ProgramDesign): ProgramDesignRow {
+  return {
+    id: design.id,
+    taskId: design.taskId,
+    planVersion: design.planVersion,
+    version: design.version,
+    fileTreeDiffJson: JSON.stringify(design.fileTreeDiff),
+    typeSignaturesJson: JSON.stringify(design.typeSignatures),
+    functionSignaturesJson: JSON.stringify(design.functionSignatures),
+  };
+}
+
+export function rowToProgramDesign(row: ProgramDesignRow): ProgramDesign {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    planVersion: row.planVersion,
+    version: row.version,
+    fileTreeDiff: parseArray(row.fileTreeDiffJson),
+    typeSignatures: JSON.parse(row.typeSignaturesJson),
+    functionSignatures: JSON.parse(row.functionSignaturesJson),
   };
 }
 

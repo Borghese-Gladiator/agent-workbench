@@ -180,6 +180,22 @@ describe('ClaudeAgentAdapter', () => {
     expect(calls[0]?.options?.permissionMode).toBe('bypassPermissions');
   });
 
+  it('threads an optional model override into the query options (TASK-51)', async () => {
+    const { queryFn, calls } = fakeQuery([]);
+    const adapter = new ClaudeAgentAdapter(queryFn);
+    const session = await adapter.createSession({ ...makeSessionInput(), model: 'claude-haiku-4-5-20251001' });
+    await adapter.execute(session, { instruction: 'classify' }, () => {}, new AbortController().signal);
+    expect(calls[0]?.options?.model).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('omits model from the query options when none is set', async () => {
+    const { queryFn, calls } = fakeQuery([]);
+    const adapter = new ClaudeAgentAdapter(queryFn);
+    const session = await adapter.createSession(makeSessionInput());
+    await adapter.execute(session, { instruction: 'do it' }, () => {}, new AbortController().signal);
+    expect(calls[0]?.options?.model).toBeUndefined();
+  });
+
   it('prepends the serialized contextPayload to the first prompt (TASK-14)', async () => {
     const { queryFn, calls } = fakeQuery([]);
     const adapter = new ClaudeAgentAdapter(queryFn);
