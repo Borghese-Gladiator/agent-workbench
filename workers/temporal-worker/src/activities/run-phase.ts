@@ -1032,7 +1032,7 @@ const challengeHandler: PhaseHandler = {
     // review findings purely so the human sees them. Only the real path runs it (the mock path
     // has no real diff to review); mock-path gate behaviour is therefore unchanged.
     let advisoryFindings: Finding[] = [];
-    if (ctx.strategy === 'claude') {
+    if (ctx.profile.usesRealAgent) {
       const maintainability = await runMaintainabilityReview({
         taskId: state.taskId,
         reviewInputs,
@@ -1042,8 +1042,8 @@ const challengeHandler: PhaseHandler = {
             taskId: state.taskId,
             cwd: reviewCwd,
             contextPayload: { inputs },
-            allowedTools: allowedToolsForBrokerRole('adversarial-reviewer', ctx.strategy),
-            disallowedTools: deniedToolsForBrokerRole('adversarial-reviewer', ctx.strategy),
+            allowedTools: allowedToolsForBrokerRole('adversarial-reviewer', ctx.profile),
+            disallowedTools: deniedToolsForBrokerRole('adversarial-reviewer', ctx.profile),
           });
           const { sink, flush } = createPhaseEventSink({
             artifactsDir: runState.artifactsDir as string,
@@ -1053,7 +1053,7 @@ const challengeHandler: PhaseHandler = {
             role: 'adversarial-reviewer',
             phase: 'challenge',
             attemptNumber: state.attemptNumber,
-            durable: ctx.strategy === 'claude',
+            durable: ctx.profile.usesDurableRunState,
           });
           const start = Date.now();
           const instr =
