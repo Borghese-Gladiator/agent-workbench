@@ -287,3 +287,135 @@ has its shell/nav layout (nav is a laid-out bar, not concatenated text) and the
 repository list renders as styled rows. *Test:* a check that every `className` token
 used in `src/**` resolves to either a Tailwind utility or a defined project class
 fails on an undefined name and passes once the shell classes exist.
+
+
+## Group H — Greenfield / full-MVP friction (surfaced live on the Lunch Money task)
+
+A single large greenfield task (empty repo → full FastAPI+DuckDB+UI MVP) blocked
+four separate times, each on workbench machinery rather than bad agent output. The
+implementation was complete and passed `implement` + `verify`; the gates around it
+were the problem. These four items are those blockers.
+
+### [ ] TASK-65: No QA command exists from the initial task write — `exercise` can't self-bootstrap
+
+**What's wrong.** When a task is created against a repo, there is no QA/start
+command associated with it, so the `exercise` (browser QA) phase has nothing to
+launch. `resolveStartCommand` reads `repository_commands` for a `purpose = 'start'`
+row, but that table is populated by `repo refresh` from the repo's *current*
+contents — for a greenfield task the repo was empty at registration, so the table is
+empty, `resolveStartCommand` returns `undefined`, and browser QA silently falls back
+to a trivial CLI `echo` check. That check covers no behavioral claim, so
+`everyBehavioralClaimCovered` stays false and `exercise` loops to
+`repeated-failure-no-progress`. On the Lunch Money run I had to hand-insert a
+`start` row (`.venv/bin/python -m uvicorn app.main:app …`) into the DB for browser QA
+to run at all. There is no first-class way to say "here is how you run this app"
+when the task itself is what creates the app.
+
+**What to do.** Give a task a way to declare (or the workbench a way to derive) its
+QA/start command as part of task creation or as an early phase, so `exercise` has a
+real target for a repo whose runnable form only exists *after* implement. Options:
+(1) let the task prompt / contract carry an optional `startCommand` + `baseUrl`;
+(2) re-discover commands from the *worktree* (post-implement) rather than only from
+the registered-repo snapshot; (3) infer a start command from the produced project
+(e.g. a FastAPI app → `uvicorn app.main:app`, a Vite app → `vite`). Whatever the
+source, `exercise` must be able to find it without a human editing SQLite.
+
+**Where.** `workers/temporal-worker/src/activities/command-support.ts`
+(`resolveStartCommand`), `run-phase.ts` (`exerciseHandler`, ~1056–1074), the
+task-create path / contract schema, `packages/repository/src/command-discovery.ts`.
+
+**How we'll know it's done.** A greenfield task that produces a runnable app reaches
+real browser QA against that app with **no** manual `repository_commands` insert.
+*Test:* a task fixture with an empty starting repo and a produced FastAPI/Vite app
+resolves a start command and `exercise` launches it.
+
+### [ ] TASK-66: UI dev servers are too brittle to start — add a verbose flag AND make startup robust
+
+**What's wrong.** (Added by the user — the UI keeps failing to start.) Browser QA
+starts a dev server and waits for it to serve; when the server doesn't come up in
+time the phase just throws "dev server did not become ready … within the timeout"
+with no server logs surfaced, so there's nothing to debug from. Startup is also
+brittle: `stdio: 'ignore'` on the spawned server (`browser-qa-support.ts:61`) throws
+away stdout/stderr, the readiness check is a bare fetch loop, and a slow/failed
+`install` or a wrong port reads identically as "not ready." A Vite app should never
+fail to start — a failed UI boot should be rare and, when it happens, legible.
+
+**What to do.** (1) Add a verbose flag/mode that captures and surfaces the dev
+server's stdout/stderr (don't `stdio: 'ignore'`) into the phase logs / an artifact,
+so a failed start shows *why*. (2) Make startup robust: ensure deps are installed
+before launch, give the server a generous+configurable readiness window, probe a
+real readiness signal, and prefer a preview/served build over a cold dev server
+where possible so "start" is deterministic. Goal: starting always works for a
+well-formed Vite/uvicorn app, and when it genuinely can't, the failure is explained.
+
+**Where.** `workers/temporal-worker/src/activities/browser-qa-support.ts`
+(`runBrowserQaViaServer` spawn/`stdio`/`waitForServer`, ~25–82), `exerciseHandler`
+readiness timeout + `AWB_QA_BASE_URL` handling.
+
+**How we'll know it's done.** *Unit:* a start-failure case yields captured server
+output in the phase evidence, not just a bare timeout string. *Manual:* a standard
+Vite app starts reliably across repeated runs; an intentionally broken start prints
+the underlying error.
+
+### [ ] TASK-67: `program-design` bodyless-signature check false-positives on valid TS type shapes
+
+**What's wrong.** `signatureIsBodyless()` in
+`workers/temporal-worker/src/activities/program-design-support.ts` decides whether a
+design signature is "structure" vs. a leaked "implementation body." It repeatedly
+mis-flagged **valid TypeScript type declarations** as bodies, failing
+`allSignaturesBodyless` → the `program-design` completion gate → a repair loop →
+`repeated-failure-no-progress`, on a design that was correct. Two distinct
+false-positives seen live on the Lunch Money task: (1) the original regex flagged
+*any* `;` inside `{ }`, so a UI interface like
+`interface Provenance { dateRange: [string,string]; filters: … }` tripped it (3 of 25
+type sigs); (2) after a first fix that split members on `;`/`,`, an inline object
+return type with generics —
+`Promise<{columns: ColumnMeta[]; rows: Record<string, unknown>[]; total: number}>` —
+split on the comma *inside* `Record<string, unknown>` and mis-read a fragment as a
+body (1 of 84 sigs). Either way one bad signature blocks the whole phase.
+
+**What to do.** Make the check flag only *unambiguous* statement markers (an explicit
+`return`, control flow `if/for/while/switch (…)`, `await`, a `const|let|var`
+declaration, or a `=>` with a following statement) and treat everything else inside
+braces as a type/interface/class shape. Do **not** parse "members" with a regex —
+nested generics and unions defeat naive splitting. Reconsider whether this check
+should hard-block at all, vs. warn: a slightly-too-fleshed-out design is low harm
+compared to blocking a correct one. (A hardened regex-based version was applied live
+but was still uncommitted; fold in and test it or replace it.)
+
+**Where.** `workers/temporal-worker/src/activities/program-design-support.ts`
+(`signatureIsBodyless`), its test file, `packages/workflow/src/evaluate-completion.ts`
+(`evaluateProgramDesign`).
+
+**How we'll know it's done.** *Unit:* interfaces/type literals/class shapes with
+`;`/`,` separators, optional members, unions, and generic return types all read as
+bodyless; only real statements read as a body — covering both live false-positive
+cases above. *Manual:* an L greenfield task walks `program-design` in one attempt
+with a design that carries realistic TS UI contracts.
+
+### [ ] TASK-68: `slice-diff-exceeds-cap` is an arbitrary line/file cap that dead-ends large legitimate work
+
+**What's wrong.** The velocity guardrail (`slice-guardrail.ts`, default 400 lines /
+20 files) fires a `slice-diff-exceeds-cap` human gate on any real-agent implement
+diff over the cap. For a legitimately large change (a full greenfield MVP is
+thousands of lines) it fires every implement pass, and there is **no CLI command and
+no "already acknowledged" state** to clear it — approving via the reused
+`approve-plan` update just returns to the same check on the next pass, so the run
+can't converge. The only escape is `AWB_SLICE_DIFF_CAP=0` in the worker env, which
+requires a restart (and thus a fresh task). The cap value itself is arbitrary and
+the gate as built is a dead-end, not a checkpoint.
+
+**What to do.** Simplest option per the user: **remove the cap**, or at minimum make
+it a soft, acknowledgeable checkpoint — a one-time human ack that is recorded on run
+state so the next implement pass doesn't re-raise it, and/or a per-task override
+(large greenfield tasks legitimately exceed any per-slice cap). If kept, it needs a
+first-class resolve path in the CLI/daemon, not the reused `approve-plan` update.
+
+**Where.** `workers/temporal-worker/src/activities/slice-guardrail.ts`,
+`run-phase.ts` (`implementHandler` cap check, ~891–919), the gate-resolution path in
+`packages/workflow/src/task-workflow.ts` + the CLI.
+
+**How we'll know it's done.** A large greenfield implement either isn't gated on
+diff size, or is gated exactly once with an ack that persists so the run proceeds on
+the next pass — verified by an implement diff over the cap reaching `verify` without
+`AWB_SLICE_DIFF_CAP=0` and without looping.
