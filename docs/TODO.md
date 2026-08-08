@@ -68,7 +68,7 @@ non-claude runtime, as previously proven for Pi on `wip-browser-games`.
 
 Lower-risk, mostly-docs/skills work + the honest self-dogfood.
 
-### [ ] TASK-45: Repo-structure legibility — per-directory AGENT(S).md + one global map
+### [x] TASK-45: Repo-structure legibility — per-directory AGENT(S).md + one global map
 
 **What's wrong.** A recurring agent-legibility gap (see the 2026-07-20 audit):
 `workers/` has no README convention and `run-phase.ts` is an 806-line hub. The
@@ -86,7 +86,7 @@ directory, not a doc framework.
 **How we'll know it's done.** Every top-level package + the activities dir has a
 one-line self-description reachable from a single map file.
 
-### [ ] TASK-48: "Implement a feature" skill
+### [x] TASK-48: "Implement a feature" skill
 
 **What's wrong.** There's no repo skill that captures the house workflow for
 implementing a feature through the workbench (plan-first, slice sizing, gate
