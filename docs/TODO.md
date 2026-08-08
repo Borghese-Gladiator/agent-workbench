@@ -64,6 +64,60 @@ conformance tests. *Manual:* a real (draft) PR produced under at least one
 non-claude runtime, as previously proven for Pi on `wip-browser-games`.
 
 
+## Group C — Quality gates
+
+### [ ] TASK-63: `exercise` QA gate is inconsistent — passed an EMPTY change (Pi) yet blocked a real one (OpenCode), same model
+
+**What's wrong.** Driving the *identical* trivial task ("add a one-line note to
+README.md stating how many games are available") on `wip-browser-games` under two
+runtimes, both on the same local model `ollama/qwen3-coder:30b`, produced opposite
+QA outcomes that were both wrong:
+
+- **Pi run (`878058b7`, 2026-08-07):** the builder committed **only
+  `package-lock.json` — no README change at all** (`git diff base..HEAD -- README.md`
+  empty). `exercise` nonetheless **cleared on attempt 1**, the run reached `release`,
+  and opened draft PR `browser-games__ai#13`. QA green on a **no-op**.
+- **OpenCode run (`082de7e9`, 2026-08-08):** the builder made a **real (off-target)
+  README edit** and `exercise` **looped `implement→verify→exercise` 3× → parked at
+  `repeated-failure-no-progress`**, never reaching a PR.
+
+Same gate passed the empty candidate and blocked the non-empty one. Both runs
+produced `terminal-recording | passed` evidence, so the divergence is in
+`evaluateExercise`'s other conditions and/or the plan/contract each planner emitted
+— NOT in the QA recording. This is TASK-42's rubber-stamp thesis reproduced: the gate
+doesn't verify the behavioral claim's *content* (Pi's empty change passed), and what
+does trip it isn't tied to artifact correctness (OpenCode's real change blocked). It
+also invalidates the earlier "Pi live-proven end-to-end" claim — PR #13 was empty.
+
+**Two candidate contributors (confirm, don't assume).** (1) Rubber-stamp:
+`evaluateExercise` clears without asserting the contract's behavioral claim is
+satisfied by the candidate diff, so an empty/no-op candidate passes. (2) Gate skew:
+TASK-42's QA-strength hardening landed on `main` *between* the Pi and OpenCode runs,
+so the two may have been judged by different gate code. Either way an empty candidate
+should never pass.
+
+**What to do.** Instrument `evaluateExercise` to log the exact `missing[]` per attempt,
+re-run one OpenCode task, capture the failing condition. Then make the gate reject a
+candidate whose committed diff doesn't touch the artifact the behavioral claim is
+about, and confirm the CLI-QA path (not just browser QA) enforces the TASK-42
+strong-assertion requirement. Runtime-independent — a workbench QA-gate bug, not an
+adapter defect; the OpenCode/Pi adapters have full feature parity (both drive the same
+`runBuilderSession` git-candidate path).
+
+**Where.** `packages/workflow/src/evaluate-completion.ts` (`evaluateExercise` + temp
+`missing[]` logging), `packages/workflow/src/completion-context.ts` (`exercise` fields),
+`packages/qa/` (CLI-QA assertion strength), plan→contract claim wiring. Relates to
+TASK-42 and the `qa-static-checks-miss-runtime-bugs` / `qa-cold-reentry-nonconvergence`
+learnings.
+
+**How we'll know it's done.** *Unit:* an `evaluateExercise` test where the committed
+diff does NOT touch the claim's target artifact leaves `missing` non-empty (a no-op
+candidate like Pi's fails). *Manual:* re-drive the README task under OpenCode and
+confirm it either produces a real note that passes QA, or is blocked with a *correct*
+reason (missing note) — never the current split where empty passes and real-but-wrong
+loops forever.
+
+
 ## Group G — Legibility, DX & dogfooding
 
 Lower-risk, mostly-docs/skills work + the honest self-dogfood.

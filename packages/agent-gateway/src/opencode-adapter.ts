@@ -75,9 +75,13 @@ export class OpenCodeAgentAdapter extends CliStreamAdapter {
   }
 
   protected buildArgv(ctx: CliArgvContext): string[] {
-    // Materialize the capability-scoped agent and run under it — the OpenCode tool boundary.
+    // `--dir` pins OpenCode's project directory to the task worktree. OpenCode does NOT confine its
+    // tools to the process cwd — it infers a project root and otherwise drifts to wherever the daemon
+    // runs (the workbench repo), editing the wrong repository (TASK-31; observed live: builder read/
+    // wrote agent-workbench instead of the target, so QA never converged). Verified: `run --dir` scopes
+    // its bash/read/edit tools to that directory.
     const agent = materializeOpenCodeAgent(ctx.allowedTools, this.writeAgent);
-    const args = ['run', '--format', 'json', '--agent', agent];
+    const args = ['run', '--format', 'json', '--dir', ctx.cwd, '--agent', agent];
     if (this.model) args.push('--model', this.model);
     if (ctx.resumeSessionId) args.push('--session', ctx.resumeSessionId);
     // The prompt is a positional message argument; pass it last so flags aren't swallowed.

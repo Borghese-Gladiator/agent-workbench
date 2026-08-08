@@ -191,6 +191,8 @@ describe('OpenCodeAgentAdapter', () => {
     const args = invocations[0]!.args;
     expect(args.slice(0, 3)).toEqual(['run', '--format', 'json']);
     expect(args).not.toContain('--dangerously-skip-permissions');
+    // --dir pins OpenCode to the worktree so its tools don't drift to the daemon's cwd (TASK-31).
+    expect(args[args.indexOf('--dir') + 1]).toBe('/tmp/worktree');
     const agentIdx = args.indexOf('--agent');
     expect(agentIdx).toBeGreaterThan(-1);
     expect(args[agentIdx + 1]).toMatch(/^awb-[0-9a-f]{10}$/);

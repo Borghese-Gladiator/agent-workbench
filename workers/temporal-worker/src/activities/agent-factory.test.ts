@@ -6,11 +6,38 @@ import {
   PiAgentAdapter,
   OpenCodeAgentAdapter,
 } from '@awb/agent-gateway';
-import { createAgentAdapter, resolveAgentRuntime, resolveRuntimeProfile, scriptMockTurns } from './agent-factory.js';
+import {
+  createAgentAdapter,
+  resolveAgentRuntime,
+  resolveRuntimeConfig,
+  resolveRuntimeProfile,
+  scriptMockTurns,
+} from './agent-factory.js';
 
 describe('agent factory', () => {
   afterEach(() => {
     delete process.env.AWB_AGENT_RUNTIME;
+    delete process.env.AWB_AGENT_MODEL;
+    delete process.env.AWB_AGENT_BINARY;
+  });
+
+  it('resolveRuntimeConfig is empty when no model/binary env is set', () => {
+    expect(resolveRuntimeConfig()).toEqual({});
+  });
+
+  it('resolveRuntimeConfig sources model + binary from the environment', () => {
+    process.env.AWB_AGENT_MODEL = 'ollama/qwen3-coder:30b';
+    process.env.AWB_AGENT_BINARY = '/usr/local/bin/opencode';
+    expect(resolveRuntimeConfig()).toEqual({ model: 'ollama/qwen3-coder:30b', binary: '/usr/local/bin/opencode' });
+  });
+
+  it('an env model overrides every runtime profile (incl. Pi per-phase routing)', () => {
+    process.env.AWB_AGENT_MODEL = 'ollama/custom-model';
+    const config = resolveRuntimeConfig();
+    // Pi normally routes challenge → llama3.2; an explicit config.model wins for every phase.
+    expect(resolveRuntimeProfile('pi').modelForPhase('challenge', config)).toBe('ollama/custom-model');
+    expect(resolveRuntimeProfile('opencode').modelForPhase('implement', config)).toBe('ollama/custom-model');
+    expect(resolveRuntimeProfile('codex').modelForPhase('plan', config)).toBe('ollama/custom-model');
   });
 
   it('defaults to the mock adapter when AWB_AGENT_RUNTIME is unset', () => {

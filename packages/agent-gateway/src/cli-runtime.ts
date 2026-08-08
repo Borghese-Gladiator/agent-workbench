@@ -119,6 +119,13 @@ export function newCliAccumulator(): CliStreamAccumulator {
 export interface CliArgvContext {
   /** The full prompt for a cold turn (context preamble + instruction) or the bare instruction on resume. */
   prompt: string;
+  /**
+   * The absolute worktree directory the session runs in. The base already spawns the CLI with this as
+   * its process `cwd`, but a runtime whose TOOLS don't inherit the process cwd (OpenCode infers its
+   * own project root and drifts to wherever the daemon runs — TASK-31) must pass it explicitly, e.g.
+   * `opencode run --dir <cwd>`.
+   */
+  cwd: string;
   /** The prior session id when resuming, else undefined (cold start). */
   resumeSessionId?: string;
   /** Turn budget, if the caller set one. */
@@ -244,6 +251,7 @@ export abstract class CliStreamAdapter implements CodingAgentAdapter {
 
     const args = this.buildArgv({
       prompt,
+      cwd: state.cwd,
       resumeSessionId: state.resumeSessionId,
       maxTurns: assignment.stopConditions?.maxTurns,
       allowedTools: state.allowedTools,
