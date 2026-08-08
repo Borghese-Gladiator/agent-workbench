@@ -33,12 +33,49 @@ export interface MaintainabilityFinding {
   description: string;
 }
 
+/** Per-model token + cost breakdown for a task (from SQLite model_invocations, summed by model). */
+export interface TokenBreakdown {
+  totals: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+    cacheCreationInputTokens: number;
+    costUsd: number;
+  };
+  byModel: Record<
+    string,
+    {
+      inputTokens: number;
+      outputTokens: number;
+      cachedInputTokens: number;
+      cacheCreationInputTokens: number;
+      costUsd: number;
+    }
+  >;
+}
+
+/**
+ * Whether the durable projection (what the list/board read) is behind the live workflow. The detail
+ * page reads live state, so it reports this so the UI can show "the index is behind" instead of
+ * silently disagreeing with the list (the walkthrough's core failure).
+ */
+export interface TaskFreshness {
+  liveWorkflowAvailable: boolean;
+  workflowUpdatedAt: string | null;
+  indexedAt: string;
+  isIndexBehind: boolean;
+}
+
 export interface TaskStateResponse {
   state: TaskWorkflowState;
   openFindings: string[];
   pendingHumanGate: TaskWorkflowState['pendingHumanGate'];
   /** Advisory maintainability findings (category maintainability, severity note). */
   maintainabilityFindings?: MaintainabilityFinding[];
+  /** Per-model token/cost breakdown — already on the wire; previously dropped by the client type. */
+  tokenBreakdown?: TokenBreakdown;
+  /** Index-vs-live freshness for this task. */
+  freshness?: TaskFreshness;
 }
 
 /** A committed QA-media artifact the Evidence Viewer can play/preview locally. */
@@ -71,6 +108,19 @@ export interface TaskSummary {
   size: TaskSize | null;
   createdAt: string;
   updatedAt: string;
+  // task-summary projection fields (the durable list/board read model). `derivedStatus` is the
+  // canonical status from the daemon — the client must not re-derive it. `indexedAt` is the
+  // projection clock; when it lags the live workflow, the detail page reports the index is behind.
+  derivedStatus: string;
+  attemptCount: number;
+  openFindingCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number | null;
+  pendingGateReason: string | null;
+  candidateSha: string | null;
+  pullRequestUrl: string | null;
+  indexedAt: string;
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {

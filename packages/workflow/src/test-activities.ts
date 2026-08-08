@@ -20,6 +20,7 @@ export function createScriptedActivities(
       cursors.set(phase, cursor + 1);
       return result;
     },
+    async syncTaskState(): Promise<void> {},
   };
 }
 

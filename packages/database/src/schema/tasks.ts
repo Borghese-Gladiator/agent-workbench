@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
 import type { TaskPhase, RunCondition, DeliveryState, TaskSize } from '@awb/domain';
 import { repositories } from './repository.js';
 
@@ -38,4 +38,37 @@ export const phaseAttempts = sqliteTable('phase_attempts', {
   startedAt: text('started_at').notNull(),
   endedAt: text('ended_at'),
   outcome: text('outcome'),
+  /** The prior phase-attempt id this one retries; null on a first attempt. */
+  retryOf: text('retry_of'),
+});
+
+/**
+ * Durable, denormalized per-task read model. The daemon recomputes a row on every workflow
+ * transition (see refreshTaskSummary) so list/board/approval pages read this instead of a live
+ * Temporal query per task. `derivedStatus` comes from the domain deriveTaskStatus; `indexedAt` is
+ * the projection clock the detail page compares against live workflow state for freshness.
+ */
+export const taskSummary = sqliteTable('task_summary', {
+  taskId: text('task_id')
+    .primaryKey()
+    .references(() => tasks.id),
+  repositoryId: text('repository_id')
+    .notNull()
+    .references(() => repositories.id),
+  phase: text('phase').notNull().$type<TaskPhase>(),
+  condition: text('condition').notNull().$type<RunCondition>(),
+  deliveryState: text('delivery_state').notNull().$type<DeliveryState>(),
+  size: text('size').$type<TaskSize>(),
+  derivedStatus: text('derived_status').notNull(),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  openFindingCount: integer('open_finding_count').notNull().default(0),
+  inputTokens: integer('input_tokens').notNull().default(0),
+  outputTokens: integer('output_tokens').notNull().default(0),
+  costUsd: real('cost_usd'),
+  pendingGateReason: text('pending_gate_reason'),
+  candidateSha: text('candidate_sha'),
+  pullRequestUrl: text('pull_request_url'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  indexedAt: text('indexed_at').notNull(),
 });

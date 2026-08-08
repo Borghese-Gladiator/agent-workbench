@@ -17,13 +17,14 @@ import {
 import type { WorkbenchDatabase } from '@awb/database';
 import {
   upsertTask,
-  listTasksWithRepository,
+  listTaskSummaries,
+  getTaskSummary,
   deleteTask,
   getTokenBreakdown,
   getRuntimeAttribution,
   listFindingsByTask,
 } from '@awb/database';
-import type { TaskSize } from '@awb/domain';
+import type { HumanGateReason, TaskFreshness, TaskSize } from '@awb/domain';
 import { routeFeedback, NO_ROUTING_SIGNAL, type FeedbackRoutingSignal } from '@awb/github';
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
 import { taskQueueName } from '../temporal-worker-constants.js';
@@ -41,6 +42,19 @@ export interface CreatedTaskRecord {
   size: TaskSize | null;
   createdAt: string;
   updatedAt: string;
+  // --- task-summary projection fields (additive; the list/board/approval read model) ---
+  /** Canonical derived status (domain deriveTaskStatus). Clients must not re-derive. */
+  derivedStatus: string;
+  attemptCount: number;
+  openFindingCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number | null;
+  pendingGateReason: HumanGateReason | null;
+  candidateSha: string | null;
+  pullRequestUrl: string | null;
+  /** When the durable projection row was last recomputed — the freshness/index clock. */
+  indexedAt: string;
 }
 
 export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchDatabase): void {
@@ -66,12 +80,15 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
   });
 
   app.get('/api/tasks', async () => {
-    return listTasksWithRepository(database.db).map(
+    // Read the durable task-summary projection (kept fresh on every workflow transition) rather than
+    // a live Temporal query per task — so the list stays truthful even for parked/awaiting-human
+    // tasks, and carries the rollups the board/approval queue need.
+    return listTaskSummaries(database.db).map(
       (t): CreatedTaskRecord => ({
-        taskId: t.id,
+        taskId: t.taskId,
         repositoryId: t.repositoryId,
         repositoryName: t.repositoryName,
-        workflowId: workflowIdFor(t.repositoryId, t.id),
+        workflowId: workflowIdFor(t.repositoryId, t.taskId),
         prompt: t.prompt,
         phase: t.phase,
         condition: t.condition,
@@ -79,6 +96,16 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
         size: t.size ?? null,
         createdAt: t.createdAt,
         updatedAt: t.updatedAt,
+        derivedStatus: t.derivedStatus,
+        attemptCount: t.attemptCount,
+        openFindingCount: t.openFindingCount,
+        inputTokens: t.inputTokens,
+        outputTokens: t.outputTokens,
+        costUsd: t.costUsd,
+        pendingGateReason: t.pendingGateReason,
+        candidateSha: t.candidateSha,
+        pullRequestUrl: t.pullRequestUrl,
+        indexedAt: t.indexedAt,
       }),
     );
   });
@@ -92,6 +119,25 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
         const state = await handle.query(getCurrentStateQuery);
         const openFindings = await handle.query(getOpenFindingsQuery);
         const pendingHumanGate = await handle.query(getPendingHumanGateQuery);
+
+        // Self-heal the durable projection from the live workflow state we just read. The worker
+        // pushes state on every transition (syncTaskState), but opening a task is also a natural
+        // point to reconcile — so even a task whose worker sync was missed (e.g. the daemon was down
+        // when it parked) has its list/board row corrected the moment someone views it. This is what
+        // makes the list and detail agree.
+        upsertTask(
+          database.db,
+          {
+            id: request.params.taskId,
+            repositoryId: request.params.repositoryId,
+            prompt: state.prompt ?? '',
+            phase: state.phase,
+            condition: state.condition,
+            deliveryState: state.deliveryState,
+          },
+          { pendingGateReason: pendingHumanGate ? pendingHumanGate.reason : null },
+        );
+
         // Token breakdown from SQLite (not Workflow state, which stays compact — docs/temporal-workflows).
         const tokenBreakdown = getTokenBreakdown(database.db, request.params.taskId);
         const runtimeAttribution = getRuntimeAttribution(database.db, request.params.taskId);
@@ -101,6 +147,19 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
         const maintainabilityFindings = listFindingsByTask(database.db, request.params.taskId)
           .filter((f) => f.category === 'maintainability' && f.severity === 'note')
           .map((f) => ({ id: f.id, path: f.path, line: f.line, description: f.description }));
+
+        // Freshness: the detail page reads LIVE workflow state, so it can tell the user when the
+        // durable summary (which the list/board read) is behind. After the self-heal above the two
+        // agree, so isIndexBehind is false here — but the field is part of the contract so the client
+        // can render a freshness banner in cases the daemon can't reach the workflow.
+        const summary = getTaskSummary(database.db, request.params.taskId);
+        const freshness: TaskFreshness = {
+          liveWorkflowAvailable: true,
+          workflowUpdatedAt: null,
+          indexedAt: summary?.indexedAt ?? new Date().toISOString(),
+          isIndexBehind: false,
+        };
+
         return {
           state,
           openFindings,
@@ -108,10 +167,25 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
           tokenBreakdown,
           runtimeAttribution,
           maintainabilityFindings,
+          freshness,
         };
       } catch (err) {
-        reply.code(404);
-        return { error: err instanceof Error ? err.message : String(err) };
+        // The workflow is unreachable (completed+evicted, terminated, or the worker is down). Fall
+        // back to the durable projection so the detail page still renders, and flag that live state
+        // is unavailable and the index may be behind.
+        const summary = getTaskSummary(database.db, request.params.taskId);
+        if (!summary) {
+          reply.code(404);
+          return { error: err instanceof Error ? err.message : String(err) };
+        }
+        const freshness: TaskFreshness = {
+          liveWorkflowAvailable: false,
+          workflowUpdatedAt: null,
+          indexedAt: summary.indexedAt,
+          isIndexBehind: true,
+        };
+        reply.code(200);
+        return { summary, freshness, liveUnavailable: true };
       }
     },
   );

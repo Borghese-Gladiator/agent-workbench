@@ -7,7 +7,7 @@ import {
   contextComposition,
 } from '../schema/index.js';
 import type { DrizzleDb } from '../connection.js';
-import { ensureRunAndPhaseAttempt } from './tasks.js';
+import { ensureRunAndPhaseAttempt, refreshTaskSummary } from './tasks.js';
 
 /**
  * Persists a phase attempt's observability: agent_sessions + their
@@ -88,6 +88,10 @@ export function persistPhaseObservability(db: DrizzleDb, payload: PhaseObservabi
           .run();
       }
     }
+
+    // New model_invocations change the task's token/cost rollup — refresh the projection inside the
+    // same transaction so the durable summary never lags the observability write.
+    refreshTaskSummary(tx as unknown as DrizzleDb, payload.taskId);
   });
 }
 

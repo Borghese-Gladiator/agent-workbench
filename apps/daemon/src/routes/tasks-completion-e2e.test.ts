@@ -10,8 +10,9 @@ import { repositories } from '@awb/database';
 import { buildServer, type DaemonServer } from '../server.js';
 import { setTemporalClientForTesting } from '../temporal-client.js';
 import { taskQueueName } from '../temporal-worker-constants.js';
-// Import the real runPhase Activity from the worker's built output, mirroring run-phase-e2e.test.ts.
-import { runPhase } from '../../../../workers/temporal-worker/dist/activities/run-phase.js';
+// Import the real runPhase + syncTaskState Activities from the worker's built output, mirroring
+// run-phase-e2e.test.ts. syncTaskState must be registered or the workflow stalls on its proxy call.
+import { runPhase, syncTaskState } from '../../../../workers/temporal-worker/dist/activities/run-phase.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -88,7 +89,7 @@ describe('daemon routes drive a task to completion', () => {
       connection: testEnv.nativeConnection,
       taskQueue: taskQueueName(),
       workflowsPath: new URL('../../../../packages/workflow/dist/task-workflow.js', import.meta.url).pathname,
-      activities: { runPhase },
+      activities: { runPhase, syncTaskState },
     });
 
     const result = await worker.runUntil(async () => {
@@ -130,9 +131,13 @@ describe('daemon routes drive a task to completion', () => {
       });
       expect(merged.statusCode).toBe(200);
 
+      // Wait for the terminal condition, not just the phase: the workflow reaches `assimilate` a
+      // beat before it sets `condition: 'completed'` (the completion transition + its state sync are
+      // awaited steps), so polling on phase alone can observe the intermediate `running`.
       await poll(async () => {
         const show = await server.app.inject({ method: 'GET', url: base });
-        return show.json().state?.phase === 'assimilate';
+        const s = show.json().state;
+        return s?.phase === 'assimilate' && s?.condition === 'completed';
       });
 
       const final = await server.app.inject({ method: 'GET', url: base });
@@ -149,7 +154,7 @@ describe('daemon routes drive a task to completion', () => {
       connection: testEnv.nativeConnection,
       taskQueue: taskQueueName(),
       workflowsPath: new URL('../../../../packages/workflow/dist/task-workflow.js', import.meta.url).pathname,
-      activities: { runPhase },
+      activities: { runPhase, syncTaskState },
     });
 
     await worker.runUntil(async () => {

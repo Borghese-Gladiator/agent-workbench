@@ -16,6 +16,15 @@ import { shouldEscalateToHuman } from './loop-routing.js';
 
 export interface TaskActivities {
   runPhase(input: { phase: TaskPhase; state: TaskWorkflowState }): Promise<PhaseAttemptResult>;
+  syncTaskState(input: {
+    taskId: string;
+    repositoryId: string;
+    prompt: string;
+    phase: string;
+    condition: string;
+    deliveryState: string;
+    pendingHumanGate?: TaskWorkflowState['pendingHumanGate'];
+  }): Promise<void>;
 }
 
 const activities = proxyActivities<TaskActivities>({
@@ -29,6 +38,18 @@ const activities = proxyActivities<TaskActivities>({
     backoffCoefficient: 2,
   },
 });
+
+async function syncState(state: TaskWorkflowState): Promise<void> {
+  await activities.syncTaskState({
+    taskId: state.taskId,
+    repositoryId: state.repositoryId,
+    prompt: state.prompt ?? '',
+    phase: state.phase,
+    condition: state.condition,
+    deliveryState: state.deliveryState,
+    pendingHumanGate: state.pendingHumanGate,
+  });
+}
 
 // Updates — synchronous, validated against current state before applying.
 export const approveContractUpdate = defineUpdate<void, [{ contractVersion: number; size?: TaskSize }]>(
@@ -286,12 +307,18 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
         break;
       }
     }
+
+    // Push the transition (phase advance / park awaiting-human / block / cancel) into the daemon's
+    // durable read model so the tasks list reflects the live coordination state instead of the
+    // stale creation-time row.
+    await syncState(state);
   }
 
   if (state.phase === 'assimilate' && state.condition !== 'cancelled') {
     state = { ...state, condition: 'completed' };
   }
 
+  await syncState(state);
   return state;
 }
 

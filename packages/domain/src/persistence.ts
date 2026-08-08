@@ -3,6 +3,7 @@ import { TaskContractSchema, TaskSizeSchema } from './contract.js';
 import { ImplementationPlanSchema, ProgramDesignSchema } from './plan.js';
 import { WorkspaceLeaseSchema } from './workspace.js';
 import { EvidenceSchema, FindingSchema, ArtifactRecordSchema } from './evidence.js';
+import { HumanGateSchema } from './lifecycle.js';
 
 /**
  * The serializable snapshot of the worker's per-task run-state that crosses the worker→daemon
@@ -23,6 +24,14 @@ export const RunStateSnapshotSchema = z.object({
   programDesign: ProgramDesignSchema.optional(),
   baseSha: z.string().optional(),
   candidateSha: z.string().optional(),
+  /**
+   * The task's pending human gate, when it is parked awaiting a decision. Carried on the snapshot so
+   * the daemon can persist the gate reason into the task-summary projection — the durable list/board
+   * read model — without a live Temporal query. Absent when no gate is pending. This is the write
+   * path that keeps the projection's `pending_gate_reason` fresh once a task parks awaiting-human
+   * (the state where the `tasks` row otherwise froze).
+   */
+  pendingHumanGate: HumanGateSchema.optional(),
   worktreePath: z.string().optional(),
   lease: WorkspaceLeaseSchema.optional(),
   verificationEvidence: z.array(EvidenceSchema),

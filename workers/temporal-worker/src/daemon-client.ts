@@ -1,4 +1,4 @@
-import type { RunStateSnapshot, SemanticEvent, PhaseObservability } from '@awb/domain';
+import type { RunStateSnapshot, SemanticEvent, PhaseObservability, HumanGate } from '@awb/domain';
 import { resolveRuntimeConfig } from '@awb/config';
 
 /**
@@ -44,6 +44,7 @@ export interface DaemonClient {
     phase?: string;
     condition?: string;
     deliveryState?: string;
+    pendingHumanGate?: HumanGate;
   }): Promise<void>;
   saveRunState(snapshot: RunStateSnapshot): Promise<void>;
   postEvent(event: SemanticEvent): Promise<void>;

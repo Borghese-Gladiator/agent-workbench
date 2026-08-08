@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import type { WorkbenchDatabase } from '@awb/database';
-import { upsertTask, persistRunStateSnapshot, insertSemanticEvent, persistPhaseObservability } from '@awb/database';
+import { upsertTask, persistRunStateSnapshot, insertSemanticEvent, persistPhaseObservability, refreshTaskSummary } from '@awb/database';
 import { RunStateSnapshotSchema, SemanticEventSchema, PhaseObservabilitySchema } from '@awb/domain';
+import type { HumanGate } from '@awb/domain';
 import { getRepository, refreshRepositorySnapshot } from '@awb/repository';
 import type { SemanticEventBus } from '../event-bus.js';
 
@@ -17,18 +18,22 @@ export function registerInternalRoutes(
   database: WorkbenchDatabase,
   eventBus: SemanticEventBus,
 ): void {
-  app.put<{ Params: { taskId: string }; Body: { repositoryId: string; prompt: string; phase?: string; condition?: string; deliveryState?: string } }>(
+  app.put<{ Params: { taskId: string }; Body: { repositoryId: string; prompt: string; phase?: string; condition?: string; deliveryState?: string; pendingHumanGate?: HumanGate } }>(
     '/internal/tasks/:taskId',
     async (request, reply) => {
       try {
-        upsertTask(database.db, {
-          id: request.params.taskId,
-          repositoryId: request.body.repositoryId,
-          prompt: request.body.prompt,
-          phase: request.body.phase as never,
-          condition: request.body.condition as never,
-          deliveryState: request.body.deliveryState as never,
-        });
+        upsertTask(
+          database.db,
+          {
+            id: request.params.taskId,
+            repositoryId: request.body.repositoryId,
+            prompt: request.body.prompt,
+            phase: request.body.phase as never,
+            condition: request.body.condition as never,
+            deliveryState: request.body.deliveryState as never,
+          },
+          { pendingGateReason: request.body.pendingHumanGate ? request.body.pendingHumanGate.reason : null },
+        );
         return { ok: true };
       } catch (err) {
         reply.code(500);
@@ -49,12 +54,25 @@ export function registerInternalRoutes(
     }
     try {
       // The task row must exist before its lifecycle children (FK); upsert it from the snapshot.
-      upsertTask(database.db, {
-        id: parsed.data.taskId,
-        repositoryId: parsed.data.repositoryId,
-        prompt: parsed.data.prompt ?? '',
-      });
+      // Pass the pending gate + candidate SHA so the task-summary projection captures them — this is
+      // the write that keeps the durable read model fresh once a task parks awaiting-human (the state
+      // where the bare `tasks` row otherwise stopped moving and the list went stale).
+      upsertTask(
+        database.db,
+        {
+          id: parsed.data.taskId,
+          repositoryId: parsed.data.repositoryId,
+          prompt: parsed.data.prompt ?? '',
+        },
+        {
+          pendingGateReason: parsed.data.pendingHumanGate ? parsed.data.pendingHumanGate.reason : null,
+          ...(parsed.data.candidateSha !== undefined ? { candidateSha: parsed.data.candidateSha } : {}),
+        },
+      );
       persistRunStateSnapshot(database.db, parsed.data);
+      // persistRunStateSnapshot writes evidence/findings/artifacts that change the rollups; refresh
+      // once more so open-finding counts and candidate SHA reflect what was just persisted.
+      refreshTaskSummary(database.db, parsed.data.taskId);
       return { ok: true };
     } catch (err) {
       reply.code(500);

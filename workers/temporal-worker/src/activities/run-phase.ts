@@ -8,6 +8,7 @@ import type {
   ProgramDesign,
   ValidatedCommand,
   Finding,
+  HumanGate,
 } from '@awb/domain';
 import type { TaskWorkflowState } from '@awb/workflow';
 import { evaluatePhaseCompletion, routeLoop, type CompletionContext } from '@awb/workflow';
@@ -1732,6 +1733,42 @@ export async function runPhase(input: {
       retryScheduled,
     });
     throw err;
+  }
+}
+
+/**
+ * Push the workflow's evolving coordination state (phase/condition/deliveryState/pendingHumanGate)
+ * back into the daemon's durable read model on every transition, so `GET /api/tasks` stops going
+ * stale once the task advances phases or parks awaiting-human. Best-effort: a sync failure is logged
+ * to stderr and never fails the workflow (the workflow calls this as a side-effect activity, not a
+ * gate). A no-op under a non-durable profile, mirroring `daemon === undefined` when
+ * `!profile.usesDurableRunState`.
+ */
+export async function syncTaskState(input: {
+  taskId: string;
+  repositoryId: string;
+  prompt: string;
+  phase: string;
+  condition: string;
+  deliveryState: string;
+  pendingHumanGate?: HumanGate;
+}): Promise<void> {
+  const profile = resolveRuntimeProfile(resolveAgentRuntime());
+  if (!profile.usesDurableRunState) return;
+  try {
+    await createDaemonClient().upsertTask({
+      taskId: input.taskId,
+      repositoryId: input.repositoryId,
+      prompt: input.prompt,
+      phase: input.phase,
+      condition: input.condition,
+      deliveryState: input.deliveryState,
+      pendingHumanGate: input.pendingHumanGate,
+    });
+  } catch (err) {
+    process.stderr.write(
+      `[syncTaskState] best-effort sync failed for ${input.taskId}: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
   }
 }
 

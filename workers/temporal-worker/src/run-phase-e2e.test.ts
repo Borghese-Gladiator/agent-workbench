@@ -12,7 +12,7 @@ import {
   pullRequestMergedSignal,
   getCurrentStateQuery,
 } from '@awb/workflow';
-import { runPhase } from './activities/run-phase.js';
+import { runPhase, syncTaskState } from './activities/run-phase.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -87,7 +87,7 @@ describe('runPhase wired for real (E2E through TaskWorkflow)', () => {
       // TaskWorkflow itself is unchanged (built by an earlier milestone) — only runPhase, this
       // task's actual deliverable, is real here (not a scripted fake).
       workflowsPath: new URL('../../../packages/workflow/dist/task-workflow.js', import.meta.url).pathname,
-      activities: { runPhase },
+      activities: { runPhase, syncTaskState },
     });
 
     const result = await worker.runUntil(async () => {
@@ -127,7 +127,7 @@ describe('runPhase wired for real (E2E through TaskWorkflow)', () => {
       connection: testEnv.nativeConnection,
       taskQueue,
       workflowsPath: new URL('../../../packages/workflow/dist/task-workflow.js', import.meta.url).pathname,
-      activities: { runPhase },
+      activities: { runPhase, syncTaskState },
     });
 
     const result = await worker.runUntil(async () => {
@@ -170,7 +170,7 @@ describe('runPhase wired for real (E2E through TaskWorkflow)', () => {
       connection: testEnv.nativeConnection,
       taskQueue,
       workflowsPath: new URL('../../../packages/workflow/dist/task-workflow.js', import.meta.url).pathname,
-      activities: { runPhase },
+      activities: { runPhase, syncTaskState },
     });
 
     const result = await worker.runUntil(async () => {

@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import type { WorkbenchDatabase } from '@awb/database';
+import { backfillTaskSummaries } from '@awb/database';
 import { initDataDir } from '@awb/config';
 import { openWorkbenchDatabase } from './db.js';
 import { SemanticEventBus } from './event-bus.js';
@@ -23,6 +24,10 @@ export async function buildServer(): Promise<DaemonServer> {
   await app.register(fastifyWebsocket);
 
   const database = openWorkbenchDatabase();
+  // Project a task-summary row for any pre-existing task that lacks one (tasks created before the
+  // projection existed), so the list/board are complete on first load rather than after each task's
+  // next workflow write.
+  backfillTaskSummaries(database.db);
   const { layout } = initDataDir();
   const eventBus = new SemanticEventBus();
 
