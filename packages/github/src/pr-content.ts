@@ -19,6 +19,19 @@ export interface PrContentInput {
 
 const TITLE_MAX = 72;
 
+/** The bold attribution line prepended to every message the workbench posts to GitHub. */
+export const CLAUDE_CODE_SIGNATURE = '**Claude Code says**';
+
+/**
+ * Prepends the Claude Code signature to a posted GitHub message body. An empty body is returned
+ * unchanged, so renderers that yield '' when there is nothing to show (e.g. renderQaMediaSection)
+ * still post nothing rather than a bare, contentless signature.
+ */
+export function withClaudeCodeSignature(body: string): string {
+  if (body.length === 0) return body;
+  return `${CLAUDE_CODE_SIGNATURE}\n\n${body}`;
+}
+
 /**
  * Splits an "In <scope>, <action>" objective into its scope and action clauses. Returns
  * `undefined` when there is no such preamble. Shared by the title path (which may render the scope
@@ -134,22 +147,24 @@ export function renderPrBody(input: PrContentInput): string {
   }
   if (changes.length === 0) changes.push('_No structured change summary was recorded._');
 
-  return [
-    '## Background',
-    '',
-    input.objective.trim() || '_No objective recorded._',
-    '',
-    '## Changes',
-    '',
-    ...changes,
-    '',
-    '## Test plan',
-    '',
-    renderTestPlan(input.evidence),
-    '',
-    '---',
-    `<sub>Delivered by the Agentic Workbench · candidate \`${input.candidateSha.slice(0, 12)}\`</sub>`,
-  ].join('\n');
+  return withClaudeCodeSignature(
+    [
+      '## Background',
+      '',
+      input.objective.trim() || '_No objective recorded._',
+      '',
+      '## Changes',
+      '',
+      ...changes,
+      '',
+      '## Test plan',
+      '',
+      renderTestPlan(input.evidence),
+      '',
+      '---',
+      `<sub>Delivered by the Agentic Workbench · candidate \`${input.candidateSha.slice(0, 12)}\`</sub>`,
+    ].join('\n'),
+  );
 }
 
 /** The Test plan section: one readable line per evidence record, grouped pass/fail, no raw claim ids. */
@@ -238,5 +253,5 @@ export function renderQaMediaSection(input: {
   if (lines.length === 0) return '';
 
   const what = input.qaSummary?.trim() || 'Exercised the changed behavior in a real browser.';
-  return [`## Browser QA`, '', what, '', ...lines].join('\n').trimEnd();
+  return withClaudeCodeSignature([`## Browser QA`, '', what, '', ...lines].join('\n').trimEnd());
 }

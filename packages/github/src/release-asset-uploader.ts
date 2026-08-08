@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 import type { Octokit } from '@octokit/rest';
 import type { GitHubMediaUploader, UploadToPullRequestInput, UploadToPullRequestResult } from './media-uploader.js';
+import { CLAUDE_CODE_SIGNATURE } from './pr-content.js';
 
 /**
  * A GitHubMediaUploader backed by the public Releases REST API (Octokit, authed by the same token
@@ -53,7 +54,7 @@ export function createReleaseAssetUploader(octokit: Octokit): GitHubMediaUploade
         repo,
         tag_name: tag,
         name: `AWB QA artifacts for PR #${prNumber}`,
-        body: `QA evidence (video/trace) uploaded by the Agentic Workbench for PR #${prNumber}.`,
+        body: `${CLAUDE_CODE_SIGNATURE}\n\nQA evidence (video/trace) uploaded by the Agentic Workbench for PR #${prNumber}.`,
         draft: false,
         prerelease: true,
       });

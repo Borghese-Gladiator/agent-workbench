@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { derivePrTitle, renderPrBody, renderQaMediaSection } from './pr-content.js';
+import {
+  derivePrTitle,
+  renderPrBody,
+  renderQaMediaSection,
+  withClaudeCodeSignature,
+  CLAUDE_CODE_SIGNATURE,
+} from './pr-content.js';
 import type { Evidence } from '@awb/domain';
 
 function ev(overrides: Partial<Evidence> = {}): Evidence {
@@ -190,5 +196,45 @@ describe('renderQaMediaSection', () => {
     expect(section).toContain('.awb/qa/s.png');
     expect(section).not.toContain('blob/b/undefined');
     expect(section).not.toContain('Recording');
+  });
+});
+
+describe('withClaudeCodeSignature', () => {
+  it('prepends the bold signature line then a blank line to a non-empty body', () => {
+    const out = withClaudeCodeSignature('hello');
+    expect(out).toBe(`${CLAUDE_CODE_SIGNATURE}\n\nhello`);
+    expect(out.startsWith('**Claude Code says**\n\n')).toBe(true);
+  });
+
+  it('leaves an empty body empty (no bare, contentless signature)', () => {
+    expect(withClaudeCodeSignature('')).toBe('');
+  });
+});
+
+describe('posted messages carry the Claude Code signature', () => {
+  it('renderPrBody starts with the signature and keeps its sections', () => {
+    const body = renderPrBody({
+      objective: 'Show N games available',
+      planSummary: 'Compute enabled count',
+      changedPaths: ['portal/src/Portal.jsx'],
+      evidence: [ev()],
+      candidateSha: 'a'.repeat(40),
+    });
+    expect(body.startsWith(`${CLAUDE_CODE_SIGNATURE}\n\n`)).toBe(true);
+    expect(body).toContain('## Background');
+  });
+
+  it('renderQaMediaSection with items starts with the signature and keeps its heading', () => {
+    const section = renderQaMediaSection({
+      ref: { owner: 'o', repo: 'r' },
+      branch: 'b',
+      items: [{ kind: 'screenshot', repoPath: '.awb/qa/s.png' }],
+    });
+    expect(section.startsWith(`${CLAUDE_CODE_SIGNATURE}\n\n`)).toBe(true);
+    expect(section).toContain('## Browser QA');
+  });
+
+  it('renderQaMediaSection stays empty (unsigned) when there is nothing to show', () => {
+    expect(renderQaMediaSection({ ref: { owner: 'o', repo: 'r' }, branch: 'b', items: [] })).toBe('');
   });
 });
