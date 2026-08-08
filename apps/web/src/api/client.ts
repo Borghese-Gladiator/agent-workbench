@@ -22,6 +22,37 @@ export interface RepositorySnapshotSummary {
   createdAt: string;
 }
 
+/** A discovered/validated build-test-lint command for a repository. */
+export interface ValidatedCommand {
+  id: string;
+  purpose: string;
+  command: string;
+  cwd: string;
+  source: string;
+  status: string;
+  validatedAtSha?: string;
+  lastExitCode?: number;
+}
+
+/** A task scoped to a repository, from the durable summaries (subset used by Repository Detail). */
+export interface RepositoryTaskSummary {
+  taskId: string;
+  repositoryId: string;
+  prompt: string;
+  title: string | null;
+  derivedStatus: string;
+  pendingGateReason: string | null;
+  updatedAt: string;
+}
+
+export interface RepositoryDetail {
+  repository: Repository;
+  latestSnapshot?: RepositorySnapshotSummary;
+  // Optional so an older daemon (pre-Phase-6) that omits them still type-checks.
+  commands?: ValidatedCommand[];
+  tasks?: RepositoryTaskSummary[];
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const response = await fetch(`/api${path}`, {
     method,
@@ -40,8 +71,7 @@ export const api = {
   listRepositories: () => request<Repository[]>('GET', '/repositories'),
   addRepository: (canonicalPath: string, name?: string) =>
     request<Repository>('POST', '/repositories', { canonicalPath, name }),
-  getRepository: (id: string) =>
-    request<{ repository: Repository; latestSnapshot?: RepositorySnapshotSummary }>('GET', `/repositories/${id}`),
+  getRepository: (id: string) => request<RepositoryDetail>('GET', `/repositories/${id}`),
   refreshRepository: (id: string) => request('POST', `/repositories/${id}/refresh`),
   approveRepository: (id: string) => request('POST', `/repositories/${id}/approve`),
 };
