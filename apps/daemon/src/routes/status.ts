@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { getTemporalClient } from '../temporal-client.js';
-import { TASK_QUEUE } from '../temporal-worker-constants.js';
+import { taskQueueName } from '../temporal-worker-constants.js';
 
 export type ServiceState = 'ready' | 'unhealthy' | 'unknown';
 
@@ -44,7 +44,7 @@ export async function describeRuntimeStatus(): Promise<RuntimeStatus> {
     const description = await withTimeout(
       client.connection.workflowService.describeTaskQueue({
         namespace: client.options.namespace,
-        taskQueue: { name: TASK_QUEUE },
+        taskQueue: { name: taskQueueName() },
       }),
       PROBE_TIMEOUT_MS,
     );

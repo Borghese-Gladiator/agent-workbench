@@ -1,6 +1,7 @@
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { createConnection } from 'node:net';
-import { DAEMON_PORT, UI_PORT, OTEL_OTLP_PORT, pidPathFor, serviceDefinitions, type ServiceKey } from './services.js';
+import { daemonPort, uiPort, otelOtlpPort, pidPathFor, serviceDefinitions, type ServiceKey } from './services.js';
+import { resolveRuntimeConfig } from '@awb/config';
 
 export type ServiceState = 'stopped' | 'starting' | 'ready' | 'unhealthy' | 'external' | 'unknown';
 
@@ -18,7 +19,7 @@ export interface RuntimeHealth {
   services: Record<ServiceKey, ServiceHealth>;
 }
 
-const DAEMON_STATUS_URL = `http://127.0.0.1:${DAEMON_PORT}/api/status`;
+const daemonStatusUrl = (): string => `${resolveRuntimeConfig().daemonUrl}/api/status`;
 
 interface DaemonStatusResponse {
   runtime: string;
@@ -64,7 +65,7 @@ async function portOpen(port: number, timeoutMs = 500): Promise<boolean> {
 
 async function fetchDaemonStatus(): Promise<DaemonStatusResponse | undefined> {
   try {
-    const res = await fetch(DAEMON_STATUS_URL);
+    const res = await fetch(daemonStatusUrl());
     // 503 is expected when the runtime is degraded — the body still carries per-service state.
     const body = (await res.json()) as Partial<DaemonStatusResponse>;
     // Guard against an older daemon (or a 404 error body) that lacks the per-service shape.
@@ -96,8 +97,8 @@ function pidFallbackState(key: ServiceKey): ServiceHealth {
 
 async function uiHealth(): Promise<ServiceHealth> {
   const pidInfo = readPid('ui');
-  const listening = await portOpen(UI_PORT);
-  const port = UI_PORT;
+  const port = uiPort();
+  const listening = await portOpen(port);
   if (pidInfo && isAlive(pidInfo.pid)) {
     return { key: 'ui', state: listening ? 'ready' : 'starting', pid: pidInfo.pid, port, uptimeMs: pidInfo.uptimeMs };
   }
@@ -113,8 +114,8 @@ async function uiHealth(): Promise<ServiceHealth> {
  */
 async function otelHealth(): Promise<ServiceHealth> {
   const pidInfo = readPid('otel');
-  const listening = await portOpen(OTEL_OTLP_PORT);
-  const port = OTEL_OTLP_PORT;
+  const port = otelOtlpPort();
+  const listening = await portOpen(port);
   if (pidInfo && isAlive(pidInfo.pid)) {
     return { key: 'otel', state: listening ? 'ready' : 'starting', pid: pidInfo.pid, port, uptimeMs: pidInfo.uptimeMs };
   }
@@ -149,7 +150,7 @@ export async function probeHealth(): Promise<RuntimeHealth> {
     const daemonPidInfo = readPid('daemon');
     if (daemonPidInfo && isAlive(daemonPidInfo.pid)) {
       daemon = { key: 'daemon', state: 'unhealthy', pid: daemonPidInfo.pid, port: defs.daemon.port, uptimeMs: daemonPidInfo.uptimeMs };
-    } else if (await portOpen(DAEMON_PORT)) {
+    } else if (await portOpen(daemonPort())) {
       daemon = { key: 'daemon', state: 'external', port: defs.daemon.port };
     } else {
       daemon = { key: 'daemon', state: 'stopped', port: defs.daemon.port };

@@ -4,7 +4,7 @@ import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
 import { buildServer, type DaemonServer } from '../server.js';
 import { setTemporalClientForTesting } from '../temporal-client.js';
-import { TASK_QUEUE } from '../temporal-worker-constants.js';
+import { taskQueueName } from '../temporal-worker-constants.js';
 import { describeRuntimeStatus } from './status.js';
 
 /**
@@ -64,7 +64,7 @@ describe('daemon /api/status', () => {
     setTemporalClientForTesting(testEnv.client);
     const worker = await Worker.create({
       connection: testEnv.nativeConnection,
-      taskQueue: TASK_QUEUE,
+      taskQueue: taskQueueName(),
       workflowsPath: new URL('../../../../packages/workflow/dist/workflows.js', import.meta.url).pathname,
       activities: {},
     });

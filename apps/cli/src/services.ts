@@ -1,17 +1,23 @@
 import { dirname, join } from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { resolveLayout } from '@awb/config';
+import { resolveLayout, resolveRuntimeConfig } from '@awb/config';
 
-export const DAEMON_PORT = 4417;
-export const TEMPORAL_PORT = 7233;
-export const UI_PORT = 5317;
+/**
+ * Every port / URL / container name below is resolved at CALL time from `resolveRuntimeConfig()`
+ * (env-driven, current values as defaults) rather than frozen as a module-level constant — so
+ * `awb up --isolated`, which populates the override env vars before starting services, moves the
+ * whole stack together in this same CLI process.
+ */
+export const daemonPort = (): number => resolveRuntimeConfig().daemonPort;
+export const temporalPort = (): number => resolveRuntimeConfig().temporalPort;
+export const uiPort = (): number => resolveRuntimeConfig().uiPort;
 /** OTLP/HTTP receiver port of the local collector (grafana/otel-lgtm all-in-one). */
-export const OTEL_OTLP_PORT = 4318;
+export const otelOtlpPort = (): number => resolveRuntimeConfig().otelOtlpPort;
 /** The collector's Grafana UI port (traces/metrics/logs explorer). */
-export const OTEL_UI_PORT = 3000;
+export const otelUiPort = (): number => resolveRuntimeConfig().otelUiPort;
 /** The OTLP/HTTP endpoint the worker + daemon export to; injected into their env by `awb up`. */
-export const OTEL_ENDPOINT = `http://127.0.0.1:${OTEL_OTLP_PORT}`;
+export const otelEndpoint = (): string => resolveRuntimeConfig().otelEndpoint;
 
 export type ServiceKey = 'temporal' | 'worker' | 'daemon' | 'ui' | 'otel';
 
@@ -46,7 +52,7 @@ export interface ServiceDefinition {
  * and fails with a misleading `spawn … ENOENT`. Anchoring on the workspace marker is correct for
  * src, dist, and any worktree location.
  */
-function repoRoot(): string {
+export function repoRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 10; i++) {
     if (existsSync(join(dir, 'pnpm-workspace.yaml'))) return dir;
@@ -75,6 +81,7 @@ export function resolveRuntimeMode(): RuntimeMode {
 export function serviceDefinitions(mode: RuntimeMode = resolveRuntimeMode()): Record<ServiceKey, ServiceDefinition> {
   const root = repoRoot();
   const layout = resolveLayout();
+  const cfg = resolveRuntimeConfig();
   const pinned = mode === 'pinned';
   // Spawn pinned services with the SAME node binary running this CLI (`process.execPath`) rather than
   // a bare `'node'`: under pnpm/fnm the child's PATH does not always include the active node (fnm's
@@ -88,7 +95,7 @@ export function serviceDefinitions(mode: RuntimeMode = resolveRuntimeMode()): Re
         command: nodeBin,
         args: ['dist/index.js'],
         cwd: join(root, 'workers', 'temporal-worker'),
-        env: { OTEL_EXPORTER_OTLP_ENDPOINT: OTEL_ENDPOINT },
+        env: { OTEL_EXPORTER_OTLP_ENDPOINT: cfg.otelEndpoint },
         ui: false,
       }
     : {
@@ -97,7 +104,7 @@ export function serviceDefinitions(mode: RuntimeMode = resolveRuntimeMode()): Re
         command: 'pnpm',
         args: ['--filter', '@awb/temporal-worker', 'dev'],
         cwd: root,
-        env: { OTEL_EXPORTER_OTLP_ENDPOINT: OTEL_ENDPOINT },
+        env: { OTEL_EXPORTER_OTLP_ENDPOINT: cfg.otelEndpoint },
         ui: false,
       };
   const daemonService: ServiceDefinition = pinned
@@ -107,8 +114,8 @@ export function serviceDefinitions(mode: RuntimeMode = resolveRuntimeMode()): Re
         command: nodeBin,
         args: ['dist/index.js'],
         cwd: join(root, 'apps', 'daemon'),
-        port: DAEMON_PORT,
-        env: { OTEL_EXPORTER_OTLP_ENDPOINT: OTEL_ENDPOINT },
+        port: cfg.daemonPort,
+        env: { OTEL_EXPORTER_OTLP_ENDPOINT: cfg.otelEndpoint },
         ui: false,
       }
     : {
@@ -117,8 +124,8 @@ export function serviceDefinitions(mode: RuntimeMode = resolveRuntimeMode()): Re
         command: 'pnpm',
         args: ['--filter', '@awb/daemon', 'dev'],
         cwd: root,
-        port: DAEMON_PORT,
-        env: { OTEL_EXPORTER_OTLP_ENDPOINT: OTEL_ENDPOINT },
+        port: cfg.daemonPort,
+        env: { OTEL_EXPORTER_OTLP_ENDPOINT: cfg.otelEndpoint },
         ui: false,
       };
   return {
@@ -136,24 +143,26 @@ export function serviceDefinitions(mode: RuntimeMode = resolveRuntimeMode()): Re
         'run',
         '--rm',
         '--name',
-        'awb-otel-lgtm',
+        cfg.otelContainerName,
         '-p',
-        `${OTEL_OTLP_PORT}:4318`,
+        `${cfg.otelOtlpPort}:4318`,
         '-p',
-        `${OTEL_UI_PORT}:3000`,
+        `${cfg.otelUiPort}:3000`,
         'grafana/otel-lgtm:latest',
       ],
       cwd: root,
-      port: OTEL_OTLP_PORT,
+      port: cfg.otelOtlpPort,
       ui: false,
     },
     temporal: {
       key: 'temporal',
       label: 'Temporal dev server',
       command: 'temporal',
-      args: ['server', 'start-dev', '--db-filename', layout.temporalSqlite],
+      // `--port` sets the frontend gRPC port the client/worker connect to; `--ui-port 0` disables the
+      // bundled Web UI so a non-default `--port` never drags the UI onto a colliding port.
+      args: ['server', 'start-dev', '--db-filename', layout.temporalSqlite, '--port', String(cfg.temporalPort), '--ui-port', '0'],
       cwd: root,
-      port: TEMPORAL_PORT,
+      port: cfg.temporalPort,
       ui: false,
     },
     worker: workerService,
@@ -164,7 +173,10 @@ export function serviceDefinitions(mode: RuntimeMode = resolveRuntimeMode()): Re
       command: 'pnpm',
       args: ['--filter', '@awb/web', 'dev'],
       cwd: root,
-      port: UI_PORT,
+      port: cfg.uiPort,
+      // Vite's /api proxy resolves its target from this at config load; pass the resolved daemon URL
+      // so an isolated stack's UI proxies to ITS daemon, not the default 4417.
+      env: { AWB_DAEMON_URL: cfg.daemonUrl },
       ui: true,
     },
   };

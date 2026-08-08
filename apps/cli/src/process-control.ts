@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { writeFileSync, readFileSync, existsSync, unlinkSync, openSync } from 'node:fs';
 import { createConnection } from 'node:net';
-import { logPathFor, pidPathFor, serviceDefinition, type ServiceKey } from './services.js';
-import { DAEMON_PORT, UI_PORT } from './services.js';
+import { logPathFor, pidPathFor, serviceDefinition, uiPort, type ServiceKey } from './services.js';
+import { resolveRuntimeConfig } from '@awb/config';
 
 function isAlive(pid: number): boolean {
   try {
@@ -65,14 +65,13 @@ export function stopService(key: ServiceKey): boolean {
   return stopped;
 }
 
-const DAEMON_HEALTH_URL = `http://127.0.0.1:${DAEMON_PORT}/api/health`;
-
 /** Waits for the daemon to answer /api/health, the last of the runtime services to come up. */
 export async function waitForDaemonHealth(timeoutMs = 30_000): Promise<boolean> {
+  const healthUrl = `${resolveRuntimeConfig().daemonUrl}/api/health`;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(DAEMON_HEALTH_URL);
+      const res = await fetch(healthUrl);
       if (res.ok) return true;
     } catch {
       // not up yet
@@ -100,7 +99,7 @@ function portOpen(port: number, timeoutMs = 500): Promise<boolean> {
 export async function waitForUi(timeoutMs = 30_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await portOpen(UI_PORT)) return true;
+    if (await portOpen(uiPort())) return true;
     await new Promise((r) => setTimeout(r, 500));
   }
   return false;

@@ -3,7 +3,7 @@ import { accessSync, constants, existsSync, mkdirSync, readFileSync, unlinkSync 
 import type { Command } from 'commander';
 import { loadConfig, resolveLayout } from '@awb/config';
 import { probeHealth } from '../health.js';
-import { DAEMON_PORT, TEMPORAL_PORT, UI_PORT, pidPathFor, runtimeDirs, type ServiceKey } from '../services.js';
+import { daemonPort, temporalPort, uiPort, pidPathFor, runtimeDirs, type ServiceKey } from '../services.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
 
 type CheckStatus = 'pass' | 'warn' | 'error';
@@ -111,9 +111,9 @@ export function registerDoctorCommand(program: Command): void {
       // Port conflicts: a port held by something AWB does not track.
       const health = await probeHealth();
       for (const [key, port] of [
-        ['daemon', DAEMON_PORT],
-        ['temporal', TEMPORAL_PORT],
-        ['ui', UI_PORT],
+        ['daemon', daemonPort()],
+        ['temporal', temporalPort()],
+        ['ui', uiPort()],
       ] as [ServiceKey, number][]) {
         const svc = health.services[key];
         if (svc.state === 'external') {

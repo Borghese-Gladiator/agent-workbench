@@ -1,11 +1,12 @@
 import { Connection, Client } from '@temporalio/client';
+import { resolveRuntimeConfig } from '@awb/config';
 
 let cachedClient: Client | undefined;
 
-/** Lazily connects to the local Temporal server. Not cached across AWB_DATA_DIR changes since a real daemon process only ever needs one connection for its lifetime. */
+/** Lazily connects to the local Temporal server at the resolved address. Not cached across AWB_DATA_DIR changes since a real daemon process only ever needs one connection for its lifetime. */
 export async function getTemporalClient(): Promise<Client> {
   if (cachedClient) return cachedClient;
-  const connection = await Connection.connect();
+  const connection = await Connection.connect({ address: resolveRuntimeConfig().temporalAddress });
   cachedClient = new Client({ connection });
   return cachedClient;
 }

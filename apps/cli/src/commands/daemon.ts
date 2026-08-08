@@ -1,11 +1,11 @@
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import type { Command } from 'commander';
-import { DAEMON_PORT } from '../services.js';
+import { resolveRuntimeConfig } from '@awb/config';
 import { stopService, startService, waitForDaemonHealth } from '../process-control.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
 
-const DAEMON_HEALTH_URL = `http://127.0.0.1:${DAEMON_PORT}/api/health`;
+const daemonHealthUrl = (): string => `${resolveRuntimeConfig().daemonUrl}/api/health`;
 
 function repoRoot(): string {
   return resolve(new URL('../../../..', import.meta.url).pathname);
@@ -36,7 +36,7 @@ export function registerDaemonCommands(program: Command): void {
     .description('Check whether the daemon is answering on its health endpoint')
     .action(async () => {
       try {
-        const res = await fetch(DAEMON_HEALTH_URL);
+        const res = await fetch(daemonHealthUrl());
         const ok = res.ok;
         if (outputOptions().json) emitJson({ ok, status: res.status });
         else printResult(ok ? 'pong' : `daemon responded ${res.status}`);

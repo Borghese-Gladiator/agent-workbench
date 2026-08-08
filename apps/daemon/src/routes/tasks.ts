@@ -26,7 +26,7 @@ import {
 import type { TaskSize } from '@awb/domain';
 import { routeFeedback, NO_ROUTING_SIGNAL, type FeedbackRoutingSignal } from '@awb/github';
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
-import { TASK_QUEUE } from '../temporal-worker-constants.js';
+import { taskQueueName } from '../temporal-worker-constants.js';
 
 export interface CreatedTaskRecord {
   taskId: string;
@@ -51,7 +51,7 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
     const workflowId = workflowIdFor(repositoryId, taskId);
 
     await client.workflow.start(TaskWorkflow, {
-      taskQueue: TASK_QUEUE,
+      taskQueue: taskQueueName(),
       workflowId,
       // An optional intake size hint (CLI --size) seeds the classifier; it still decides.
       args: [{ taskId, repositoryId, prompt, ...(size ? { size } : {}) }],
