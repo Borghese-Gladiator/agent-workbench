@@ -123,6 +123,11 @@ export interface TaskSummary {
   candidateSha: string | null;
   pullRequestUrl: string | null;
   indexedAt: string;
+  /** Concise title (null → derive from prompt with deriveTaskTitle). */
+  title: string | null;
+  /** Cross-task retry lineage. */
+  retryOfTaskId: string | null;
+  rootTaskId: string | null;
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {

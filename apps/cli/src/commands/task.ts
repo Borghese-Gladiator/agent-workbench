@@ -287,6 +287,8 @@ export function registerTaskCommands(program: Command): void {
         const result = await daemonClient.post<CreatedTask>('/api/tasks', {
           repositoryId: repoId,
           prompt: original.prompt,
+          // Record cross-task lineage so the retry links back to what it re-runs.
+          retryOfTaskId: tId,
         });
         rememberTaskId(result.taskId);
         if (outputOptions().json) emitJson(result);

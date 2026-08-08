@@ -61,6 +61,12 @@ export interface UpsertTaskInput {
   deliveryState?: DeliveryState;
   /** Task size class; set at intake as a hint or once the classifier decides. */
   size?: TaskSize;
+  /** Optional concise title (set at create). Lineage/title are insert-only — later syncs ignore them. */
+  title?: string;
+  /** The task this one retries; set at create for a retry, establishing cross-task lineage. */
+  retryOfTaskId?: string;
+  /** Head of the retry chain; set at create (defaults to this task's own id for an original). */
+  rootTaskId?: string;
 }
 
 export function upsertTask(db: DrizzleDb, input: UpsertTaskInput, summaryContext?: TaskSummaryContext): void {
@@ -75,6 +81,11 @@ export function upsertTask(db: DrizzleDb, input: UpsertTaskInput, summaryContext
     condition: input.condition ?? existing?.condition ?? 'running',
     deliveryState: input.deliveryState ?? existing?.deliveryState ?? 'not-started',
     size: input.size ?? existing?.size ?? null,
+    // Title + lineage are set once, at first insert. Preserve the existing values on any later sync
+    // (a sync-update never carries them), and default an original's root to its own id.
+    title: existing?.title ?? input.title ?? null,
+    retryOfTaskId: existing?.retryOfTaskId ?? input.retryOfTaskId ?? null,
+    rootTaskId: existing?.rootTaskId ?? input.rootTaskId ?? input.id,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -149,6 +160,11 @@ export interface TaskSummaryWithRepository {
   repositoryId: string;
   repositoryName: string | null;
   prompt: string;
+  /** Concise title (null → the client derives one from the prompt). */
+  title: string | null;
+  /** Cross-task retry lineage, joined from the tasks row. */
+  retryOfTaskId: string | null;
+  rootTaskId: string | null;
   phase: TaskPhase;
   condition: RunCondition;
   deliveryState: DeliveryState;
@@ -265,6 +281,9 @@ export function listTaskSummaries(db: DrizzleDb): TaskSummaryWithRepository[] {
       repositoryId: taskSummary.repositoryId,
       repositoryName: repositories.name,
       prompt: tasks.prompt,
+      title: tasks.title,
+      retryOfTaskId: tasks.retryOfTaskId,
+      rootTaskId: tasks.rootTaskId,
       phase: taskSummary.phase,
       condition: taskSummary.condition,
       deliveryState: taskSummary.deliveryState,

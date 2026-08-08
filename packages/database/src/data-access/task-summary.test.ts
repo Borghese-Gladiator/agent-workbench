@@ -88,6 +88,27 @@ describe('task_summary projection (Phase 0: state coherence)', () => {
     expect(getTaskSummary(db.db, 't1')?.pendingGateReason).toBeNull();
   });
 
+  it('records title + cross-task retry lineage, insert-only (a later sync does not clobber)', () => {
+    upsertTask(db.db, { id: 'orig', repositoryId: REPO_ID, prompt: 'Count the games. Extra detail.', title: 'Count games' });
+    const origSummary = getTaskSummary(db.db, 'orig');
+    expect(origSummary?.title).toBe('Count games');
+    expect(origSummary?.retryOfTaskId).toBeNull();
+    // An original's root is itself.
+    expect(origSummary?.rootTaskId).toBe('orig');
+
+    // A retry: root copied from the parent, retryOf set.
+    upsertTask(db.db, { id: 'retry1', repositoryId: REPO_ID, prompt: 'Count the games. Extra detail.', retryOfTaskId: 'orig', rootTaskId: 'orig' });
+    let r = getTaskSummary(db.db, 'retry1');
+    expect(r?.retryOfTaskId).toBe('orig');
+    expect(r?.rootTaskId).toBe('orig');
+
+    // A later sync-style upsert (no lineage/title args) must preserve them.
+    upsertTask(db.db, { id: 'retry1', repositoryId: REPO_ID, prompt: 'Count the games. Extra detail.', phase: 'plan', condition: 'running' });
+    r = getTaskSummary(db.db, 'retry1');
+    expect(r?.retryOfTaskId).toBe('orig');
+    expect(r?.rootTaskId).toBe('orig');
+  });
+
   it('deleteTask removes the summary row (no FK violation)', () => {
     upsertTask(db.db, { id: 't1', repositoryId: REPO_ID, prompt: 'p' });
     expect(getTaskSummary(db.db, 't1')).toBeDefined();

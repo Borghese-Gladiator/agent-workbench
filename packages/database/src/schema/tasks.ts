@@ -13,6 +13,12 @@ export const tasks = sqliteTable('tasks', {
   deliveryState: text('delivery_state').notNull().$type<DeliveryState>(),
   /** Task size class; nullable until the specify classifier sets it. */
   size: text('size').$type<TaskSize>(),
+  /** Optional concise label; when null the UI derives a title from the prompt's first sentence. */
+  title: text('title'),
+  /** The task this one retries (cross-task; retry creates a new task). Null for an original. */
+  retryOfTaskId: text('retry_of_task_id'),
+  /** Head of the retry chain; equals `id` for an original, copied from the parent for a retry. */
+  rootTaskId: text('root_task_id'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });

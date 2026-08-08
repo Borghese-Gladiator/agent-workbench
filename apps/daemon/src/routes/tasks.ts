@@ -56,14 +56,27 @@ export interface CreatedTaskRecord {
   pullRequestUrl: string | null;
   /** When the durable projection row was last recomputed — the freshness/index clock. */
   indexedAt: string;
+  /** Concise title (null → derive from prompt). */
+  title: string | null;
+  /** Cross-task retry lineage. */
+  retryOfTaskId: string | null;
+  rootTaskId: string | null;
 }
 
 export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchDatabase): void {
-  app.post<{ Body: { repositoryId: string; prompt: string; size?: TaskSize } }>('/api/tasks', async (request, reply) => {
+  app.post<{ Body: { repositoryId: string; prompt: string; size?: TaskSize; title?: string; retryOfTaskId?: string } }>('/api/tasks', async (request, reply) => {
     const client = await getTemporalClient();
     const taskId = randomUUID();
-    const { repositoryId, prompt, size } = request.body;
+    const { repositoryId, prompt, size, title, retryOfTaskId } = request.body;
     const workflowId = workflowIdFor(repositoryId, taskId);
+
+    // Cross-task retry lineage: a retry's root is its parent's root (or the parent itself if the
+    // parent is an original). Resolve it from the parent's summary row so a whole family shares one root.
+    let rootTaskId: string | undefined;
+    if (retryOfTaskId) {
+      const parent = getTaskSummary(database.db, retryOfTaskId);
+      rootTaskId = parent?.rootTaskId ?? retryOfTaskId;
+    }
 
     await client.workflow.start(TaskWorkflow, {
       taskQueue: taskQueueName(),
@@ -73,8 +86,17 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
     });
 
     // Persist the task row so it survives a daemon restart and `task show` reads lifecycle state
-    // from SQLite, replacing the previous session-scoped in-memory array.
-    upsertTask(database.db, { id: taskId, repositoryId, prompt, ...(size ? { size } : {}) });
+    // from SQLite, replacing the previous session-scoped in-memory array. Title + lineage are set
+    // here at create (insert-only in upsertTask).
+    upsertTask(database.db, {
+      id: taskId,
+      repositoryId,
+      prompt,
+      ...(size ? { size } : {}),
+      ...(title ? { title } : {}),
+      ...(retryOfTaskId ? { retryOfTaskId } : {}),
+      ...(rootTaskId ? { rootTaskId } : {}),
+    });
 
     reply.code(201);
     return { taskId, repositoryId, workflowId };
@@ -107,6 +129,9 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
         candidateSha: t.candidateSha,
         pullRequestUrl: t.pullRequestUrl,
         indexedAt: t.indexedAt,
+        title: t.title,
+        retryOfTaskId: t.retryOfTaskId,
+        rootTaskId: t.rootTaskId,
       }),
     );
   });
