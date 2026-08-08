@@ -108,6 +108,7 @@ const cases: Case[] = [
           JSON.stringify({ type: 'text', sessionID: 'oc-sess', part: { type: 'text', text: 'oc text' } }),
           JSON.stringify({ type: 'step_finish', sessionID: 'oc-sess', part: { type: 'step-finish', reason: 'stop', tokens: { input: 1, output: 1 } } }),
         ]),
+        writeAgent: () => {},
       }),
     expectedText: 'oc text',
     expectedSessionId: 'oc-sess',
