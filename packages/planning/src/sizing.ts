@@ -1,64 +1,77 @@
 import type { TaskSize } from '@awb/domain';
 
 /**
- * Cheap, model-free signals about a task, gathered at intake before spending a classification call
- * (TASK-51 / WSFF: "size from cheap signals first"). All optional so a caller can supply whatever it
- * has; the heuristic degrades gracefully.
+ * A bounded set of reason codes the size classifier may cite (TASK-51). Constrained rather than
+ * free-text so classifier behavior is inspectable and the shadow-evaluation log (TASK-61) can bucket
+ * decisions by cause. Advisory — never gates anything.
  */
-export interface SizingSignals {
-  /** The raw task prompt. */
+export const SIZE_REASON_CODES = [
+  'atomic_local_change',
+  'obvious_validation',
+  'multiple_steps',
+  'scope_uncertain',
+  'design_choice',
+  'cross_system',
+  'public_contract',
+  'data_migration',
+  'security_sensitive',
+  'rollout_or_rollback',
+] as const;
+export type SizeReasonCode = (typeof SIZE_REASON_CODES)[number];
+
+export interface SizeClassification {
+  size: TaskSize;
+  reasonCodes: SizeReasonCode[];
+}
+
+/**
+ * What the classifier sees. Just the prompt today; an optional `repositoryContext` string is reserved
+ * for a future cheap discovery pass (resolved files / callers / affected boundaries) — kept as free
+ * text so we can grow the evidence without a schema commitment.
+ */
+export interface SizingInput {
   prompt: string;
-  /** Number of files the prompt/plan is expected to touch, if known from the structure map. */
-  targetFileCount?: number;
-  /** Number of distinct packages/workspaces the change spans, if known. */
-  packageSpan?: number;
-}
-
-const PROMPT_S_MAX = 160;
-const PROMPT_L_MIN = 600;
-
-/**
- * Deterministic S/M/L heuristic over cheap signals (TASK-51). Also the fallback when the tiny-model
- * classifier is unavailable (mock runtime, no model, unparseable output), so classification always
- * yields a size. Bias: cross-package span or many files ⇒ L; a short single-target prompt ⇒ S.
- */
-export function classifyTaskSize(signals: SizingSignals): TaskSize {
-  const { prompt } = signals;
-  const fileCount = signals.targetFileCount ?? 0;
-  const span = signals.packageSpan ?? 0;
-
-  // Cross-package or many-file work is Large regardless of prompt length.
-  if (span >= 2 || fileCount >= 6) return 'L';
-
-  const len = prompt.trim().length;
-  // Small (single-shot) requires POSITIVE evidence of smallness: a short prompt AND a known low file
-  // count. A short prompt with an unknown file count is NOT single-shotted — default up to M, since
-  // single-shotting a task we can't size is exactly the 2000-line-dump risk WSFF warns against.
-  const fileCountKnown = signals.targetFileCount !== undefined;
-  if (len <= PROMPT_S_MAX && fileCountKnown && fileCount <= 1 && span <= 1) return 'S';
-  // A long prompt (or a handful of files) that isn't cross-package is still Large.
-  if (len >= PROMPT_L_MIN || fileCount >= 4) return 'L';
-  // Everything in between is Medium.
-  return 'M';
+  repositoryContext?: string;
 }
 
 /**
- * The instruction handed to the tiny-model classifier session (TASK-51). It sees the cheap signals
- * and must emit exactly one size token in a JSON block. Mirrors `plannerInstruction`'s contract:
- * the model has a precise target and the gate/parse can check it.
+ * The instruction handed to the size classifier (TASK-51). It teaches the model WHAT small / medium /
+ * large tasks look like — task characteristics + worked examples — and lets it judge the arbitrary
+ * instruction, rather than describing our phase machinery. `M` is the "when unsure" default so an
+ * uncertain task is never single-shotted (S) nor over-planned (L) on a guess.
  */
-export function sizingInstruction(signals: SizingSignals): string {
+export function sizingInstruction(input: SizingInput): string {
   return [
-    'Classify the SIZE of this software task as one of S, M, or L, using the WSFF 80/20 rule:',
-    '- S (single-shot): a trivial, single-target change (e.g. a one-line edit, a copy tweak).',
-    '- M (medium): a self-contained change to one area needing a short plan, but no separate program design.',
-    '- L (large): a multi-file or multi-package feature that deserves a full plan AND a program-design pass.',
+    'You classify a software-engineering task as S, M, or L by how much up-front planning it warrants.',
+    'Judge the WORK the task implies, not how it is phrased.',
     '',
-    `Task prompt: ${signals.prompt}`,
-    signals.targetFileCount !== undefined ? `Approx files touched: ${signals.targetFileCount}.` : '',
-    signals.packageSpan !== undefined ? `Packages/workspaces spanned: ${signals.packageSpan}.` : '',
+    'S — small:',
+    '- Concrete, atomic, locally scoped; one obvious implementation direction.',
+    '- No meaningful design decision; no public contract, schema, security, or persistence boundary.',
+    '- Validation is obvious and local.',
+    '- Examples: fix a typo, tweak copy, add a config value, implement one well-specified helper.',
     '',
-    'Respond with ONLY a JSON object as a fenced ```json code block: {"size": "S" | "M" | "L"}.',
+    'M — medium (use this when the evidence does not clearly support S or L):',
+    '- Bounded work that benefits from an ordered plan: several coordinated edits in one area.',
+    '- No architectural, migration, or cross-system decision required.',
+    '- Examples: add a field end-to-end within one package, add a filter to a list, refactor one module.',
+    '',
+    'L — large:',
+    '- Planning must resolve design alternatives, substantial uncertainty, or dependent phases.',
+    '- Touches public APIs, data schemas, security/authorization, persistence, deployment, migration, or rollback.',
+    '- Requires coordination across subsystems or diagnosis spanning multiple components.',
+    '- Examples: migrate authentication to OAuth, make the app multi-tenant, change a public data contract.',
+    '',
+    'Rules of evidence:',
+    '- Do NOT use prompt length. A short prompt can describe a huge task; a long, detailed one can describe a tiny change.',
+    '- File or package count is evidence, not a rule: a 50-file mechanical rename can be M; a one-line authorization change can be L.',
+    '- Weigh uncertainty and blast radius, not verbosity.',
+    '',
+    `Task:\n${input.prompt}`,
+    input.repositoryContext ? `\nRepository context:\n${input.repositoryContext}` : '',
+    '',
+    'Respond with ONLY a JSON object as a fenced ```json code block:',
+    `{"size": "S" | "M" | "L", "reasonCodes": string[] (subset of: ${SIZE_REASON_CODES.join(', ')})}`,
   ]
     .filter(Boolean)
     .join('\n');
@@ -73,15 +86,28 @@ function extractJsonBlock(text: string): string | undefined {
   return undefined;
 }
 
+function parseReasonCodes(block: string | undefined): SizeReasonCode[] {
+  if (!block) return [];
+  const allowed = new Set<string>(SIZE_REASON_CODES);
+  const found = new Set<SizeReasonCode>();
+  for (const code of SIZE_REASON_CODES) {
+    if (block.includes(code)) found.add(code);
+  }
+  // (allowed is only used to bound membership above; kept explicit for readers.)
+  void allowed;
+  return [...found];
+}
+
 /**
- * Parses a classifier session's textual output into a `TaskSize`. Returns undefined when nothing
- * usable is present so the caller can fall back to `classifyTaskSize` — the classifier is advisory,
- * never a hard dependency (external tooling stays model-agnostic per the standing learning).
+ * Parses a classifier's textual output into a `SizeClassification`. Returns `undefined` when no size
+ * token is present, so the caller treats classification as simply not having happened (the contract's
+ * own `size ?? 'M'` default is the single degradation policy — the classifier never invents a size).
  */
-export function parseSizingOutput(text: string): TaskSize | undefined {
+export function parseSizingOutput(text: string): SizeClassification | undefined {
   const block = extractJsonBlock(text);
   const candidate = block ?? text;
   const match = candidate.match(/"?size"?\s*[:=]?\s*"?(S|M|L)"?/i) ?? candidate.match(/\b(S|M|L)\b/);
   const raw = match?.[1]?.toUpperCase();
-  return raw === 'S' || raw === 'M' || raw === 'L' ? (raw as TaskSize) : undefined;
+  if (raw !== 'S' && raw !== 'M' && raw !== 'L') return undefined;
+  return { size: raw, reasonCodes: parseReasonCodes(candidate) };
 }

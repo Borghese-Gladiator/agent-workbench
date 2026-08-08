@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type {
   AgentAssignment,
   AgentEventSink,
@@ -7,7 +7,7 @@ import type {
   CodingAgentAdapter,
   CreateAgentSessionInput,
 } from '@awb/agent-gateway';
-import { classifyTaskSizeWithModel, SIZE_CLASSIFIER_MODEL } from './classifier-support.js';
+import { classifyTaskSize, SIZE_CLASSIFIER_MODEL } from './classifier-support.js';
 
 class FakeClassifierAdapter implements CodingAgentAdapter {
   readonly id = 'fake-classifier';
@@ -26,38 +26,58 @@ class FakeClassifierAdapter implements CodingAgentAdapter {
 
 const baseInput = {
   taskId: 'task-1',
+  phase: 'specify' as const,
+  attemptNumber: 1,
   cwd: '/tmp/repo',
-  signals: { prompt: 'add a feature', targetFileCount: 3 },
+  input: { prompt: 'add a feature' },
   allowedTools: [],
   disallowedTools: [],
 };
 
-describe('classifyTaskSizeWithModel (TASK-51)', () => {
-  it('uses the heuristic (not the model) when useModel is false (mock profile)', async () => {
+afterEach(() => {
+  delete process.env.AWB_CLASSIFIER_SHADOW;
+  delete process.env.AWB_SHADOW_CLASSIFIER_MODEL;
+  delete process.env.AWB_OLLAMA_HOST;
+});
+
+describe('classifyTaskSize (TASK-51 authoritative path)', () => {
+  it('returns undefined when useModel is false (no model call)', async () => {
     const adapter = new FakeClassifierAdapter('```json\n{"size":"L"}\n```');
-    const size = await classifyTaskSizeWithModel({ ...baseInput, adapter, useModel: false, model: SIZE_CLASSIFIER_MODEL });
-    // heuristic only — never calls the model (M for 3 files, medium prompt)
-    expect(size).toBe('M');
+    const result = await classifyTaskSize({ ...baseInput, adapter, useModel: false, model: SIZE_CLASSIFIER_MODEL });
+    expect(result).toBeUndefined();
     expect(adapter.lastCreateInput).toBeUndefined();
   });
 
-  it('parses the tiny-model answer on a real-agent profile and requests the small model', async () => {
-    const adapter = new FakeClassifierAdapter('My answer:\n```json\n{"size":"L"}\n```');
-    const size = await classifyTaskSizeWithModel({ ...baseInput, adapter, useModel: true, model: SIZE_CLASSIFIER_MODEL });
-    expect(size).toBe('L');
+  it('returns undefined when useModel is true but no model is provided', async () => {
+    const adapter = new FakeClassifierAdapter('```json\n{"size":"L"}\n```');
+    const result = await classifyTaskSize({ ...baseInput, adapter, useModel: true });
+    expect(result).toBeUndefined();
+    expect(adapter.lastCreateInput).toBeUndefined();
+  });
+
+  it('parses the model answer and requests the small model', async () => {
+    const adapter = new FakeClassifierAdapter('My answer:\n```json\n{"size":"L","reasonCodes":["security_sensitive"]}\n```');
+    const result = await classifyTaskSize({ ...baseInput, adapter, useModel: true, model: SIZE_CLASSIFIER_MODEL });
+    expect(result?.size).toBe('L');
+    expect(result?.reasonCodes).toEqual(['security_sensitive']);
     expect(adapter.lastCreateInput?.model).toBe(SIZE_CLASSIFIER_MODEL);
   });
 
-  it('falls back to the heuristic when the model output is unparseable', async () => {
+  it('returns undefined when the model output is unparseable (contract default then applies)', async () => {
     const adapter = new FakeClassifierAdapter('I really cannot tell.');
-    const size = await classifyTaskSizeWithModel({ ...baseInput, adapter, useModel: true, model: SIZE_CLASSIFIER_MODEL });
-    expect(size).toBe('M');
+    const result = await classifyTaskSize({ ...baseInput, adapter, useModel: true, model: SIZE_CLASSIFIER_MODEL });
+    expect(result).toBeUndefined();
   });
+});
 
-  it('uses the heuristic when useModel is true but no model is provided', async () => {
-    const adapter = new FakeClassifierAdapter('```json\n{"size":"L"}\n```');
-    const size = await classifyTaskSizeWithModel({ ...baseInput, adapter, useModel: true });
-    expect(size).toBe('M');
-    expect(adapter.lastCreateInput).toBeUndefined();
+describe('classifyTaskSize (TASK-51 shadow path)', () => {
+  it('still returns the authoritative answer when the shadow model is unreachable', async () => {
+    // Enable shadow but point Ollama at a dead port so the local fetch fails — the authoritative
+    // (Haiku) answer must be unaffected and the task must not throw.
+    process.env.AWB_CLASSIFIER_SHADOW = '1';
+    process.env.AWB_OLLAMA_HOST = 'http://127.0.0.1:1'; // nothing listens here
+    const adapter = new FakeClassifierAdapter('```json\n{"size":"M"}\n```');
+    const result = await classifyTaskSize({ ...baseInput, adapter, useModel: true, model: SIZE_CLASSIFIER_MODEL });
+    expect(result?.size).toBe('M');
   });
 });

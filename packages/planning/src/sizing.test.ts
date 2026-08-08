@@ -1,56 +1,57 @@
 import { describe, expect, it } from 'vitest';
-import { classifyTaskSize, sizingInstruction, parseSizingOutput } from './sizing.js';
+import { sizingInstruction, parseSizingOutput, SIZE_REASON_CODES } from './sizing.js';
 
-describe('classifyTaskSize (TASK-51 heuristic)', () => {
-  it('classifies a short single-target prompt as S', () => {
-    expect(classifyTaskSize({ prompt: 'fix a typo in the README', targetFileCount: 1 })).toBe('S');
+describe('sizingInstruction (TASK-51)', () => {
+  it('embeds the task prompt', () => {
+    expect(sizingInstruction({ prompt: 'migrate auth to OAuth' })).toContain('migrate auth to OAuth');
   });
 
-  it('classifies a cross-package change as L regardless of prompt length', () => {
-    expect(classifyTaskSize({ prompt: 'small', packageSpan: 2 })).toBe('L');
+  it('teaches the S/M/L rubric and the anti-length/anti-file-count rules', () => {
+    const instr = sizingInstruction({ prompt: 'x' });
+    expect(instr).toContain('S — small');
+    expect(instr).toContain('M — medium');
+    expect(instr).toContain('L — large');
+    expect(instr).toContain('Do NOT use prompt length');
+    expect(instr).toContain('File or package count is evidence, not a rule');
   });
 
-  it('classifies a many-file change as L', () => {
-    expect(classifyTaskSize({ prompt: 'add a feature', targetFileCount: 8 })).toBe('L');
+  it('lists the constrained reason codes and asks for JSON', () => {
+    const instr = sizingInstruction({ prompt: 'x' });
+    for (const code of SIZE_REASON_CODES) expect(instr).toContain(code);
+    expect(instr).toContain('"size"');
   });
 
-  it('classifies a long single-area prompt as L', () => {
-    const prompt = 'x'.repeat(700);
-    expect(classifyTaskSize({ prompt, targetFileCount: 2, packageSpan: 1 })).toBe('L');
-  });
-
-  it('classifies a medium single-area change as M', () => {
-    expect(classifyTaskSize({ prompt: 'refactor the tasks list to show phase and status', targetFileCount: 2 })).toBe('M');
-  });
-
-  it('defaults an unknown-signal medium-length prompt to M', () => {
-    expect(classifyTaskSize({ prompt: 'add validation to the create-task form fields' })).toBe('M');
+  it('includes optional repository context when provided', () => {
+    const instr = sizingInstruction({ prompt: 'x', repositoryContext: 'RetryPolicy in packages/http/retry.ts' });
+    expect(instr).toContain('Repository context:');
+    expect(instr).toContain('RetryPolicy in packages/http/retry.ts');
   });
 });
 
-describe('parseSizingOutput (TASK-51 model path)', () => {
-  it('parses a fenced JSON size block', () => {
-    expect(parseSizingOutput('Here is my answer:\n```json\n{"size": "L"}\n```')).toBe('L');
+describe('parseSizingOutput (TASK-51)', () => {
+  it('parses a fenced JSON size + reason codes', () => {
+    const out = parseSizingOutput('```json\n{"size":"L","reasonCodes":["security_sensitive","public_contract"]}\n```');
+    expect(out?.size).toBe('L');
+    expect(out?.reasonCodes).toEqual(expect.arrayContaining(['security_sensitive', 'public_contract']));
+    expect(out?.reasonCodes).toHaveLength(2);
   });
 
   it('parses a bare JSON object', () => {
-    expect(parseSizingOutput('{"size":"S"}')).toBe('S');
+    expect(parseSizingOutput('{"size":"S"}')?.size).toBe('S');
   });
 
-  it('parses a lone letter answer', () => {
-    expect(parseSizingOutput('M')).toBe('M');
+  it('parses a lone letter answer with no reason codes', () => {
+    const out = parseSizingOutput('M');
+    expect(out?.size).toBe('M');
+    expect(out?.reasonCodes).toEqual([]);
   });
 
-  it('returns undefined for unparseable output so the caller falls back', () => {
+  it('ignores unknown reason codes', () => {
+    const out = parseSizingOutput('{"size":"M","reasonCodes":["not_a_real_code","multiple_steps"]}');
+    expect(out?.reasonCodes).toEqual(['multiple_steps']);
+  });
+
+  it('returns undefined when no size token is present', () => {
     expect(parseSizingOutput('I am not sure how big this is.')).toBeUndefined();
-  });
-});
-
-describe('sizingInstruction', () => {
-  it('embeds the prompt and asks for a JSON size token', () => {
-    const instr = sizingInstruction({ prompt: 'do the thing', targetFileCount: 3, packageSpan: 1 });
-    expect(instr).toContain('do the thing');
-    expect(instr).toContain('Approx files touched: 3');
-    expect(instr).toContain('"size"');
   });
 });

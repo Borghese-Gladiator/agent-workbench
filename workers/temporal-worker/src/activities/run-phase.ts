@@ -32,7 +32,7 @@ import {
 import { resolveSliceDiffCap, sliceDiffExceedsCap } from './slice-guardrail.js';
 import { runBrowserQaViaServer } from './browser-qa-support.js';
 import { draftContractInputFromPrompt, formatContractGateSummary } from './contract-support.js';
-import { classifyTaskSizeWithModel, SIZE_CLASSIFIER_MODEL } from './classifier-support.js';
+import { classifyTaskSize, SIZE_CLASSIFIER_MODEL } from './classifier-support.js';
 import { programDesignInstruction, parseProgramDesignOutput } from './program-design-support.js';
 import { resolveRepoRef, createRealDelivery } from './delivery-support.js';
 import { createPhaseEventSink } from './durable-event-sink.js';
@@ -252,20 +252,26 @@ const specifyHandler: PhaseHandler = {
             ],
           };
       // Classify task size (TASK-51) before drafting the contract, so the contract carries the size a
-      // human reviews at the gate. The tiny-model (Haiku) call is Claude-SDK-specific, so it runs only
-      // on a profile that uses SDK tool/model names; every other profile (mock + non-Claude CLI
-      // adapters) uses the deterministic heuristic. An intake hint (state.size) seeds nothing here —
-      // the classifier decides, and a human can still override at the gate.
-      const size = await classifyTaskSizeWithModel({
+      // human reviews at the gate. The authoritative (Haiku) call is Claude-SDK-specific, so it runs
+      // only on a profile that uses SDK tool/model names; every other profile (mock + non-Claude CLI
+      // adapters) gets `undefined`, and the contract's `size ?? 'M'` default applies. An intake hint
+      // (state.size) takes precedence; a human can still override at the gate.
+      const classification = await classifyTaskSize({
         adapter: createAgentAdapter(),
         taskId: state.taskId,
+        phase: 'specify',
+        attemptNumber: state.attemptNumber,
         cwd: ctx.profile.usesRealAgent ? (await resolveRepositoryPath(state.repositoryId)) ?? process.cwd() : process.cwd(),
         useModel: ctx.profile.usesSdkToolNames,
         model: ctx.profile.usesSdkToolNames ? SIZE_CLASSIFIER_MODEL : undefined,
-        signals: { prompt: state.prompt ?? '' },
+        input: { prompt: state.prompt ?? '' },
         allowedTools: allowedToolsForBrokerRole('planner', ctx.profile),
         disallowedTools: deniedToolsForBrokerRole('planner', ctx.profile),
+        daemon: ctx.daemon,
       });
+      // Precedence: explicit intake hint → classifier → draftContract's `M` default (the one place
+      // "unclassified" becomes a concrete size). The classifier never invents a size.
+      const size = state.size ?? classification?.size;
       runState.size = size;
       const contract = markAwaitingApproval(draftContract({ ...draftInput, size }));
       runState.contract = contract;
