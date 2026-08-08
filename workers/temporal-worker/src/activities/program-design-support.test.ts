@@ -29,14 +29,42 @@ describe('signatureIsBodyless (TASK-52)', () => {
     expect(signatureIsBodyless('makeFoo(id: string): Foo')).toBe(true);
   });
 
-  it('accepts a TS interface shape (no statements)', () => {
-    expect(signatureIsBodyless('interface Foo { id: string; name: string }')).toBe(false);
-    // a `;` inside the braces reads as a statement leak — interfaces should be declared without them
+  it('accepts a TS interface / type / class shape (declarations, not statements)', () => {
     expect(signatureIsBodyless('interface Foo { id: string }')).toBe(true);
+    expect(signatureIsBodyless('interface Foo { id: string; name: string }')).toBe(true);
+    expect(signatureIsBodyless('type Bar = { a: number, b?: string }')).toBe(true);
+    expect(signatureIsBodyless('class Settings { token: SecretStr; timeout: float }')).toBe(true);
+  });
+
+  it('accepts an inline object return type with generics and `;`/`,` (no member-split false positive)', () => {
+    expect(
+      signatureIsBodyless(
+        'async function loadFullRows(id: string, offset: number): Promise<{columns: ColumnMeta[]; rows: Record<string, unknown>[]; total: number}>',
+      ),
+    ).toBe(true);
+  });
+
+  it('accepts a UI interface with `;`-separated members (TASK-67 live false-positive #1)', () => {
+    expect(
+      signatureIsBodyless(
+        'interface Provenance { dateRange: [string, string]; filters: Record<string, string>; source: string }',
+      ),
+    ).toBe(true);
+  });
+
+  it('accepts function-type members inside a type literal (a `=>` is a declaration, not an arrow body)', () => {
+    expect(signatureIsBodyless('interface Props { onClick: () => void; onSave: (id: string) => Promise<void> }')).toBe(
+      true,
+    );
+    expect(signatureIsBodyless('type Handlers = { onChange: (v: number) => void }')).toBe(true);
   });
 
   it('rejects a leaked function body', () => {
     expect(signatureIsBodyless('makeFoo(id) { return { id }; }')).toBe(false);
+    expect(signatureIsBodyless('load() { const x = read(); return x }')).toBe(false);
+    expect(signatureIsBodyless('run() { if (x) doThing() }')).toBe(false);
+    expect(signatureIsBodyless('handler() { await save(); }')).toBe(false);
+    expect(signatureIsBodyless('make() { return () => 1 }')).toBe(false);
   });
 });
 
