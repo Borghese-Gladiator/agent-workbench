@@ -2,6 +2,18 @@ import { randomUUID } from 'node:crypto';
 import type { Evidence, EvidenceKind, EvidenceStatus } from '@awb/domain';
 
 /**
+ * TASK-42: how strong an assertion is, so the gate can distinguish "the feature is wired and
+ * live" from "the feature is correct".
+ *  - `liveness`   — the step merely did not throw (navigate/click succeeded, an element exists).
+ *                   Proves the wiring is alive; proves nothing about behaviour.
+ *  - `state-transition` — observed that an action produced the expected post-action state
+ *                   (e.g. a card was beaten, a element appeared/disappeared).
+ *  - `value-match` — compared an observed value against an expected value.
+ * A scenario made only of `liveness` assertions is trivially weak (see `scenarioStrength`).
+ */
+export type QaAssertionStrength = 'liveness' | 'state-transition' | 'value-match';
+
+/**
  * One structured, typed assertion result. Per product spec §23: "A video alone does not pass
  * QA. Structured assertions determine pass or failure." Every QA executor produces a list of
  * these independent of whatever recording/trace artifact it also captures.
@@ -10,6 +22,37 @@ export interface QaAssertionResult {
   name: string;
   passed: boolean;
   detail?: string;
+  /** TASK-42: assertion strength; defaults to `liveness` when a producer omits it. */
+  strength?: QaAssertionStrength;
+}
+
+/** True when an assertion observes real behaviour (a state transition or a value comparison). */
+export function isStrongAssertion(a: QaAssertionResult): boolean {
+  return a.strength === 'state-transition' || a.strength === 'value-match';
+}
+
+/**
+ * TASK-42: classify a scenario's assertions. A scenario is `weak` when every assertion is a
+ * liveness check (did-not-throw / existence) — it passes exactly like one that exercises the
+ * real behaviour, so the challenge phase treats it as a QA-quality finding rather than a silent
+ * pass. `strong` means at least one assertion observes a state transition or a value.
+ */
+export function scenarioStrength(assertions: QaAssertionResult[]): 'weak' | 'strong' {
+  return assertions.some(isStrongAssertion) ? 'strong' : 'weak';
+}
+
+/**
+ * TASK-42: whether a browser QA run hit a frontend-observable policy-blocking signal — an
+ * unhandled console error or a failed/4xx+ network request. Feeds the exercise gate's
+ * `policyBlockingErrorsPresent` (was hard-coded false), so a page that throws errors no longer
+ * passes QA. We deliberately do NOT inspect the transport (WebSocket/SSE/polling): QA validates
+ * the frontend's observable behaviour and lets the app make whatever connections it makes.
+ */
+export function policyBlockingErrorsPresent(input: {
+  consoleErrors: string[];
+  failedRequests: string[];
+}): boolean {
+  return input.consoleErrors.length > 0 || input.failedRequests.length > 0;
 }
 
 export interface QaEvidenceContext {

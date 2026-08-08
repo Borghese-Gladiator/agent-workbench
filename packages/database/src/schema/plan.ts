@@ -35,4 +35,5 @@ export const planClaimCoverage = sqliteTable('plan_claim_coverage', {
   claimId: text('claim_id').notNull(),
   planSliceIdsJson: text('plan_slice_ids_json').notNull(),
   qaScenarioIdsJson: text('qa_scenario_ids_json').notNull(),
+  expectedAssertionsJson: text('expected_assertions_json').notNull().default('[]'),
 });

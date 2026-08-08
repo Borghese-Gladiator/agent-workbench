@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ArtifactStore, InMemoryArtifactMetadataStore } from '@awb/evidence';
 import { runBrowserQa } from './browser-qa.js';
+import { scenarioStrength } from './shared.js';
 import { makeQaEvidenceContext } from './test-helpers.js';
 
 const FIXTURE_HTML = `<!doctype html>
@@ -14,9 +15,17 @@ const FIXTURE_HTML = `<!doctype html>
     <button id="reveal-button" onclick="document.getElementById('revealed').style.display='block'">Reveal</button>
     <div id="revealed" style="display:none">Revealed Text</div>
     <input id="name-input" type="text" />
-    <script>
-      console.error("fixture console error for capture test");
-    </script>
+  </body>
+</html>`;
+
+// TASK-42: a fixture that emits a console error at load, so the console-error capture test can
+// assert QA now *fails* on it (previously captured but ignored).
+const CONSOLE_ERROR_HTML = `<!doctype html>
+<html>
+  <head><title>QA Fixture (console error)</title></head>
+  <body>
+    <p>hi</p>
+    <script>console.error("fixture console error for capture test");</script>
   </body>
 </html>`;
 
@@ -28,6 +37,11 @@ describe('runBrowserQa', () => {
 
   beforeAll(async () => {
     server = createServer((req, res) => {
+      if (req.url === '/console-error') {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(CONSOLE_ERROR_HTML);
+        return;
+      }
       if (req.url !== '/' && req.url !== '/index.html') {
         res.writeHead(404, { 'Content-Type': 'text/plain' });
         res.end('not found');
@@ -65,10 +79,10 @@ describe('runBrowserQa', () => {
             { kind: 'navigate', url: '/' },
             { kind: 'type', selector: '#name-input', text: 'hello world' },
             { kind: 'click', selector: '#reveal-button' },
-            { kind: 'waitForSelector', selector: '#revealed' },
-            { kind: 'waitForText', text: 'Revealed Text' },
+            // TASK-42: a genuine post-action state assertion (state-transition) + a value match.
+            { kind: 'expectVisible', selector: '#revealed' },
+            { kind: 'expectText', selector: '#revealed', equals: 'Revealed Text' },
             { kind: 'screenshot', name: 'after-reveal' },
-            { kind: 'ariaSnapshot', selector: 'body' },
           ],
         },
         makeQaEvidenceContext(),
@@ -77,6 +91,9 @@ describe('runBrowserQa', () => {
 
       expect(result.assertions.every((a) => a.passed)).toBe(true);
       expect(result.evidence.status).toBe('passed');
+      expect(result.policyBlockingErrorsPresent).toBe(false);
+      // The scenario exercises real behaviour, so it is not a weak (all-liveness) scenario.
+      expect(scenarioStrength(result.assertions)).toBe('strong');
 
       const videoArtifact = result.artifacts.find((a) => a.kind === 'qa-video');
       const traceArtifact = result.artifacts.find((a) => a.kind === 'browser-trace');
@@ -89,8 +106,6 @@ describe('runBrowserQa', () => {
       expect(await store.exists(traceArtifact!.id)).toBe(true);
       expect(videoArtifact!.byteSize).toBeGreaterThan(0);
       expect(traceArtifact!.byteSize).toBeGreaterThan(0);
-
-      expect(result.consoleErrors.some((e) => e.includes('fixture console error'))).toBe(true);
     },
     20_000,
   );
@@ -117,7 +132,7 @@ describe('runBrowserQa', () => {
   );
 
   it(
-    'captures failed network requests for a real 404 response',
+    'fails QA on a real 404 response (network error is a blocking signal)',
     async () => {
       const result = await runBrowserQa(
         {
@@ -131,9 +146,27 @@ describe('runBrowserQa', () => {
         store,
       );
 
-      expect(result.assertions.every((a) => a.passed)).toBe(true);
-      expect(result.evidence.status).toBe('passed');
+      // TASK-42: a captured 4xx now produces a failing assertion and blocks the gate.
       expect(result.failedRequests.some((f) => f.includes('404'))).toBe(true);
+      expect(result.policyBlockingErrorsPresent).toBe(true);
+      expect(result.evidence.status).toBe('failed');
+      expect(result.assertions.some((a) => a.name === 'no-failed-request' && !a.passed)).toBe(true);
+    },
+    20_000,
+  );
+
+  it(
+    'fails QA on an unhandled console error',
+    async () => {
+      const result = await runBrowserQa(
+        { baseUrl, steps: [{ kind: 'navigate', url: '/console-error' }] },
+        makeQaEvidenceContext(),
+        store,
+      );
+
+      expect(result.consoleErrors.some((e) => e.includes('fixture console error'))).toBe(true);
+      expect(result.policyBlockingErrorsPresent).toBe(true);
+      expect(result.evidence.status).toBe('failed');
     },
     20_000,
   );

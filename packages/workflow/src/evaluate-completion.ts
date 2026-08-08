@@ -23,6 +23,9 @@ function evaluateSpecify(ctx: CompletionContext['specify']): CompletionDecision 
   if (!ctx.nonGoalsArrayPresent) missing.push('nonGoals array is not present');
   if (!ctx.noUnresolvedAmbiguity) missing.push('unresolved ambiguity remains');
 
+  if (!ctx.problemStatementPresent) missing.push('problem statement is empty');
+  else reasons.push('problem statement is present');
+
   if (ctx.contractStatus !== 'approved') missing.push(`contract status is "${ctx.contractStatus}", not "approved"`);
   else reasons.push('a human approved the current contract version');
 
@@ -109,6 +112,11 @@ function evaluateExercise(ctx: CompletionContext['exercise']): CompletionDecisio
 
   if (!ctx.everyRequiredScenarioHasResult) missing.push('some required QA scenario has no result');
   if (!ctx.everyBehavioralClaimCovered) missing.push('some behavioral acceptance claim is not covered');
+  if (ctx.behavioralClaimsMissingStrongAssertion && ctx.behavioralClaimsMissingStrongAssertion.length > 0) {
+    missing.push(
+      `${ctx.behavioralClaimsMissingStrongAssertion.length} behavioral claim(s) lack a passing state-transition/value assertion`,
+    );
+  }
   if (!ctx.structuredAssertionsPass) missing.push('structured assertions do not pass');
   if (!ctx.requiredRecordingExists) missing.push('required video or terminal recording does not exist');
   if (!ctx.browserScenariosHaveTraces) missing.push('a browser scenario is missing a Playwright trace');

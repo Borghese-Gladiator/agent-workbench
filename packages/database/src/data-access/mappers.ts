@@ -8,6 +8,7 @@ import type {
   Finding,
   WorkspaceLease,
   ArtifactRecord,
+  ExpectedAssertion,
 } from '@awb/domain';
 import type {
   TaskContractRow,
@@ -33,6 +34,11 @@ function parseArray(json: string): string[] {
   return Array.isArray(value) ? value : [];
 }
 
+function parseExpectedAssertions(json: string): ExpectedAssertion[] {
+  const value = JSON.parse(json);
+  return Array.isArray(value) ? (value as ExpectedAssertion[]) : [];
+}
+
 // --- TaskContract (+ acceptance claims) ---
 
 export function contractToRow(contract: TaskContract): TaskContractRow {
@@ -41,6 +47,7 @@ export function contractToRow(contract: TaskContract): TaskContractRow {
     taskId: contract.taskId,
     version: contract.version,
     objective: contract.objective,
+    problemStatement: contract.problemStatement,
     constraintsJson: JSON.stringify(contract.constraints),
     nonGoalsJson: JSON.stringify(contract.nonGoals),
     risk: contract.risk,
@@ -77,6 +84,7 @@ export function rowToContract(row: TaskContractRow, claims: AcceptanceClaimRow[]
     taskId: row.taskId,
     version: row.version,
     objective: row.objective,
+    problemStatement: row.problemStatement,
     constraints: parseArray(row.constraintsJson),
     nonGoals: parseArray(row.nonGoalsJson),
     risk: row.risk,
@@ -130,14 +138,17 @@ export function coverageToRow(coverage: ClaimCoverage, planId: string): Omit<Pla
     claimId: coverage.claimId,
     planSliceIdsJson: JSON.stringify(coverage.planSliceIds),
     qaScenarioIdsJson: JSON.stringify(coverage.qaScenarioIds),
+    expectedAssertionsJson: JSON.stringify(coverage.expectedAssertions ?? []),
   };
 }
 
 export function rowToCoverage(row: PlanClaimCoverageRow): ClaimCoverage {
+  const expectedAssertions = parseExpectedAssertions(row.expectedAssertionsJson);
   return {
     claimId: row.claimId,
     planSliceIds: parseArray(row.planSliceIdsJson),
     qaScenarioIds: parseArray(row.qaScenarioIdsJson),
+    ...(expectedAssertions.length > 0 ? { expectedAssertions } : {}),
   };
 }
 

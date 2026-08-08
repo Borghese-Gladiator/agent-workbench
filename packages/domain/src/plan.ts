@@ -1,5 +1,19 @@
 import { z } from 'zod';
 
+/**
+ * TASK-42: an expected per-claim QA assertion the planner emits — the specific state transition
+ * (or value) the QA author must observe for a behavioral claim. Gives the QA author a target and
+ * lets the exercise gate check that an assertion actually exercises the claim's observable
+ * behaviour, not merely that some scenario ran for it.
+ */
+export const ExpectedAssertionSchema = z.object({
+  claimId: z.string(),
+  /** Human-readable description of the transition/value to observe (e.g. "a higher rank beats a lower one"). */
+  observes: z.string(),
+  kind: z.enum(['state-transition', 'value-match']),
+});
+export type ExpectedAssertion = z.infer<typeof ExpectedAssertionSchema>;
+
 export const PlanSliceSchema = z.object({
   id: z.string(),
   objective: z.string(),
@@ -13,6 +27,8 @@ export const PlanSliceSchema = z.object({
    * (see everyBehavioralClaimHasQaScenario). Optional so non-behavioral plans/fixtures are unaffected.
    */
   qaScenarioIds: z.array(z.string()).optional(),
+  /** TASK-42: expected per-claim QA assertions this slice's scenarios must observe. */
+  expectedAssertions: z.array(ExpectedAssertionSchema).optional(),
 });
 export type PlanSlice = z.infer<typeof PlanSliceSchema>;
 
@@ -28,6 +44,8 @@ export const ClaimCoverageSchema = z.object({
   claimId: z.string(),
   planSliceIds: z.array(z.string()),
   qaScenarioIds: z.array(z.string()),
+  /** TASK-42: the expected assertions covering this claim, aggregated from its covering slices. */
+  expectedAssertions: z.array(ExpectedAssertionSchema).optional(),
 });
 export type ClaimCoverage = z.infer<typeof ClaimCoverageSchema>;
 

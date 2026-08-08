@@ -19,10 +19,20 @@ export interface TaskWorkflowState {
   runtimeMsByPhase: Record<string, number>;
 }
 
+/** TASK-53: advisory maintainability annotation surfaced for the human (non-blocking). */
+export interface MaintainabilityFinding {
+  id: string;
+  path?: string;
+  line?: number;
+  description: string;
+}
+
 export interface TaskStateResponse {
   state: TaskWorkflowState;
   openFindings: string[];
   pendingHumanGate: TaskWorkflowState['pendingHumanGate'];
+  /** TASK-53: advisory maintainability findings (category maintainability, severity note). */
+  maintainabilityFindings?: MaintainabilityFinding[];
 }
 
 /** A committed QA-media artifact the Evidence Viewer can play/preview locally (TASK-58). */

@@ -5,7 +5,12 @@ import { chromium } from 'playwright';
 import type { Page, ConsoleMessage, Response } from 'playwright';
 import { ArtifactStore } from '@awb/evidence';
 import type { ArtifactRecord } from '@awb/domain';
-import { produceQaEvidence, type QaAssertionResult, type QaEvidenceContext } from './shared.js';
+import {
+  policyBlockingErrorsPresent,
+  produceQaEvidence,
+  type QaAssertionResult,
+  type QaEvidenceContext,
+} from './shared.js';
 import { transcodeWebmToGif } from './transcode.js';
 
 export type BrowserQaStep =
@@ -15,7 +20,13 @@ export type BrowserQaStep =
   | { kind: 'waitForSelector'; selector: string; timeoutMs?: number }
   | { kind: 'waitForText'; text: string; timeoutMs?: number }
   | { kind: 'screenshot'; name: string }
-  | { kind: 'ariaSnapshot'; selector: string };
+  | { kind: 'ariaSnapshot'; selector: string }
+  // TASK-42: state-transition / value-match steps that observe real behaviour rather than
+  // "the action did not throw". `expectVisible`/`expectHidden` assert a post-action DOM state;
+  // `expectText` compares an element's text to an expected value.
+  | { kind: 'expectVisible'; selector: string; timeoutMs?: number }
+  | { kind: 'expectHidden'; selector: string; timeoutMs?: number }
+  | { kind: 'expectText'; selector: string; equals: string };
 
 export interface BrowserQaScenario {
   baseUrl: string;
@@ -27,6 +38,14 @@ export interface BrowserQaResult {
   artifacts: ArtifactRecord[];
   consoleErrors: string[];
   failedRequests: string[];
+  /**
+   * TASK-42: convenience — whether any frontend-observable error (an unhandled console error or a
+   * failed/4xx+ network request) should block the gate. We do NOT inspect the transport (e.g.
+   * WebSocket) directly: QA validates the frontend's observable behaviour and lets the app make
+   * whatever connections it makes. A transport-level bug (e.g. a duplicate socket) is caught via
+   * its observable symptom — a console/network error, or a failing state/value assertion.
+   */
+  policyBlockingErrorsPresent: boolean;
   evidence: ReturnType<typeof produceQaEvidence>;
 }
 
@@ -150,6 +169,16 @@ export async function runBrowserQa(
     await rm(join(tracePath, '..'), { recursive: true, force: true });
   }
 
+  // TASK-42: surface captured console/network errors and socket leaks as real failing
+  // assertions, so a page that throws errors or opens duplicate sockets fails QA instead of
+  // silently passing (these signals were previously captured but never asserted on).
+  for (const err of consoleErrors) {
+    assertions.push({ name: 'no-console-error', passed: false, detail: err, strength: 'state-transition' });
+  }
+  for (const req of failedRequests) {
+    assertions.push({ name: 'no-failed-request', passed: false, detail: req, strength: 'state-transition' });
+  }
+
   const evidence = produceQaEvidence({
     kind: 'qa-video',
     assertions,
@@ -160,7 +189,14 @@ export async function runBrowserQa(
     context,
   });
 
-  return { assertions, artifacts, consoleErrors, failedRequests, evidence };
+  return {
+    assertions,
+    artifacts,
+    consoleErrors,
+    failedRequests,
+    policyBlockingErrorsPresent: policyBlockingErrorsPresent({ consoleErrors, failedRequests }),
+    evidence,
+  };
 }
 
 async function executeStep(
@@ -176,27 +212,61 @@ async function executeStep(
     case 'navigate': {
       const url = step.url.startsWith('http') ? step.url : new URL(step.url, baseUrl).toString();
       await page.goto(url);
-      assertions.push({ name: `navigate:${step.url}`, passed: true });
+      assertions.push({ name: `navigate:${step.url}`, passed: true, strength: 'liveness' });
       return;
     }
     case 'click': {
       await page.locator(step.selector).click();
-      assertions.push({ name: `click:${step.selector}`, passed: true });
+      assertions.push({ name: `click:${step.selector}`, passed: true, strength: 'liveness' });
       return;
     }
     case 'type': {
       await page.locator(step.selector).fill(step.text);
-      assertions.push({ name: `type:${step.selector}`, passed: true });
+      assertions.push({ name: `type:${step.selector}`, passed: true, strength: 'liveness' });
       return;
     }
     case 'waitForSelector': {
       await page.locator(step.selector).waitFor({ state: 'visible', timeout: step.timeoutMs });
-      assertions.push({ name: `waitForSelector:${step.selector}`, passed: true });
+      assertions.push({ name: `waitForSelector:${step.selector}`, passed: true, strength: 'liveness' });
       return;
     }
     case 'waitForText': {
       await page.getByText(step.text).waitFor({ state: 'visible', timeout: step.timeoutMs });
-      assertions.push({ name: `waitForText:${step.text}`, passed: true });
+      assertions.push({ name: `waitForText:${step.text}`, passed: true, strength: 'liveness' });
+      return;
+    }
+    case 'expectVisible': {
+      // TASK-42: a genuine post-action state assertion — the element became visible.
+      let visible = false;
+      try {
+        await page.locator(step.selector).waitFor({ state: 'visible', timeout: step.timeoutMs ?? 5000 });
+        visible = true;
+      } catch {
+        visible = false;
+      }
+      assertions.push({ name: `expectVisible:${step.selector}`, passed: visible, strength: 'state-transition' });
+      return;
+    }
+    case 'expectHidden': {
+      let hidden = false;
+      try {
+        await page.locator(step.selector).waitFor({ state: 'hidden', timeout: step.timeoutMs ?? 5000 });
+        hidden = true;
+      } catch {
+        hidden = false;
+      }
+      assertions.push({ name: `expectHidden:${step.selector}`, passed: hidden, strength: 'state-transition' });
+      return;
+    }
+    case 'expectText': {
+      // TASK-42: a value comparison — the observed text equals the expected value.
+      const actual = (await page.locator(step.selector).textContent())?.trim() ?? '';
+      assertions.push({
+        name: `expectText:${step.selector}`,
+        passed: actual === step.equals,
+        detail: `expected "${step.equals}", got "${actual}"`,
+        strength: 'value-match',
+      });
       return;
     }
     case 'screenshot': {
@@ -212,7 +282,7 @@ async function executeStep(
         candidateSha: context.candidateSha,
       });
       artifacts.push(artifact);
-      assertions.push({ name: `screenshot:${step.name}`, passed: true, detail: artifact.id });
+      assertions.push({ name: `screenshot:${step.name}`, passed: true, detail: artifact.id, strength: 'liveness' });
       return;
     }
     case 'ariaSnapshot': {
@@ -221,6 +291,7 @@ async function executeStep(
         name: `ariaSnapshot:${step.selector}`,
         passed: snapshot.length > 0,
         detail: snapshot,
+        strength: 'liveness',
       });
       return;
     }

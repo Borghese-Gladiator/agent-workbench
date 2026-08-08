@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { deriveQaStatus, produceQaEvidence } from './shared.js';
+import {
+  deriveQaStatus,
+  policyBlockingErrorsPresent,
+  produceQaEvidence,
+  scenarioStrength,
+} from './shared.js';
 import { makeQaEvidenceContext } from './test-helpers.js';
 
 describe('deriveQaStatus', () => {
@@ -29,6 +34,38 @@ describe('deriveQaStatus', () => {
     expect(
       deriveQaStatus([{ name: 'execution', passed: false }], true, true),
     ).toBe('inconclusive');
+  });
+});
+
+describe('scenarioStrength (TASK-42)', () => {
+  it('classifies an all-liveness scenario as weak', () => {
+    expect(
+      scenarioStrength([
+        { name: 'navigate', passed: true, strength: 'liveness' },
+        { name: 'click', passed: true, strength: 'liveness' },
+        { name: 'no-strength-defaults-to-liveness', passed: true },
+      ]),
+    ).toBe('weak');
+  });
+
+  it('classifies a scenario with a state-transition or value assertion as strong', () => {
+    expect(
+      scenarioStrength([
+        { name: 'navigate', passed: true, strength: 'liveness' },
+        { name: 'expectVisible', passed: true, strength: 'state-transition' },
+      ]),
+    ).toBe('strong');
+  });
+});
+
+describe('policyBlockingErrorsPresent (TASK-42)', () => {
+  it('is false with no captured signals', () => {
+    expect(policyBlockingErrorsPresent({ consoleErrors: [], failedRequests: [] })).toBe(false);
+  });
+
+  it('is true when any console or network signal is present', () => {
+    expect(policyBlockingErrorsPresent({ consoleErrors: ['boom'], failedRequests: [] })).toBe(true);
+    expect(policyBlockingErrorsPresent({ consoleErrors: [], failedRequests: ['404'] })).toBe(true);
   });
 });
 

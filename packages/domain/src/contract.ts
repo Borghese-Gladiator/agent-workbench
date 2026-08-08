@@ -38,6 +38,12 @@ export const TaskContractSchema = z.object({
   taskId: z.string(),
   version: z.number().int().positive(),
   objective: z.string(),
+  /**
+   * TASK-54: the problem the task solves, aligned on with the human at the specify gate before any
+   * planning spend. What the acceptance claims must satisfy is captured by `claims`; this is the
+   * human-facing "why".
+   */
+  problemStatement: z.string(),
   constraints: z.array(z.string()),
   nonGoals: z.array(z.string()),
   risk: TaskRiskSchema,

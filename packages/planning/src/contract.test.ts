@@ -34,6 +34,22 @@ describe('draftContract', () => {
     const ids = contract.claims.map((c) => c.id);
     expect(new Set(ids).size).toBe(2);
   });
+
+  // TASK-54: problem statement.
+  it('defaults the problem statement to the objective', () => {
+    const contract = draftContract({ taskId: 'task-1', objective: 'Add dark mode', claims: [baseClaim] });
+    expect(contract.problemStatement).toBe('Add dark mode');
+  });
+
+  it('uses the supplied problem statement when given', () => {
+    const contract = draftContract({
+      taskId: 'task-1',
+      objective: 'Add dark mode',
+      problemStatement: 'no dark mode exists',
+      claims: [baseClaim],
+    });
+    expect(contract.problemStatement).toBe('no dark mode exists');
+  });
 });
 
 describe('reviseContract', () => {
@@ -99,5 +115,21 @@ describe('contractCompletionInputs', () => {
   it('flags an empty objective', () => {
     const contract = draftContract({ taskId: 'task-1', objective: '   ', claims: [baseClaim] });
     expect(contractCompletionInputs(contract, true).objectiveNonEmpty).toBe(false);
+  });
+
+  // TASK-54: reviewer-alignment before implementation.
+  it('reports the problem statement present for a drafted contract', () => {
+    const contract = draftContract({ taskId: 'task-1', objective: 'Add dark mode', claims: [baseClaim] });
+    expect(contractCompletionInputs(contract, true).problemStatementPresent).toBe(true);
+  });
+
+  it('flags an empty problem statement', () => {
+    const contract = draftContract({
+      taskId: 'task-1',
+      objective: 'Add dark mode',
+      problemStatement: '   ',
+      claims: [baseClaim],
+    });
+    expect(contractCompletionInputs(contract, true).problemStatementPresent).toBe(false);
   });
 });
