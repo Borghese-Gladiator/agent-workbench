@@ -43,7 +43,7 @@ export function RepositoryDetailPage() {
   if (error && !repository) {
     return (
       <div>
-        <PageHeader title="Repository" back={{ to: '/', label: 'Repositories' }} />
+        <PageHeader title="Repository" back={{ to: '/repositories', label: 'Repositories' }} />
         <div className="rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
           {error}
         </div>
@@ -53,7 +53,7 @@ export function RepositoryDetailPage() {
   if (!repository) {
     return (
       <div>
-        <PageHeader title="Repository" back={{ to: '/', label: 'Repositories' }} />
+        <PageHeader title="Repository" back={{ to: '/repositories', label: 'Repositories' }} />
         <p className="text-sm text-muted-foreground">Loading…</p>
       </div>
     );
@@ -63,7 +63,7 @@ export function RepositoryDetailPage() {
     <div>
       <PageHeader
         title={repository.name}
-        back={{ to: '/', label: 'Repositories' }}
+        back={{ to: '/repositories', label: 'Repositories' }}
         actions={
           <>
             <Button

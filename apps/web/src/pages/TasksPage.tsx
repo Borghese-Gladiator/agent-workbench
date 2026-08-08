@@ -1,6 +1,6 @@
 import { Plus } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -21,11 +21,14 @@ import { deriveTaskTitle, relativeTime, shortId } from '@/lib/format';
 import { api, type Repository } from '../api/client.js';
 import { tasksApi, type TaskSummary } from '../api/tasks.js';
 import { useTaskListLiveRefresh } from '../hooks/useTaskListLiveRefresh.js';
+import { TaskBoard } from './TaskBoard.js';
 
 const POLL_INTERVAL_MS = 4000;
 
 export function TasksPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view = searchParams.get('view') === 'board' ? 'board' : 'list';
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,6 +89,19 @@ export function TasksPage() {
   }, [tasks, search, statusFilter, repoFilter, sort]);
 
   const filtersActive = search !== '' || statusFilter !== 'All' || repoFilter !== 'All';
+
+  // Compact "needs attention" counts over ALL tasks (not the filtered set) — the at-a-glance strip.
+  const attention = useMemo(() => {
+    let awaiting = 0;
+    let failed = 0;
+    let running = 0;
+    for (const t of tasks) {
+      if (t.derivedStatus === 'awaiting-human') awaiting += 1;
+      else if (t.derivedStatus === 'failed' || t.derivedStatus === 'blocked') failed += 1;
+      else if (t.derivedStatus === 'running' || t.derivedStatus === 'planning') running += 1;
+    }
+    return { awaiting, failed, running };
+  }, [tasks]);
 
   async function handleCreate(): Promise<void> {
     if (!newRepoId || !newPrompt.trim()) return;
@@ -153,19 +169,41 @@ export function TasksPage() {
   return (
     <div className="mx-auto max-w-5xl">
       <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-xl font-semibold tracking-tight">Tasks</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-semibold tracking-tight">Tasks</h1>
+          <div className="flex rounded-md border p-0.5" role="tablist" aria-label="View">
+            {(['list', 'board'] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                role="tab"
+                aria-selected={view === v}
+                onClick={() => setSearchParams((p) => (v === 'list' ? p.delete('view') : p.set('view', v), p), { replace: true })}
+                className={
+                  'rounded px-2.5 py-1 text-xs font-medium capitalize transition-colors ' +
+                  (view === v ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')
+                }
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
         <Button size="sm" onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4" />
           Create task
         </Button>
       </div>
 
-      <div className="mb-5 flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-sm text-muted-foreground">
-        <span aria-hidden className="text-primary">
-          ⓘ
-        </span>
-        Tasks shown here are stored by the daemon and reappear after a restart.
-      </div>
+      {!loading && tasks.length > 0 && (
+        <div className="mb-5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border bg-card px-3 py-2 text-sm">
+          <span className="text-warn">{attention.awaiting} awaiting approval</span>
+          <span aria-hidden className="text-muted-foreground">·</span>
+          <span className="text-danger">{attention.failed} blocked / failed</span>
+          <span aria-hidden className="text-muted-foreground">·</span>
+          <span className="text-muted-foreground">{attention.running} running</span>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 flex items-center justify-between rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -176,6 +214,16 @@ export function TasksPage() {
         </div>
       )}
 
+      {view === 'board' ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex justify-end">{controls}</div>
+          {loading ? (
+            <p className="p-6 text-center text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            <TaskBoard tasks={filtered} repoLabel={repoLabel} />
+          )}
+        </div>
+      ) : (
       <Panel className="flex flex-col">
         <PanelHeader title="Pipeline" action={controls} />
         <Table>
@@ -234,6 +282,7 @@ export function TasksPage() {
         )}
         {loading && <p className="p-6 text-center text-sm text-muted-foreground">Loading…</p>}
       </Panel>
+      )}
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>

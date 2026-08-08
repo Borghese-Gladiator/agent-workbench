@@ -14,8 +14,8 @@ interface NavItem {
 // Evidence was removed from primary nav — it is now the "Verification" tab inside Task Detail
 // (where task/candidate/claim context exists). /evidence redirects there (see App.tsx).
 const NAV_ITEMS: NavItem[] = [
-  { to: '/', label: 'Repositories', icon: FolderGit2, end: true },
   { to: '/tasks', label: 'Tasks', icon: ListChecks },
+  { to: '/repositories', label: 'Repositories', icon: FolderGit2 },
   { to: '/approvals', label: 'Approvals', icon: ClipboardCheck },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
