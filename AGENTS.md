@@ -85,7 +85,8 @@ top-level `tests/`. Nothing under `packages/` runs on its own — `apps/` and
 | tree-sitter unit/symbol/import extraction | `packages/repository-map` |
 | Project memory (facts, FTS5 retrieval, invalidation) | `packages/repository-memory` |
 | Temporal Workflows + deterministic completion policy | `packages/workflow` |
-| Git worktree/port/process management | `packages/workspace`, `packages/execution` |
+| Git worktree/branch/port lease management | `packages/workspace` |
+| Command execution (spawn, capture, timeouts) | `packages/execution` |
 | Agent adapter interface + mock/Claude adapters | `packages/agent-gateway` |
 | Per-role tool allowlists | `packages/capability-broker` |
 | Task contract, planner↔critic loop, builder slice loop | `packages/planning` |
@@ -96,14 +97,19 @@ top-level `tests/`. Nothing under `packages/` runs on its own — `apps/` and
 | Human-gate trigger policy | `packages/policy` |
 | Token/usage aggregation | `packages/agent-gateway` (`UsageAggregator`) |
 | Runtime-by-phase tracking | `packages/workflow` (`TaskWorkflowState.runtimeMsByPhase`) |
+| OpenTelemetry traces/metrics, structured logging (diagnostics-only) | `packages/telemetry` |
 | Temporal worker process (Activities live here) | `workers/temporal-worker` |
+| Per-phase Activity logic + support modules (the I/O layer) | `workers/temporal-worker/src/activities` (see its `AGENTS.md`) |
 | Daemon (Fastify API, the only SQLite writer) | `apps/daemon` |
 | Web dashboard | `apps/web` |
 | CLI (`awb ...`) | `apps/cli` |
 
 Every package under `packages/` has its own `README.md` covering purpose,
 responsibilities, and explicit non-responsibilities — read that first before
-reading the source.
+reading the source. `apps/*` and `workers/temporal-worker` carry a `README.md`
+too; the Activities directory
+(`workers/temporal-worker/src/activities/`) has an `AGENTS.md` mapping its ~25
+support modules — read that before opening the `run-phase.ts` hub.
 
 ## Agent Workbench commands
 

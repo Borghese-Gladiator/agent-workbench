@@ -10,19 +10,26 @@ logic (agent sessions, command execution, git/worktree operations, etc.).
 
 - `src/index.ts` — worker bootstrap (`startWorker()`), pointed at the built
   `@awb/workflow` dist output for workflow bundling.
-- `src/activities/run-phase.ts` — the real `runPhase` Activity. As of
-  Milestone 3 this is a stub that always returns `{ outcome: "blocked" }`,
-  since real per-phase logic depends on packages landing in later milestones
-  (agent-gateway, verification, qa, review). Wiring it up is tracked
-  per-milestone, not silently deferred forever.
+- `src/activities/` — the Activities. `run-phase.ts` is the real `runPhase`
+  Activity (a hub that dispatches each lifecycle phase), and ~20 support modules
+  around it do the actual per-phase work (contract, planner, builder, worktree,
+  delivery, browser QA) plus run-state persistence, observability, and the
+  slice guardrail. **See `src/activities/AGENTS.md` for the full module map** —
+  read that before opening `run-phase.ts`.
 
 ## Does NOT
 
 - Contain lifecycle/completion logic itself — that's `@awb/workflow`. This
-  package's activities are thin wrappers that delegate to the packages that
-  actually do the work (repository, workspace, agent-gateway, verification,
-  qa, review, github) once those exist.
+  package's Activities delegate to the domain packages that do the work
+  (repository, workspace, agent-gateway, verification, qa, review, github); the
+  only phase-advancement decision is `evaluatePhaseCompletion` in
+  `@awb/workflow`, which Activities call but never override.
 
 ## Dependencies
 
-`@awb/domain`, `@awb/workflow`, `@temporalio/worker`, `@temporalio/activity`.
+`@temporalio/worker` + `@temporalio/activity`, and the domain packages the
+Activities delegate to — `@awb/workflow` (deterministic completion policy),
+`@awb/domain`, and the I/O libraries: `agent-gateway`, `capability-broker`,
+`config`, `database`, `evidence`, `execution`, `github`, `planning`, `qa`,
+`repository`, `repository-memory`, `review`, `telemetry`, `verification`,
+`workspace`. (Full graph: `docs/dependencies.md`.)
