@@ -1,6 +1,6 @@
 ---
 name: implement-feature
-description: Implement a feature or fix in the agent-workbench repository by using Agentic Workbench to modify its own code safely. Use for requests to add, change, fix, refactor, or implement behavior in this repo. Plan first, create an isolated target worktree, run the implementation against that worktree from a stable controller checkout, independently verify the resulting diff and behavior, repair if necessary, then land with close-worktree. Do not use for driving changes in unrelated repositories.
+description: Implement a feature or fix in the agent-workbench repository by using Agentic Workbench to modify its own code safely. Use for requests to add, change, fix, refactor, or implement behavior in this repo. Plan first, create an isolated target worktree, run the implementation against that worktree from a stable controller checkout, independently verify the resulting diff and behavior, repair if necessary, then commit and report. Do not use for driving changes in unrelated repositories.
 ---
 
 # Implement a feature in agent-workbench
@@ -17,7 +17,7 @@ Never use a checkout as both controller and target during the same live task.
 The flow is a delegate-then-independently-verify loop, not a straight line: the
 implementation is delegated to AWB, its result is verified against the plan and
 the real diff (never against the task's own success message), and a defect routes
-back into a bounded repair loop before the change is ever landed.
+back into a bounded repair loop before the change is committed.
 
 ```
 implement-feature
@@ -33,8 +33,9 @@ implement-feature
 │                                                          diagnose directly)
 │
 ├── 6. behavioral verification       build / test / manual, observed not expected
-├── 7. adversarial diff review       correctness the string-checks miss
-└── 8. close-worktree                only on green
+└── 7. adversarial diff review       correctness the string-checks miss
+        │
+        └── commit + report          landing is the user's call, not this skill
 ```
 
 Read `AGENTS.md` before planning. Treat it as authoritative for architecture,
@@ -217,16 +218,9 @@ Check especially for:
 
 Do not substitute grep-based QA for correctness review.
 
-## 8. Land the verified target
-
-Only after both gates pass, invoke `close-worktree`.
-
-Let that skill own rebasing, fast-forwarding local `main`, worktree removal, and
-branch cleanup.
-
-Commit with Git as required by the workflow.
-
-Do not push unless explicitly asked.
+Commit the verified change with Git. Do not push, land, or remove the worktree
+unless explicitly asked — stop after reporting and let the user decide how to
+land it.
 
 ## Completion report
 
