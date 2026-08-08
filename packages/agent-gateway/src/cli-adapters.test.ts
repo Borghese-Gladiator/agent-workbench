@@ -143,6 +143,8 @@ describe('PiAgentAdapter', () => {
 });
 
 describe('OpenCodeAgentAdapter', () => {
+  // Capture the materialized agent instead of writing to ~/.config/opencode/agent.
+  const writeAgent = () => {};
   const ocLines = [
     JSON.stringify({ type: 'step_start', sessionID: 'ses_1', part: { type: 'step-start' } }),
     JSON.stringify({ type: 'text', sessionID: 'ses_1', part: { type: 'text', text: 'PROBE_OK' } }),
@@ -160,7 +162,7 @@ describe('OpenCodeAgentAdapter', () => {
 
   it('parses text, tool + file-change, tokens, and the session id', async () => {
     const { run } = fakeRunner(ocLines);
-    const { result, events } = await drive(new OpenCodeAgentAdapter({ runCliStreaming: run }));
+    const { result, events } = await drive(new OpenCodeAgentAdapter({ runCliStreaming: run, writeAgent }));
     expect(result.completed).toBe(true);
     expect(result.summary).toBe('PROBE_OK');
     expect(result.sessionId).toBe('ses_1');
@@ -179,16 +181,43 @@ describe('OpenCodeAgentAdapter', () => {
       JSON.stringify({ type: 'step_finish', sessionID: 'ses_2', part: { reason: 'stop', tokens: { input: 17650, output: 7, cache: { read: 0 } } } }),
     ];
     const { run } = fakeRunner(multiStep);
-    const { result } = await drive(new OpenCodeAgentAdapter({ runCliStreaming: run }));
+    const { result } = await drive(new OpenCodeAgentAdapter({ runCliStreaming: run, writeAgent }));
     expect(result.usage).toMatchObject({ inputTokens: 17650, outputTokens: 126 });
   });
 
-  it('builds opencode run --format json argv with the prompt last, --model when set', async () => {
+  it('runs under a materialized --agent (not --dangerously-skip-permissions), prompt last, --model when set', async () => {
     const { run, invocations } = fakeRunner(ocLines);
-    await drive(new OpenCodeAgentAdapter({ runCliStreaming: run, model: 'anthropic/claude-sonnet-4-5' }));
+    await drive(new OpenCodeAgentAdapter({ runCliStreaming: run, model: 'anthropic/claude-sonnet-4-5', writeAgent }));
     const args = invocations[0]!.args;
-    expect(args.slice(0, 4)).toEqual(['run', '--format', 'json', '--dangerously-skip-permissions']);
+    expect(args.slice(0, 3)).toEqual(['run', '--format', 'json']);
+    expect(args).not.toContain('--dangerously-skip-permissions');
+    const agentIdx = args.indexOf('--agent');
+    expect(agentIdx).toBeGreaterThan(-1);
+    expect(args[agentIdx + 1]).toMatch(/^awb-[0-9a-f]{10}$/);
     expect(args).toEqual(expect.arrayContaining(['--model', 'anthropic/claude-sonnet-4-5']));
     expect(args[args.length - 1]).toContain('do the thing');
+  });
+
+  it('materializes a capability-scoped agent: read-only role denies edit/bash, builder allows them', async () => {
+    const captured = new Map<string, string>();
+    const capture = (name: string, contents: string) => captured.set(name, contents);
+
+    const ro = fakeRunner(ocLines);
+    const roAdapter = new OpenCodeAgentAdapter({ runCliStreaming: ro.run, writeAgent: capture });
+    const roSess = await roAdapter.createSession({ role: 'adversarial-reviewer', taskId: 't', cwd: '/tmp/w', contextPayload: {}, allowedTools: ['repository.read', 'diff.read'] });
+    await roAdapter.execute(roSess, { instruction: 'review' }, () => {}, new AbortController().signal);
+    const roAgent = ro.invocations[0]!.args[ro.invocations[0]!.args.indexOf('--agent') + 1]!;
+    expect(captured.get(roAgent)).toContain('edit: deny');
+    expect(captured.get(roAgent)).toContain('read: allow');
+
+    const b = fakeRunner(ocLines);
+    const bAdapter = new OpenCodeAgentAdapter({ runCliStreaming: b.run, writeAgent: capture });
+    const bSess = await bAdapter.createSession({ role: 'builder', taskId: 't', cwd: '/tmp/w', contextPayload: {}, allowedTools: ['repository.read', 'worktree.write', 'command.run-scoped'] });
+    await bAdapter.execute(bSess, { instruction: 'build' }, () => {}, new AbortController().signal);
+    const bAgent = b.invocations[0]!.args[b.invocations[0]!.args.indexOf('--agent') + 1]!;
+    expect(captured.get(bAgent)).toContain('edit: allow');
+    expect(captured.get(bAgent)).toContain('bash: allow');
+    // Distinct capability sets → distinct agent files.
+    expect(roAgent).not.toBe(bAgent);
   });
 });

@@ -9,6 +9,7 @@ export * from './codex-sandbox.js';
 export * from './pi-adapter.js';
 export * from './pi-tools.js';
 export * from './opencode-adapter.js';
+export * from './opencode-tools.js';
 export * from './runtime-profile.js';
 export * from './capability-tools.js';
 export * from './transport-errors.js';
