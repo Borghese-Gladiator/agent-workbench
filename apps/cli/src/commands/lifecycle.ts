@@ -46,7 +46,8 @@ async function ensureRuntime(): Promise<{ ready: boolean; alreadyReady: boolean;
 
 /**
  * Populate the isolation env overrides (ports/queue/OTel-container/data-dir) derived from THIS
- * checkout's workspace root, so an isolated stack occupies a deterministic, collision-free slot. Sets
+ * checkout's workspace root, so an isolated stack occupies a deterministic slot with a low collision
+ * probability for typical local usage. Sets
  * only vars not already set (an explicit override the user passed still wins), and must run before
  * any service def / health probe resolves its config. Returns the applied overrides for reporting.
  */

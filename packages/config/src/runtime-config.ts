@@ -8,19 +8,19 @@ import { createHash } from 'node:crypto';
  * default — so `awb up` with no overrides behaves exactly as before.
  */
 export interface RuntimeConfig {
-  daemonPort: number;
-  temporalPort: number;
-  uiPort: number;
-  otelOtlpPort: number;
-  otelUiPort: number;
-  otelContainerName: string;
-  taskQueue: string;
+  readonly daemonPort: number;
+  readonly temporalPort: number;
+  readonly uiPort: number;
+  readonly otelOtlpPort: number;
+  readonly otelUiPort: number;
+  readonly otelContainerName: string;
+  readonly taskQueue: string;
   /** `host:port` the Temporal client + worker connect to. */
-  temporalAddress: string;
+  readonly temporalAddress: string;
   /** Base URL the CLI + worker reach the daemon at. */
-  daemonUrl: string;
+  readonly daemonUrl: string;
   /** OTLP/HTTP endpoint the worker + daemon export spans to. */
-  otelEndpoint: string;
+  readonly otelEndpoint: string;
 }
 
 export const DEFAULT_DAEMON_PORT = 4417;
@@ -77,12 +77,16 @@ export function deriveIsolationTag(seed: string): string {
 
 /**
  * The env overrides that isolate one stack, derived from `seed` (the checkout's workspace root).
- * Ports come from a deterministic 8-wide block offset off the defaults by the tag, keeping each
- * stack's ports contiguous and collision-resistant across worktrees; the queue + OTel container +
- * data dir get a `-<tag>` suffix. Returns only the vars that are NOT already set, so an explicit
- * env override the user passed always wins over the derived value.
+ * Each service's historical default port is shifted by the same deterministic 10-port-strided
+ * offset derived from the tag; the offset falls in one of 200 slots, so distinct worktrees have a
+ * low collision probability for typical local usage (not a hard guarantee). The queue + OTel
+ * container + data dir get a `-<tag>` suffix. Returns only the vars that are NOT already set, so an
+ * explicit env override the user passed always wins over the derived value.
  */
-export function isolatedOverrides(seed: string, dataDirBase: string): Record<string, string> {
+export function isolatedOverrides(
+  seed: string,
+  dataDirBase: string,
+): Readonly<Record<string, string>> {
   const tag = deriveIsolationTag(seed);
   // A per-stack offset in [1, 200], multiplied by a 10-port stride so blocks never overlap and stay
   // well below the ephemeral range. Deterministic from the tag.
@@ -101,7 +105,8 @@ export function isolatedOverrides(seed: string, dataDirBase: string): Record<str
   };
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(derived)) {
-    if (process.env[key] === undefined || process.env[key]!.trim() === '') out[key] = value;
+    const existing = process.env[key];
+    if (existing === undefined || existing.trim() === '') out[key] = value;
   }
   return out;
 }
