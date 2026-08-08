@@ -64,6 +64,20 @@ describe('CodexAgentAdapter', () => {
     expect(args[args.length - 1]).toContain('do the thing');
   });
 
+  it('derives --sandbox from the role capabilities: read-only vs workspace-write', async () => {
+    const sandboxFor = async (allowedTools: string[], role: 'builder' | 'adversarial-reviewer') => {
+      const { run, invocations } = fakeRunner(codexLines);
+      const adapter = new CodexAgentAdapter({ runCliStreaming: run });
+      const session = await adapter.createSession({ role, taskId: 't', cwd: '/tmp/w', contextPayload: {}, allowedTools });
+      await adapter.execute(session, { instruction: 'go' }, () => {}, new AbortController().signal);
+      const args = invocations[0]!.args;
+      return args[args.indexOf('--sandbox') + 1];
+    };
+    // A read-only role (no mutating capability) → read-only; the builder → workspace-write.
+    expect(await sandboxFor(['repository.read', 'diff.read'], 'adversarial-reviewer')).toBe('read-only');
+    expect(await sandboxFor(['repository.read', 'worktree.write', 'command.run-scoped'], 'builder')).toBe('workspace-write');
+  });
+
   it('fails on a non-zero exit', async () => {
     const { run } = fakeRunner([JSON.stringify({ type: 'item.completed', item: { item_type: 'agent_message', text: 'x' } })], 1);
     const { result } = await drive(new CodexAgentAdapter({ runCliStreaming: run }));

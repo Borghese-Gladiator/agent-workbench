@@ -7,6 +7,7 @@ import {
   type CliStreamAccumulator,
   type RunCliStreaming,
 } from './cli-runtime.js';
+import { capabilitiesToCodexSandbox } from './codex-sandbox.js';
 
 export interface CodexAdapterOptions {
   runCliStreaming?: RunCliStreaming;
@@ -34,8 +35,13 @@ export class CodexAgentAdapter extends CliStreamAdapter {
   protected buildArgv(ctx: CliArgvContext): string[] {
     // `--skip-git-repo-check`: exec refuses to run in a dir codex hasn't trusted; task worktrees are
     // never in that list. `project_doc_max_bytes=0` keeps AGENTS.md discovery off — the caller inlines
-    // exactly the context it wants. `--sandbox workspace-write` lets the agent edit inside the cwd.
-    const args = ['exec', '--json', '--skip-git-repo-check', '--sandbox', 'workspace-write', '-c', 'project_doc_max_bytes=0'];
+    // exactly the context it wants. The sandbox mode is derived from the role's granted capabilities
+    // (Codex has no per-tool allow/exclude — the OS sandbox IS the boundary): a role with no mutating
+    // capability runs `read-only` (still runs commands, cannot write files); the builder gets
+    // `workspace-write`.
+    const policy = capabilitiesToCodexSandbox(ctx.allowedTools);
+    const args = ['exec', '--json', '--skip-git-repo-check', '--sandbox', policy.sandbox, '-c', 'project_doc_max_bytes=0'];
+    if (policy.webSearch) args.push('-c', 'tools.web_search=true');
     if (this.model) args.push('--model', this.model);
     // Resume threads the prior thread id; the prompt is the next turn. Cold start passes the prompt.
     if (ctx.resumeSessionId) args.push('resume', ctx.resumeSessionId, ctx.prompt);
