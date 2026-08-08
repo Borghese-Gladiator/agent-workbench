@@ -1,13 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import type { SemanticEvent, TaskPhase } from '@awb/domain';
-import { sizingInstruction, parseSizingOutput, type SizingInput, type SizeClassification } from '@awb/planning';
+import type { SizingInput, SizeClassification } from '@awb/planning';
 import { runIdForTask } from '@awb/database';
 import type { CodingAgentAdapter } from '@awb/agent-gateway';
 import type { DaemonClient } from '../daemon-client.js';
-import { classifyWithOllama, shadowClassifierEnabled, shadowClassifierModel } from './ollama-classify.js';
+import {
+  classifyWithClaude,
+  classifyWithOllama,
+  shadowClassifierEnabled,
+  shadowClassifierModel,
+} from './size-classifiers.js';
 
-/** The small/fast model used for the authoritative S/M/L classification (TASK-51). Cheap by design. */
-export const SIZE_CLASSIFIER_MODEL = 'claude-haiku-4-5-20251001';
+export { SIZE_CLASSIFIER_MODEL } from './size-classifiers.js';
 
 export interface ClassifySizeInput {
   adapter: CodingAgentAdapter;
@@ -16,12 +20,12 @@ export interface ClassifySizeInput {
   attemptNumber: number;
   cwd: string;
   /**
-   * Whether to spend a real model call to classify (TASK-38 profile-driven: pass
-   * `profile.usesSdkToolNames`). When false the classifier returns `undefined` (nothing classified) so
-   * the caller's contract default (`size ?? 'M'`) applies — the mock runtime stays model-free.
+   * Whether to spend a real model call for the authoritative classification (TASK-38 profile-driven:
+   * pass `profile.usesSdkToolNames`). When false, no authoritative call is made and the result is
+   * `undefined` so the contract's `size ?? 'M'` default applies — the mock runtime stays model-free.
    */
   useModel: boolean;
-  /** Provider model for the authoritative classifier session (Claude → Haiku). Omit to skip the call. */
+  /** Provider model for the authoritative (Claude) classifier. Omit to skip the call. */
   model?: string;
   input: SizingInput;
   allowedTools: string[];
@@ -31,74 +35,50 @@ export interface ClassifySizeInput {
 }
 
 /**
- * Classifies a task's size (TASK-51). The AUTHORITATIVE decision comes from a tiny model (Haiku) via
- * the agent adapter; it returns `undefined` when no model is available, the call fails, or the output
- * is unparseable — the classifier never invents a size, so the contract's `size ?? 'M'` default is the
- * single degradation policy.
- *
- * When the shadow evaluator is enabled (`AWB_CLASSIFIER_SHADOW=1`, TASK-61) a LOCAL model (Ollama,
- * direct HTTP — not a coding-agent adapter) classifies the same task in parallel; the two decisions
- * are recorded (semantic event + log line) for agree/diverge tracking. The shadow is observe-only:
- * it never changes the returned size and never fails the task.
+ * Orchestrates size classification (TASK-51): runs the authoritative (Claude/Haiku) classifier and,
+ * when the shadow evaluator is enabled (`AWB_CLASSIFIER_SHADOW=1`), the LOCAL (Ollama) classifier in
+ * parallel, then records the comparison. Both classifiers live in `size-classifiers.ts` as sibling
+ * functions; this module only decides when to run each and how to report. Returns the AUTHORITATIVE
+ * decision (or `undefined`); the shadow is observe-only — never changes the size, never fails the task.
  */
 export async function classifyTaskSize(input: ClassifySizeInput): Promise<SizeClassification | undefined> {
-  const [authoritative, shadow] = await Promise.all([
+  const shadow = shadowClassifierEnabled();
+  const [authoritative, local] = await Promise.all([
     input.useModel && input.model
-      ? classifyWithClaude(input, input.model)
+      ? classifyWithClaude(input.input, {
+          adapter: input.adapter,
+          taskId: input.taskId,
+          cwd: input.cwd,
+          model: input.model,
+          allowedTools: input.allowedTools,
+          disallowedTools: input.disallowedTools,
+        })
       : Promise.resolve<SizeClassification | undefined>(undefined),
-    shadowClassifierEnabled() ? classifyWithOllama(input.input) : Promise.resolve<SizeClassification | undefined>(undefined),
+    shadow ? classifyWithOllama(input.input) : Promise.resolve<SizeClassification | undefined>(undefined),
   ]);
 
-  if (shadowClassifierEnabled()) {
-    await recordShadowComparison(input, authoritative, shadow);
+  if (shadow) {
+    await recordShadowComparison(input, authoritative, local);
   }
 
   return authoritative;
 }
 
-async function classifyWithClaude(input: ClassifySizeInput, model: string): Promise<SizeClassification | undefined> {
-  try {
-    const session = await input.adapter.createSession({
-      role: 'planner',
-      taskId: input.taskId,
-      cwd: input.cwd,
-      contextPayload: {},
-      allowedTools: input.allowedTools,
-      disallowedTools: input.disallowedTools,
-      model,
-    });
-    let text = '';
-    const execution = await input.adapter.execute(
-      session,
-      { instruction: sizingInstruction(input.input), stopConditions: { maxTurns: 1 } },
-      (event) => {
-        if (event.type === 'message') text += event.text;
-      },
-      new AbortController().signal,
-    );
-    await input.adapter.dispose(session);
-    // The answer usually lands in the result summary; fall back to streamed message text.
-    return parseSizingOutput(execution.summary) ?? parseSizingOutput(text);
-  } catch {
-    return undefined;
-  }
-}
-
 /**
- * Records the Haiku-vs-local comparison BOTH as a durable semantic event (queryable per-run, feeds
+ * Records the Claude-vs-local comparison BOTH as a durable semantic event (queryable per-run, feeds
  * TASK-61) and a daemon.log line (quick eyeballing). Best-effort — never throws.
  */
 async function recordShadowComparison(
   input: ClassifySizeInput,
   authoritative: SizeClassification | undefined,
-  shadow: SizeClassification | undefined,
+  local: SizeClassification | undefined,
 ): Promise<void> {
   const haiku = authoritative ? authoritative.size : 'unavailable';
-  const local = shadow ? shadow.size : 'unavailable';
-  const agree = authoritative !== undefined && shadow !== undefined && authoritative.size === shadow.size;
+  const localSize = local ? local.size : 'unavailable';
+  const agree = authoritative !== undefined && local !== undefined && authoritative.size === local.size;
 
   console.error(
-    `[classifier-shadow] task=${input.taskId} haiku=${haiku} local=${local} (${shadowClassifierModel()}) agree=${agree}`,
+    `[classifier-shadow] task=${input.taskId} haiku=${haiku} local=${localSize} (${shadowClassifierModel()}) agree=${agree}`,
   );
 
   if (!input.daemon) return;
@@ -111,11 +91,11 @@ async function recordShadowComparison(
     phaseAttemptId: `${input.taskId}-${input.phase}-${input.attemptNumber}`,
     producer: 'workbench',
     type: 'status-changed',
-    summary: `size classifier: haiku=${haiku} local=${local} agree=${agree}`,
+    summary: `size classifier: haiku=${haiku} local=${localSize} agree=${agree}`,
     payloadJson: {
       kind: 'size-classifier-shadow',
       haiku: authoritative ?? null,
-      local: shadow ?? null,
+      local: local ?? null,
       localModel: shadowClassifierModel(),
       agree,
     },
