@@ -1,3 +1,4 @@
+import type { TaskPhase } from '@awb/domain';
 import {
   MockAgentAdapter,
   isAgentRuntime,
@@ -27,11 +28,18 @@ export function resolveRuntimeProfile(runtime: AgentRuntime = resolveAgentRuntim
   return runtimeProfile(runtime);
 }
 
+/**
+ * Build the adapter for the selected runtime. `phase` lets a profile pick a phase-appropriate model
+ * (Pi routes the heavy `challenge` review phase to a fast local model); omit it for the runtime
+ * default. `config` is empty today (runtime is global via `AWB_AGENT_RUNTIME`) but is the seam for
+ * per-project model/binary later.
+ */
 export function createAgentAdapter(
   runtime: AgentRuntime = resolveAgentRuntime(),
   config: RuntimeConfig = {},
+  phase?: TaskPhase,
 ): CodingAgentAdapter {
-  return runtimeProfile(runtime).createAdapter(config);
+  return runtimeProfile(runtime).createAdapter(config, phase);
 }
 
 function isMockAdapter(adapter: CodingAgentAdapter): adapter is MockAgentAdapter {

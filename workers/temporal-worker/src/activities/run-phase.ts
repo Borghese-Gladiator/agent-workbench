@@ -288,7 +288,7 @@ const planHandler: PhaseHandler = {
     }
     const planCwd = resolvedRepoPath ?? process.cwd();
 
-    const adapter = createAgentAdapter();
+    const adapter = createAgentAdapter(ctx.strategy, {}, 'plan');
     scriptMockTurns(adapter, state.taskId, 'planner', { summary: 'Single-slice plan covering the task objective' });
     scriptMockTurns(adapter, state.taskId, 'plan-critic', { findings: [] });
 
@@ -566,7 +566,7 @@ const implementHandler: PhaseHandler = {
     let everySliceAccountedFor = true;
 
     const realBuilder = ctx.profile.usesRealAgent && runState.worktreePath !== undefined;
-    const adapter = realBuilder ? createAgentAdapter() : undefined;
+    const adapter = realBuilder ? createAgentAdapter(ctx.strategy, {}, 'implement') : undefined;
     let candidateSha = 'f'.repeat(40);
 
     for (const slice of plan.slices) {
@@ -897,7 +897,7 @@ const challengeHandler: PhaseHandler = {
       return { kind: 'early', result: blockedResult('challenge', ['contract or plan not available']) };
     }
 
-    const adapter = createAgentAdapter();
+    const adapter = createAgentAdapter(ctx.strategy, {}, 'challenge');
     scriptMockTurns(adapter, state.taskId, 'adversarial-reviewer', { findings: [] });
     const reviewCwd = requireWorktreeCwd(ctx.profile, runState.worktreePath, 'challenge', state.taskId);
 
