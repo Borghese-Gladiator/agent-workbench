@@ -11,10 +11,13 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  // Ports/daemon-URL come from env (set by `awb up`, mirroring @awb/config's resolveRuntimeConfig)
+  // with today's values as defaults, so an isolated stack's UI binds its own port and proxies to its
+  // own daemon. Kept as bare env reads because this browser app must not import the Node config pkg.
   server: {
-    port: 5317,
+    port: Number(process.env.AWB_UI_PORT ?? 5317),
     proxy: {
-      '/api': 'http://127.0.0.1:4417',
+      '/api': process.env.AWB_DAEMON_URL ?? 'http://127.0.0.1:4417',
     },
   },
   test: {

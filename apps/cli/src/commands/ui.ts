@@ -2,12 +2,12 @@ import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import type { Command } from 'commander';
 import { probeHealth } from '../health.js';
-import { UI_PORT, logPathFor } from '../services.js';
+import { uiPort, logPathFor } from '../services.js';
 import { startService, stopService, waitForUi } from '../process-control.js';
 import { ensureRuntime } from './lifecycle.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
 
-const UI_URL = `http://localhost:${UI_PORT}`;
+const uiUrl = (): string => `http://localhost:${uiPort()}`;
 
 function openBrowser(url: string): void {
   const command =
@@ -46,9 +46,9 @@ export function registerUiCommands(program: Command): void {
         process.exitCode = 1;
         return;
       }
-      openBrowser(UI_URL);
-      if (outputOptions().json) emitJson({ ok: true, url: UI_URL });
-      else printInfo(`ui ready at ${UI_URL}`);
+      openBrowser(uiUrl());
+      if (outputOptions().json) emitJson({ ok: true, url: uiUrl() });
+      else printInfo(`ui ready at ${uiUrl()}`);
     });
 
   const ui = program.command('ui').description('Manage the optional frontend');
@@ -66,11 +66,11 @@ export function registerUiCommands(program: Command): void {
         return;
       }
       if (outputOptions().json) {
-        emitJson({ ok: ready, url: ready ? UI_URL : null });
+        emitJson({ ok: ready, url: ready ? uiUrl() : null });
         if (!ready) process.exitCode = 1;
         return;
       }
-      if (ready) printInfo(`ui ready at ${UI_URL}`);
+      if (ready) printInfo(`ui ready at ${uiUrl()}`);
       else {
         printError('ui unhealthy: the frontend did not become reachable in time');
         printError('Next: awb logs ui --tail 50');
@@ -94,8 +94,8 @@ export function registerUiCommands(program: Command): void {
       stopService('ui');
       startService('ui');
       const ready = await waitForUi();
-      if (outputOptions().json) emitJson({ ok: ready, url: ready ? UI_URL : null });
-      else printInfo(ready ? `ui ready at ${UI_URL}` : 'ui restarted (not yet reachable)');
+      if (outputOptions().json) emitJson({ ok: ready, url: ready ? uiUrl() : null });
+      else printInfo(ready ? `ui ready at ${uiUrl()}` : 'ui restarted (not yet reachable)');
       if (!ready) process.exitCode = 1;
     });
 
@@ -105,7 +105,7 @@ export function registerUiCommands(program: Command): void {
     .action(async () => {
       const health = await probeHealth();
       const state = health.services.ui.state;
-      if (outputOptions().json) emitJson({ ui: state, url: state === 'ready' ? UI_URL : null });
+      if (outputOptions().json) emitJson({ ui: state, url: state === 'ready' ? uiUrl() : null });
       else printResult(`ui=${state}`);
       if (state !== 'ready') process.exitCode = 1;
     });

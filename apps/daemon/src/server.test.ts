@@ -9,7 +9,7 @@ import { Worker } from '@temporalio/worker';
 import { discoverRepository } from '../../../workers/temporal-worker/dist/activities/discovery-support.js';
 import { buildServer, type DaemonServer } from './server.js';
 import { setTemporalClientForTesting } from './temporal-client.js';
-import { TASK_QUEUE } from './temporal-worker-constants.js';
+import { taskQueueName } from './temporal-worker-constants.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -94,7 +94,7 @@ describe('daemon server', () => {
     setTemporalClientForTesting(testEnv.client);
     const worker = await Worker.create({
       connection: testEnv.nativeConnection,
-      taskQueue: TASK_QUEUE,
+      taskQueue: taskQueueName(),
       workflowsPath: new URL('../../../packages/workflow/dist/workflows.js', import.meta.url).pathname,
       activities: { discoverRepository },
     });

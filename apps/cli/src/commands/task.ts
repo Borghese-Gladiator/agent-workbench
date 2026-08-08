@@ -6,7 +6,7 @@ import { rememberTaskId, resolveRepositoryId, resolveTaskId } from '../remembere
 import { resolveRepoRef } from './repo.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
 import { parseDuration } from '../duration.js';
-import { UI_PORT } from '../services.js';
+import { uiPort } from '../services.js';
 
 interface CreatedTask {
   taskId: string;
@@ -328,7 +328,7 @@ export function registerTaskCommands(program: Command): void {
       try {
         const repoId = resolveRepositoryId(repositoryId);
         const tId = resolveTaskId(taskId);
-        const url = `http://localhost:${UI_PORT}/tasks/${repoId}/${tId}`;
+        const url = `http://localhost:${uiPort()}/tasks/${repoId}/${tId}`;
         const command =
           process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
         const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];

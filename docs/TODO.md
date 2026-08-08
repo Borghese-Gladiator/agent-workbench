@@ -103,7 +103,7 @@ duplicating them.
 **How we'll know it's done.** The skill exists and, invoked on a small feature,
 produces a plan + drives it without re-deriving the workflow each time.
 
-### [ ] TASK-59: `awb up` can't run two stacks at once — hard-coded ports + worktree-broken `repoRoot()`
+### [x] TASK-59: `awb up` can't run two stacks at once — hard-coded ports + worktree-broken `repoRoot()`
 
 **What's wrong.** Trying to drive a live task from a git worktree while other
 worktree sessions were running (the normal state when several groups are in flight)

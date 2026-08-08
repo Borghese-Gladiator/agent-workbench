@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { repositories } from '@awb/database';
 import { buildServer, type DaemonServer } from '../server.js';
 import { setTemporalClientForTesting } from '../temporal-client.js';
-import { TASK_QUEUE } from '../temporal-worker-constants.js';
+import { taskQueueName } from '../temporal-worker-constants.js';
 // Import the real runPhase Activity from the worker's built output, mirroring run-phase-e2e.test.ts.
 import { runPhase } from '../../../../workers/temporal-worker/dist/activities/run-phase.js';
 
@@ -86,7 +86,7 @@ describe('daemon routes drive a task to completion', () => {
   it('create -> approve-contract -> pr-merged, entirely over HTTP, reaches assimilate/merged', async () => {
     const worker = await Worker.create({
       connection: testEnv.nativeConnection,
-      taskQueue: TASK_QUEUE,
+      taskQueue: taskQueueName(),
       workflowsPath: new URL('../../../../packages/workflow/dist/task-workflow.js', import.meta.url).pathname,
       activities: { runPhase },
     });
@@ -147,7 +147,7 @@ describe('daemon routes drive a task to completion', () => {
   it('DELETE removes a task (terminating its workflow) and drops it from the list (TASK-37)', async () => {
     const worker = await Worker.create({
       connection: testEnv.nativeConnection,
-      taskQueue: TASK_QUEUE,
+      taskQueue: taskQueueName(),
       workflowsPath: new URL('../../../../packages/workflow/dist/task-workflow.js', import.meta.url).pathname,
       activities: { runPhase },
     });

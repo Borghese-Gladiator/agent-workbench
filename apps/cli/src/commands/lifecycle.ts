@@ -1,7 +1,10 @@
 import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import type { Command } from 'commander';
-import { probeHealth, type RuntimeHealth, type ServiceHealth, type ServiceState } from '../health.js';
-import { RUNTIME_SERVICES, logPathFor, type ServiceKey } from '../services.js';
+import { ensureDataDir, resolveDataDir, isolatedOverrides, resolveRuntimeConfig } from '@awb/config';
+import { probeHealth, type RuntimeHealth, type ServiceHealth } from '../health.js';
+import { RUNTIME_SERVICES, logPathFor, repoRoot, type ServiceKey } from '../services.js';
 import { startService, stopService, waitForDaemonHealth } from '../process-control.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
 import { parseDuration } from '../duration.js';
@@ -29,6 +32,11 @@ async function ensureRuntime(): Promise<{ ready: boolean; alreadyReady: boolean;
   if (before.runtime === 'ready') {
     return { ready: true, alreadyReady: true, elapsedMs: Date.now() - start };
   }
+  // Provision the data dir BEFORE starting Temporal. Temporal's `start-dev --db-filename
+  // <dataDir>/temporal/temporal.sqlite` crashes ("failed checking dir for database file") if the
+  // `temporal/` subdir does not exist yet, and the daemon (the only other caller of initDataDir)
+  // starts LAST in RUNTIME_SERVICES — so on a fresh AWB_DATA_DIR the subdir must be created here.
+  ensureDataDir();
   for (const key of RUNTIME_SERVICES) {
     startService(key);
   }
@@ -36,16 +44,43 @@ async function ensureRuntime(): Promise<{ ready: boolean; alreadyReady: boolean;
   return { ready, alreadyReady: false, elapsedMs: Date.now() - start };
 }
 
+/**
+ * Populate the isolation env overrides (ports/queue/OTel-container/data-dir) derived from THIS
+ * checkout's workspace root, so an isolated stack occupies a deterministic, collision-free slot. Sets
+ * only vars not already set (an explicit override the user passed still wins), and must run before
+ * any service def / health probe resolves its config. Returns the applied overrides for reporting.
+ */
+function applyIsolation(): Record<string, string> {
+  const dataDirBase = process.env.AWB_DATA_DIR ?? join(homedir(), '.agentic-workbench');
+  const overrides = isolatedOverrides(repoRoot(), dataDirBase);
+  for (const [key, value] of Object.entries(overrides)) {
+    process.env[key] = value;
+  }
+  return overrides;
+}
+
 export function registerLifecycleCommands(program: Command): void {
   program
     .command('up')
     .description('Start the core runtime (OTel collector, Temporal, worker, daemon) and wait until healthy')
     .option('--dev', 'Run worker + daemon from live source via tsx watch (hot reload) instead of pinned dist')
-    .action(async (opts: { dev?: boolean }) => {
+    .option(
+      '--isolated',
+      'Derive a deterministic port block + task queue + OTel container + data dir from this checkout, so N worktrees run concurrent stacks without collision',
+    )
+    .action(async (opts: { dev?: boolean; isolated?: boolean }) => {
       if (opts.dev === true) process.env.AWB_RUNTIME_MODE = 'dev';
+      if (opts.isolated === true) applyIsolation();
+      const cfg = resolveRuntimeConfig();
       const { ready, alreadyReady, elapsedMs } = await ensureRuntime();
+      const stack = {
+        daemonUrl: cfg.daemonUrl,
+        temporalAddress: cfg.temporalAddress,
+        taskQueue: cfg.taskQueue,
+        dataDir: resolveDataDir(),
+      };
       if (outputOptions().json) {
-        emitJson({ ok: ready, runtime: ready ? 'ready' : 'unhealthy', alreadyReady });
+        emitJson({ ok: ready, runtime: ready ? 'ready' : 'unhealthy', alreadyReady, isolated: opts.isolated === true, stack });
         if (!ready) process.exitCode = 1;
         return;
       }
@@ -54,6 +89,10 @@ export function registerLifecycleCommands(program: Command): void {
         printError('Next: awb logs daemon --tail 50');
         process.exitCode = 1;
         return;
+      }
+      if (opts.isolated === true) {
+        printInfo(`isolated stack: daemon ${stack.daemonUrl}, temporal ${stack.temporalAddress}, queue ${stack.taskQueue}`);
+        printInfo(`data dir: ${stack.dataDir}`);
       }
       if (alreadyReady) {
         printInfo('runtime already ready');

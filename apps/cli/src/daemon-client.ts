@@ -1,7 +1,7 @@
-const DAEMON_BASE_URL = 'http://127.0.0.1:4417';
+import { resolveRuntimeConfig } from '@awb/config';
 
 export function daemonBaseUrl(): string {
-  return DAEMON_BASE_URL;
+  return resolveRuntimeConfig().daemonUrl;
 }
 
 export class DaemonRequestError extends Error {
@@ -17,7 +17,7 @@ export class DaemonRequestError extends Error {
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${DAEMON_BASE_URL}${path}`, {
+    response = await fetch(`${daemonBaseUrl()}${path}`, {
       method,
       headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
       body: body !== undefined ? JSON.stringify(body) : undefined,
