@@ -6,6 +6,7 @@ import {
   rejectContractUpdate,
   approvePlanUpdate,
   rejectPlanUpdate,
+  decideGateUpdate,
   cancelSignal,
   pullRequestMergedSignal,
   pullRequestClosedSignal,
@@ -252,6 +253,41 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
       }
     },
   );
+
+  // Generalized gate decision — the ONE route the UI uses to act on any pending human gate,
+  // whatever its reason (the per-reason approve/reject-contract/plan routes above remain for their
+  // specific flows). The gateId in the path is the stale-gate guard: the workflow rejects a decision
+  // whose gateId isn't the currently-pending one. On success the summary is refreshed so the list /
+  // board / approval queue reflect the resolved gate immediately.
+  app.post<{
+    Params: { repositoryId: string; taskId: string; gateId: string };
+    Body: { decision: 'approve' | 'deny'; comment?: string };
+  }>('/api/tasks/:repositoryId/:taskId/gates/:gateId/decision', async (request, reply) => {
+    const { repositoryId, taskId, gateId } = request.params;
+    const { decision, comment } = request.body;
+    if (decision !== 'approve' && decision !== 'deny') {
+      reply.code(400);
+      return { error: `decision must be "approve" or "deny", got ${JSON.stringify(decision)}` };
+    }
+    const client = await getTemporalClient();
+    const handle = client.workflow.getHandle(workflowIdFor(repositoryId, taskId));
+    try {
+      await handle.executeUpdate(decideGateUpdate, { args: [{ gateId, decision, ...(comment ? { comment } : {}) }] });
+      // Reconcile the projection from the now-updated live state (gate cleared / condition changed).
+      const state = await handle.query(getCurrentStateQuery);
+      const pendingHumanGate = await handle.query(getPendingHumanGateQuery);
+      upsertTask(
+        database.db,
+        { id: taskId, repositoryId, prompt: state.prompt ?? '', phase: state.phase, condition: state.condition, deliveryState: state.deliveryState },
+        { pendingGateReason: pendingHumanGate ? pendingHumanGate.reason : null },
+      );
+      return { ok: true };
+    } catch (err) {
+      // A stale/absent gate is a conflict (the task moved on), not a 500.
+      reply.code(409);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 
   app.delete<{ Params: { repositoryId: string; taskId: string } }>(
     '/api/tasks/:repositoryId/:taskId',

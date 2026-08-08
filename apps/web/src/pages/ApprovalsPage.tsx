@@ -28,18 +28,6 @@ export function ApprovalsPage() {
     }
   }
 
-  async function withBusy(fn: () => Promise<unknown>): Promise<void> {
-    setBusy(true);
-    try {
-      await fn();
-      await handleLookup();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div>
       <PageHeader title="Approvals" />
@@ -81,37 +69,15 @@ export function ApprovalsPage() {
 
       {state &&
         (state.pendingHumanGate ? (
-          <GatePanel
-            repositoryId={repositoryId.trim()}
-            taskId={taskId.trim()}
-            phase={state.phase}
-            gate={state.pendingHumanGate}
-            busy={busy}
-            onApproveContract={() =>
-              void withBusy(() =>
-                tasksApi.approveContract(
-                  repositoryId.trim(),
-                  taskId.trim(),
-                  state.attemptNumber || 1,
-                ),
-              )
-            }
-            onRejectContract={() =>
-              void withBusy(() =>
-                tasksApi.rejectContract(repositoryId.trim(), taskId.trim(), 'rejected from UI'),
-              )
-            }
-            onApprovePlan={() =>
-              void withBusy(() =>
-                tasksApi.approvePlan(repositoryId.trim(), taskId.trim(), state.attemptNumber || 1),
-              )
-            }
-            onRejectPlan={() =>
-              void withBusy(() =>
-                tasksApi.rejectPlan(repositoryId.trim(), taskId.trim(), 'rejected from UI'),
-              )
-            }
-          />
+          <div className="mt-4">
+            <GatePanel
+              repositoryId={repositoryId.trim()}
+              taskId={taskId.trim()}
+              gate={state.pendingHumanGate}
+              size={state.size}
+              onDecided={() => void handleLookup()}
+            />
+          </div>
         ) : (
           <p className="mt-4 text-sm text-muted-foreground">No pending human gate for this task.</p>
         ))}

@@ -153,6 +153,12 @@ export const tasksApi = {
     request('POST', `/tasks/${repositoryId}/${taskId}/approve-plan`, { planVersion }),
   rejectPlan: (repositoryId: string, taskId: string, reason: string) =>
     request('POST', `/tasks/${repositoryId}/${taskId}/reject-plan`, { reason }),
+  /** Generalized gate decision — acts on ANY pending human gate by its id (stale-gate guarded). */
+  decideGate: (repositoryId: string, taskId: string, gateId: string, decision: 'approve' | 'deny', comment?: string) =>
+    request('POST', `/tasks/${repositoryId}/${taskId}/gates/${encodeURIComponent(gateId)}/decision`, {
+      decision,
+      ...(comment ? { comment } : {}),
+    }),
   cancel: (repositoryId: string, taskId: string) => request('POST', `/tasks/${repositoryId}/${taskId}/cancel`),
   remove: (repositoryId: string, taskId: string) =>
     request<{ removed: string }>('DELETE', `/tasks/${repositoryId}/${taskId}`),

@@ -6,6 +6,7 @@ import {
   TaskWorkflow,
   approveContractUpdate,
   extendBudgetUpdate,
+  decideGateUpdate,
   cancelSignal,
   pullRequestMergedSignal,
   pullRequestClosedSignal,
@@ -251,6 +252,69 @@ describe('TaskWorkflow', () => {
       },
     );
     expect(result.phase).toBe('assimilate');
+  }, 30_000);
+
+  it('decideGate approve resumes a task parked at the contract gate (generalized route)', async () => {
+    const { result } = await runWithActivities(
+      {
+        specify: [awaitHuman('specify', 'task-contract-approval'), candidate('specify')],
+      },
+      async (handle) => {
+        await waitForCondition(async () => (await handle.query(getCurrentStateQuery)).condition === 'awaiting-human');
+        await handle.executeUpdate(decideGateUpdate, { args: [{ gateId: 'gate-specify', decision: 'approve' }] });
+      },
+    );
+    expect(result.phase).toBe('assimilate');
+  }, 30_000);
+
+  it('decideGate rejects a stale gateId (stale-gate guard)', async () => {
+    let updateError: unknown;
+    const { result } = await runWithActivities(
+      {
+        specify: [awaitHuman('specify', 'task-contract-approval'), candidate('specify')],
+      },
+      async (handle) => {
+        await waitForCondition(async () => (await handle.query(getCurrentStateQuery)).condition === 'awaiting-human');
+        // Wrong gateId — the task's pending gate is `gate-specify`.
+        await handle
+          .executeUpdate(decideGateUpdate, { args: [{ gateId: 'gate-stale', decision: 'approve' }] })
+          .catch((err: unknown) => {
+            updateError = err;
+          });
+        // Recover with the correct id so the workflow can finish and the test terminates.
+        await handle.executeUpdate(decideGateUpdate, { args: [{ gateId: 'gate-specify', decision: 'approve' }] });
+      },
+    );
+    expect(updateError).toBeDefined();
+    // Temporal wraps the ApplicationFailure as a generic "Workflow Update failed"; the guard's
+    // message is on the cause chain. Assert the rejection surfaced (stale gate was NOT applied).
+    const messageChain = `${String(updateError)} ${String((updateError as { cause?: unknown }).cause ?? '')}`;
+    expect(messageChain).toMatch(/no longer current|Workflow Update failed/i);
+    expect(result.phase).toBe('assimilate');
+  }, 30_000);
+
+  it('decideGate deny on a pr-readiness gate closes the PR and routes to assimilate', async () => {
+    const { result } = await runWithActivities(
+      {
+        specify: [candidate('specify')],
+        plan: [candidate('plan')],
+        prepare: [candidate('prepare')],
+        implement: [candidate('implement')],
+        verify: [candidate('verify')],
+        exercise: [candidate('exercise')],
+        challenge: [candidate('challenge')],
+        release: [awaitHuman('release', 'pr-readiness')],
+      },
+      async (handle) => {
+        await waitForCondition(async () => {
+          const s = await handle.query(getCurrentStateQuery);
+          return s.phase === 'release' && s.condition === 'awaiting-human';
+        });
+        await handle.executeUpdate(decideGateUpdate, { args: [{ gateId: 'gate-release', decision: 'deny', comment: 'not ready' }] });
+      },
+    );
+    expect(result.phase).toBe('assimilate');
+    expect(result.deliveryState).toBe('closed');
   }, 30_000);
 
   it('loops verify failure back to implement, then succeeds on repair', async () => {

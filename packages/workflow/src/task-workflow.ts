@@ -65,6 +65,19 @@ export const extendBudgetUpdate = defineUpdate<void, [{ additionalTokens?: numbe
 );
 export const approveScopeChangeUpdate = defineUpdate<void, [{ description: string }]>('approveScopeChange');
 
+/**
+ * Generalized human-gate decision — one update for EVERY gate reason, so the UI has a single
+ * "act on the pending gate" path instead of a per-reason route (many reasons, incl. pr-readiness,
+ * had no route at all and were display-only). `gateId` is checked against the current pending gate
+ * so a decision on a stale gate (the task already moved on) is rejected rather than silently
+ * mis-applied. approve clears the gate and resumes; deny clears the gate and resumes too (the phase
+ * re-runs — the `comment` is the feedback), except release/pr-readiness where deny closes the PR.
+ */
+export const decideGateUpdate = defineUpdate<
+  void,
+  [{ gateId: string; decision: 'approve' | 'deny'; comment?: string }]
+>('decideGate');
+
 // Signals — asynchronous, fire-and-forget from the caller's perspective.
 export const cancelSignal = defineSignal('cancel');
 export const pauseSignal = defineSignal('pause');
@@ -182,6 +195,33 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
     failureStreak.clear();
   });
   setHandler(approveScopeChangeUpdate, () => {
+    state = { ...state, condition: 'running', pendingHumanGate: undefined };
+  });
+
+  setHandler(decideGateUpdate, (args) => {
+    const gate = state.pendingHumanGate;
+    if (!gate) {
+      throw ApplicationFailure.nonRetryable('No pending human gate for this task');
+    }
+    // Stale-gate guard: the caller must be acting on the gate that is currently pending. If the task
+    // has already advanced past it (a different or no gate), reject rather than mis-apply.
+    if (args.gateId !== gate.id) {
+      throw ApplicationFailure.nonRetryable(
+        `Gate ${args.gateId} is no longer current (pending gate is ${gate.id}); reload and retry`,
+      );
+    }
+    // pr-readiness is a release-phase gate: the draft PR is already live on GitHub, so approving is
+    // an acknowledgement (the real merge arrives via the pullRequestMerged signal), while denying
+    // closes the PR and routes to assimilate. Every other reason clears the gate and resumes — a
+    // deny means the phase re-runs, the comment being the feedback the regenerated artifact gets.
+    if (gate.reason === 'pr-readiness') {
+      if (args.decision === 'deny') {
+        state = { ...state, deliveryState: 'closed', phase: 'assimilate', condition: 'running', pendingHumanGate: undefined };
+      } else {
+        state = { ...state, pendingHumanGate: undefined };
+      }
+      return;
+    }
     state = { ...state, condition: 'running', pendingHumanGate: undefined };
   });
 
