@@ -232,3 +232,58 @@ definitions, `apps/daemon/src/temporal-client.ts` + `workers/temporal-worker/src
 simultaneously without collision (distinct ports, queues, Temporal, data dirs), each
 drives a task end to end against its own code, and a foreign process on a default
 port makes `up` fail with a clear message instead of a false "ready".
+
+### [ ] TASK-64: Web UI renders unstyled — layout/semantic CSS classes are used but never defined
+
+**What's wrong.** `apps/web` renders with no layout — the nav collapses to a run of
+concatenated text (`RepositoriesTasksApprovalsEvidenceSettings`), repository rows
+stack as raw text, no shell/sidebar. The page is *not* entirely style-less: the
+`:root`/`.dark` design tokens from `styles.css` apply (dark background, light
+foreground), which is what makes this deceptive. The cause is that the app's
+structural classes are **referenced in JSX but defined nowhere**:
+
+- `App.tsx` uses `className="app-shell"`, `app-nav`, `app-main`
+  (`apps/web/src/App.tsx:13,14,23`) — grep for a definition returns **zero** matches;
+  `styles.css` is 120 lines of Tailwind imports + theme tokens only, with no
+  component/layout rules.
+- The pages/components mix Tailwind utilities (`flex`, `text-sm`,
+  `text-muted-foreground`, `gap-2`, `rounded-md`, …) with a second set of **orphaned
+  semantic classes** that are likewise undefined: `error`, `note`, `actions`,
+  `repository-path`, `task-facts`, `align-top`, etc. The utilities style themselves;
+  the semantic classes render as nothing.
+
+This reads as a **half-finished migration**: styling was moved to Tailwind utilities
+but a stylesheet's worth of hand-authored layout/semantic classes (an old
+`App.css`/`index.css` or component CSS) was removed or never committed, while the JSX
+still references those class names. Restarting vite, clearing caches, reinstalling
+`@tailwindcss/vite`, and adding `@source` do **not** fix it — those address Tailwind
+utility generation, which is a different subsystem from the missing named classes.
+
+**Open thread to resolve first (don't skip).** There is an unexplained
+served-vs-applied contradiction: the dev server *serves* a `styles.css` module that
+contains utility rules (`.flex`, `.gap-2` present when fetched directly and in the
+injected `<style>` per a headless browser), yet the real Chrome tab renders as if no
+utilities apply either. Confirm in the *actual* browser (devtools → Elements →
+Computed on `.app-nav`, and Sources for the `styles.css` module) whether utilities are
+truly absent there too, so the fix targets the real gap and not a headless-vs-real
+discrepancy. Do not declare this fixed from a scripted `document.styleSheets` check —
+that undercounts modern `@layer`/`@property` CSS and gave false readings here.
+
+**What to do.** (1) Decide the intended styling system for the shell and the orphaned
+semantic classes — either author the missing CSS (a real `app-shell`/`app-nav`/
+`app-main` layout + the semantic classes) or migrate those JSX references to Tailwind
+utilities/components so there are no used-but-undefined class names. (2) Add a guard
+so this can't silently regress: a lint/test that fails when a `className` token is
+neither a known Tailwind utility nor a defined project class. (3) Resolve the
+served-vs-applied thread above before closing.
+
+**Where.** `apps/web/src/App.tsx` (`app-shell`/`app-nav`/`app-main`),
+`apps/web/src/styles.css` (missing layout + semantic rules), `apps/web/src/pages/**`
+and `apps/web/src/components/**` (orphaned `error`/`note`/`actions`/`repository-path`/
+`task-facts`/`align-top`), `apps/web/vite.config.ts` (Tailwind plugin).
+
+**How we'll know it's done.** In a real browser hard-load of `localhost:5317`, the app
+has its shell/nav layout (nav is a laid-out bar, not concatenated text) and the
+repository list renders as styled rows. *Test:* a check that every `className` token
+used in `src/**` resolves to either a Tailwind utility or a defined project class
+fails on an undefined name and passes once the shell classes exist.
