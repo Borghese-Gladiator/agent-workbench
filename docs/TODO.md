@@ -207,6 +207,41 @@ TASK-55/TASK-46 for the metric plumbing; evaluates TASK-51/TASK-52.
 program-design) with a keep/collapse/drop recommendation backed by the rework +
 reviewed-ratio numbers.
 
+### [ ] TASK-62: Evaluate a local shadow classifier as a Haiku replacement — bigger corpus, bigger models
+
+**What's wrong / the finding.** The size classifier (TASK-51) runs Haiku as the
+authoritative model with an opt-in local (Ollama) shadow. A first live shadow run
+(`AWB_CLASSIFIER_SHADOW=1`, model `llama3.2:latest` ≈ 3B) over a 6-prompt corpus
+scored **Haiku 6/6 vs. expected, local 4/6, agree 4/6**. The two local misses were
+informative: it over-sized a trivial README change (S→M, the *safe* error) AND
+under-sized a new-repo task (L→M, the *dangerous* under-planning error the sizing
+router exists to prevent). Conclusion so far: **`llama3.2:3b` is not promotable** to
+authoritative — keep it shadow-only, Haiku decides. But that call rests on n=6, a
+single run, non-deterministic models, and only ONE local model — directional, not a
+benchmark.
+
+**What to do.** Turn the one-off run into a real evaluation before making any
+promote/decline decision:
+- Build a curated prompt corpus (~30–50) spanning clear-S / clear-L / borderline
+  S-M and M-L, each with an expected label + rationale (extend the 6 seed cases).
+- Run each prompt N times (models are non-deterministic) and report per-model
+  accuracy, agreement, and — weighted heavier — the **cost-weighted error rate**
+  (under-sizing L→S/M penalized far more than over-sizing), per TASK-61's rubric.
+- Test the LARGER local models already pulled (`qwen3:30b`, `gemma4:26b`,
+  `qwen3-coder:30b`), not just the 3B, to see whether size closes the gap enough to
+  justify a local authoritative path (offline / zero-API-cost classification).
+- Fold results into TASK-61's shadow-mode trace collection rather than a bespoke
+  harness; the live harness used here lives in scratch only (not committed).
+
+**Where.** `workers/temporal-worker/src/activities/size-classifiers.ts` (the shadow
+path already exists), the eval corpus + runner (new, likely `docs/` + a scratch or
+`scripts/` harness), TASK-61's `PlanningEvaluationTrace`. Depends on nothing; informs
+whether the Haiku dependency can be dropped for classification.
+
+**How we'll know it's done.** A short writeup: per-model accuracy + cost-weighted
+error over the corpus, and a clear promote / keep-shadow / decline call for each
+candidate local model (with `llama3.2:3b` already declined on the seed evidence).
+
 ---
 
 ## Group C — Quality gates: QA correctness, maintainability & pre-work alignment
