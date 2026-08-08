@@ -5,7 +5,10 @@ import type { DataDirLayout } from './paths.js';
 
 export const WorkbenchConfigSchema = z.object({
   version: z.number().int().default(1),
-  agentProvider: z.enum(['mock', 'claude']).default('mock'),
+  // Keep in sync with AGENT_RUNTIMES in @awb/agent-gateway (the source of truth). Not imported from
+  // there because config is a foundational leaf (config → domain only); a backwards edge to the
+  // heavier agent-gateway would invert the dependency layering (docs/dependencies.md).
+  agentProvider: z.enum(['mock', 'claude', 'codex', 'pi', 'opencode']).default('mock'),
   network: z
     .object({
       allowLocalhost: z.boolean().default(true),
