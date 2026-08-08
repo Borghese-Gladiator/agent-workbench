@@ -172,11 +172,11 @@ describe('ClaudeAgentAdapter', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]?.prompt).toBe('do it');
     expect(calls[0]?.options?.cwd).toBe('/tmp/my-worktree');
-    // allowedTools auto-approves; disallowedTools is what actually enforces the scope (TASK-24).
+    // allowedTools auto-approves; disallowedTools is what actually enforces the scope.
     expect(calls[0]?.options?.allowedTools).toEqual(['Read', 'Bash']);
     expect(calls[0]?.options?.disallowedTools).toEqual(['Write', 'Edit']);
     expect(calls[0]?.options?.maxTurns).toBe(7);
-    // Headless worker runs need auto-approved tools (TASK-13).
+    // Headless worker runs need auto-approved tools.
     expect(calls[0]?.options?.permissionMode).toBe('bypassPermissions');
   });
 

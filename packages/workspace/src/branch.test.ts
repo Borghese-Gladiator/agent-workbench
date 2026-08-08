@@ -14,13 +14,13 @@ describe('resolveTaskBranchName', () => {
 
   it('does not dump a full UUID (or double it) into the branch', () => {
     const uuid = 'ecabb015-d40d-409a-82c3-82fce7bee7b9';
-    // TASK-39: the "In <scope>," preamble is stripped, so the slug leads with the ACTION.
+    // The "In <scope>," preamble is stripped, so the slug leads with the ACTION.
     const branch = resolveTaskBranchName(uuid, 'In the portal header, show the number of available games');
     expect(branch).toBe('awb/show-the-number-of-available-games-ecabb015');
     expect(branch).not.toContain(uuid);
   });
 
-  // TASK-39: no leading `in-` and no repo-name filler for an "In <repo>, <action>" prompt.
+  // No leading `in-` and no repo-name filler for an "In <repo>, <action>" prompt.
   it('strips the "In <scope>," preamble so the branch reads as the action', () => {
     const branch = resolveTaskBranchName('f47a0d8e-1111-2222-3333-444455556666', 'In wip-browser-games, add a one-line note');
     expect(branch).toBe('awb/add-a-one-line-note-f47a0d8e');

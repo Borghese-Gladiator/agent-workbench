@@ -54,7 +54,7 @@ describe('awb CLI', () => {
     expect(code === 0).toBe(parsed.ok);
   });
 
-  // TASK-9: the contract/plan approval version options must NOT collide with commander's global
+  // The contract/plan approval version options must NOT collide with commander's global
   // `--version` (which prints "0.1.0" and no-ops). They were renamed to `--contract-version` /
   // `--plan-version`; passing them must reach the daemon-request layer, not the version short-circuit.
   it('approve-contract --contract-version reaches the daemon (no --version collision)', () => {
@@ -77,7 +77,7 @@ describe('awb CLI', () => {
     expect(output).not.toMatch(/unknown option|error: /i);
   });
 
-  // TASK-10: a single leading `--` (injected by `pnpm … cli -- <args>`) must be stripped so
+  // A single leading `--` (injected by `pnpm … cli -- <args>`) must be stripped so
   // subcommand options like `--prompt` pass through instead of being swallowed by commander's
   // options terminator.
   it('strips a leading -- so --prompt passes through', () => {

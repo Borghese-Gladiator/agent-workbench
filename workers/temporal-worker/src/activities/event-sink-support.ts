@@ -6,7 +6,7 @@ import type { AgentEventSink } from '@awb/agent-gateway';
 /**
  * A per-task, per-role agent event sink that persists every event an agent session emits — its
  * text messages, tool-use/tool-result events, and usage — to a newline-delimited JSON log file
- * under the task's artifacts dir (TASK-1). Before this, every session used NOOP_EVENT_SINK, so when
+ * under the task's artifacts dir. Before this, every session used NOOP_EVENT_SINK, so when
  * the plan phase stalled (`repeated-failure-no-progress`) the planner/critic's actual output was
  * discarded and the stall was uninspectable. The log file makes it possible to read exactly what
  * the planner emitted (e.g. whether it produced the fenced JSON plan block) after a stall.

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { TaskPhase } from '@awb/domain';
 import { routeLoop, shouldEscalateToHuman } from './loop-routing.js';
 
-// Phase sets the router keys off (TASK-60): only membership of `program-design` matters.
+// Phase sets the router keys off: only membership of `program-design` matters.
 const L_PHASE_SET: TaskPhase[] = [
   'specify', 'plan', 'program-design', 'prepare', 'implement', 'verify', 'exercise', 'challenge', 'release', 'assimilate',
 ];
@@ -35,7 +35,7 @@ describe('routeLoop', () => {
     expect(routeLoop({ kind: 'challenge-finding', category: 'requirements' })).toBe('specify');
   });
 
-  // TASK-60: structural findings route to the phase that owns structure for the run.
+  // Structural findings route to the phase that owns structure for the run.
   it('routes an architecture finding to program-design on an L run', () => {
     expect(routeLoop({ kind: 'challenge-finding', category: 'architecture' }, L_PHASE_SET)).toBe('program-design');
   });

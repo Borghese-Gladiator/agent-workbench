@@ -21,7 +21,7 @@ export type BrowserQaStep =
   | { kind: 'waitForText'; text: string; timeoutMs?: number }
   | { kind: 'screenshot'; name: string }
   | { kind: 'ariaSnapshot'; selector: string }
-  // TASK-42: state-transition / value-match steps that observe real behaviour rather than
+  // State-transition / value-match steps that observe real behaviour rather than
   // "the action did not throw". `expectVisible`/`expectHidden` assert a post-action DOM state;
   // `expectText` compares an element's text to an expected value.
   | { kind: 'expectVisible'; selector: string; timeoutMs?: number }
@@ -39,7 +39,7 @@ export interface BrowserQaResult {
   consoleErrors: string[];
   failedRequests: string[];
   /**
-   * TASK-42: convenience — whether any frontend-observable error (an unhandled console error or a
+   * Convenience — whether any frontend-observable error (an unhandled console error or a
    * failed/4xx+ network request) should block the gate. We do NOT inspect the transport (e.g.
    * WebSocket) directly: QA validates the frontend's observable behaviour and lets the app make
    * whatever connections it makes. A transport-level bug (e.g. a duplicate socket) is caught via
@@ -169,9 +169,9 @@ export async function runBrowserQa(
     await rm(join(tracePath, '..'), { recursive: true, force: true });
   }
 
-  // TASK-42: surface captured console/network errors and socket leaks as real failing
+  // Surface captured console/network errors and socket leaks as real failing
   // assertions, so a page that throws errors or opens duplicate sockets fails QA instead of
-  // silently passing (these signals were previously captured but never asserted on).
+  // silently passing.
   for (const err of consoleErrors) {
     assertions.push({ name: 'no-console-error', passed: false, detail: err, strength: 'state-transition' });
   }
@@ -236,7 +236,7 @@ async function executeStep(
       return;
     }
     case 'expectVisible': {
-      // TASK-42: a genuine post-action state assertion — the element became visible.
+      // A genuine post-action state assertion — the element became visible.
       let visible = false;
       try {
         await page.locator(step.selector).waitFor({ state: 'visible', timeout: step.timeoutMs ?? 5000 });
@@ -259,7 +259,7 @@ async function executeStep(
       return;
     }
     case 'expectText': {
-      // TASK-42: a value comparison — the observed text equals the expected value.
+      // A value comparison — the observed text equals the expected value.
       const actual = (await page.locator(step.selector).textContent())?.trim() ?? '';
       assertions.push({
         name: `expectText:${step.selector}`,

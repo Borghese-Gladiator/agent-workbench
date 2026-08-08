@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * TASK-42: an expected per-claim QA assertion the planner emits — the specific state transition
+ * An expected per-claim QA assertion the planner emits — the specific state transition
  * (or value) the QA author must observe for a behavioral claim. Gives the QA author a target and
  * lets the exercise gate check that an assertion actually exercises the claim's observable
  * behaviour, not merely that some scenario ran for it.
@@ -27,7 +27,7 @@ export const PlanSliceSchema = z.object({
    * (see everyBehavioralClaimHasQaScenario). Optional so non-behavioral plans/fixtures are unaffected.
    */
   qaScenarioIds: z.array(z.string()).optional(),
-  /** TASK-42: expected per-claim QA assertions this slice's scenarios must observe. */
+  /** Expected per-claim QA assertions this slice's scenarios must observe. */
   expectedAssertions: z.array(ExpectedAssertionSchema).optional(),
 });
 export type PlanSlice = z.infer<typeof PlanSliceSchema>;
@@ -44,7 +44,7 @@ export const ClaimCoverageSchema = z.object({
   claimId: z.string(),
   planSliceIds: z.array(z.string()),
   qaScenarioIds: z.array(z.string()),
-  /** TASK-42: the expected assertions covering this claim, aggregated from its covering slices. */
+  /** The expected assertions covering this claim, aggregated from its covering slices. */
   expectedAssertions: z.array(ExpectedAssertionSchema).optional(),
 });
 export type ClaimCoverage = z.infer<typeof ClaimCoverageSchema>;
@@ -72,7 +72,7 @@ export const ImplementationPlanSchema = z.object({
 export type ImplementationPlan = z.infer<typeof ImplementationPlanSchema>;
 
 /**
- * A single type/interface or function declared in the program-design phase (TASK-52 / WSFF): its
+ * A single type/interface or function declared in the program-design phase (WSFF): its
  * signature and a one-line intent, deliberately WITHOUT a body. Reviewing this before implementation
  * is the cheap structural review WSFF prescribes — architectural mistakes are caught while still free.
  */
@@ -85,7 +85,7 @@ export const DesignSignatureSchema = z.object({
 export type DesignSignature = z.infer<typeof DesignSignatureSchema>;
 
 /**
- * The program-design artifact (TASK-52): the projected structure of an L task's change, decided and
+ * The program-design artifact: the projected structure of an L task's change, decided and
  * reviewed BEFORE any slice runs. `fileTreeDiff` is a human-readable list of files added/changed;
  * `typeSignatures`/`functionSignatures` are signatures-only (no bodies). Gated like the plan.
  */

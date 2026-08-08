@@ -2,7 +2,7 @@ import { sizingInstruction, parseSizingOutput, type SizingInput, type SizeClassi
 import type { CodingAgentAdapter } from '@awb/agent-gateway';
 
 /**
- * The two size classifiers (TASK-51), colocated as sibling functions with the same shape:
+ * The two size classifiers, colocated as sibling functions with the same shape:
  * `(input, opts) => Promise<SizeClassification | undefined>`. One authoritative (Claude/Haiku, via the
  * agent SDK — works under the workbench's ambient Claude login, no API key), one local shadow (Ollama,
  * direct HTTP). Both parse through the shared `parseSizingOutput` and return `undefined` on any failure
@@ -65,7 +65,7 @@ export async function classifyWithClaude(
 /**
  * True when the shadow (local) classifier is enabled — gated behind `AWB_CLASSIFIER_SHADOW=1` so
  * normal real runs make a single (Claude) classification call; the local second opinion is opt-in for
- * evaluation sessions (TASK-61).
+ * evaluation sessions.
  */
 export function shadowClassifierEnabled(): boolean {
   return process.env.AWB_CLASSIFIER_SHADOW === '1';

@@ -6,8 +6,8 @@ import { createFileEventSink } from './event-sink-support.js';
 import { createDaemonClient } from '../daemon-client.js';
 
 /**
- * Durable, streaming agent-event sink (TASK-22). Each raw provider `AgentEvent` an agent session
- * emits is normalized into a compact `SemanticEvent` (spec §19 — never the raw token stream), stamped
+ * Durable, streaming agent-event sink. Each raw provider `AgentEvent` an agent session
+ * emits is normalized into a compact `SemanticEvent` (never the raw token stream), stamped
  * with a monotonic per-run `sequence`, and POSTed to the daemon, which persists it to `semantic_events`
  * and republishes it on its in-process bus to any connected WebSocket client (the daemon owns the bus;
  * the worker reaches it over HTTP — single hop, no polling).
@@ -55,7 +55,7 @@ export function createDurableEventSink(input: {
 
 /**
  * The per-agent-session sink used by every phase: fans each event to BOTH the NDJSON file log (the
- * existing local diagnostic, kept) AND the durable/streaming daemon sink (TASK-22). On the mock
+ * existing local diagnostic, kept) AND the durable/streaming daemon sink. On the mock
  * runtime, or when no daemon is reachable, the durable sink's POST simply records an error and the
  * file sink still works — observability is best-effort and never fails the turn. Returns a `flush`
  * the caller awaits after `adapter.execute` so events are persisted before the phase result returns.

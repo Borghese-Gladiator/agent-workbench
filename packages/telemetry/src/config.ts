@@ -1,5 +1,5 @@
 /**
- * Telemetry is OFF unless an OTLP endpoint is configured (TASK-34 / ADR-008). This keeps every unit
+ * Telemetry is OFF unless an OTLP endpoint is configured. This keeps every unit
  * test and the mock runtime free of exporters, background timers, and network egress — telemetry is a
  * diagnostics layer, never load-bearing. `awb up` sets `OTEL_EXPORTER_OTLP_ENDPOINT` to the local
  * collector; a bare `pnpm test` leaves it unset and telemetry is a no-op.

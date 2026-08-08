@@ -46,7 +46,7 @@ export function registerRepositoryRoutes(app: FastifyInstance, database: Workben
       reply.code(404);
       return { error: `No repository with id ${request.params.id}` };
     }
-    // Discovery is a first-class Temporal workflow (spec §9/§15, TASK-26). Run it to completion and
+    // Discovery is a first-class Temporal workflow. Run it to completion and
     // return its result; the actual snapshot write happens in the workflow's activity, daemon-side.
     const client = await getTemporalClient();
     const handle = await client.workflow.start(RepositoryDiscoveryWorkflow, {

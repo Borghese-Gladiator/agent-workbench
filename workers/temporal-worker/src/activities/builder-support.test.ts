@@ -26,7 +26,7 @@ const execFileAsync = promisify(execFile);
 class FakeBuilderAdapter implements CodingAgentAdapter {
   readonly id = 'fake-builder';
   private cwd = '';
-  /** Captures the createSession input so tests can assert the resume id was threaded (TASK-32). */
+  /** Captures the createSession input so tests can assert the resume id was threaded. */
   lastCreateInput?: CreateAgentSessionInput;
   constructor(
     private readonly onExecute: (cwd: string) => Promise<void>,
@@ -107,7 +107,7 @@ describe('runRealBuilderAttempt (Stage 2 real builder)', () => {
     const { stdout } = await execFileAsync('git', ['show', '--stat', 'HEAD'], { cwd: worktree });
     expect(stdout).toContain('greeting.txt');
 
-    // TASK-11: the builder reports the session's usage + wall-clock for per-phase aggregation.
+    // The builder reports the session's usage + wall-clock for per-phase aggregation.
     expect(result.usage).toEqual({ provider: 'fake', model: 'fake', inputTokens: 42, outputTokens: 7 });
     expect(result.runtimeMs).toBeGreaterThanOrEqual(0);
   });
@@ -159,7 +159,7 @@ describe('runRealBuilderAttempt (Stage 2 real builder)', () => {
     expect(result.headSha).toBe(baseSha);
   });
 
-  // TASK-32: a resume token supplied to the attempt is threaded into createSession, and the provider's
+  // A resume token supplied to the attempt is threaded into createSession, and the provider's
   // session token from execute is surfaced back so a caller can persist it for the next retry.
   it('threads resumeSessionId into the session and returns the provider sessionId', async () => {
     const adapter = new FakeBuilderAdapter(

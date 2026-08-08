@@ -46,10 +46,10 @@ import {
 } from './mappers.js';
 
 /**
- * Write/read helpers for the run-lifecycle entities the worker persists through the daemon (TASK-27).
+ * Write/read helpers for the run-lifecycle entities the worker persists through the daemon.
  * Every write is idempotent (re-running a phase attempt re-persists the same row without error), so a
  * Temporal activity retry never produces duplicates. All functions take a Drizzle handle and are used
- * only by the daemon — the single application writer (spec §8 / docs/storage.md).
+ * only by the daemon — the single application writer (docs/storage.md).
  */
 
 // --- TaskContract ---
@@ -107,7 +107,7 @@ export function getPlan(db: DrizzleDb, planId: string): ImplementationPlan | und
   return rowToPlan(row, slices, coverage);
 }
 
-// --- ProgramDesign (TASK-52) ---
+// --- ProgramDesign ---
 
 export function upsertProgramDesign(db: DrizzleDb, design: ProgramDesign): void {
   const row = programDesignToRow(design);
@@ -208,7 +208,7 @@ export function listAllArtifacts(db: DrizzleDb): ArtifactRecord[] {
   return db.select().from(artifacts).all().map(rowToArtifact);
 }
 
-// --- RunStateSnapshot (the worker→daemon durability payload, TASK-27) ---
+// --- RunStateSnapshot (the worker→daemon durability payload) ---
 
 /**
  * Persists a whole run-state snapshot in one transaction: the contract, plan, workspace lease,
@@ -301,7 +301,7 @@ export function loadRunStateSnapshot(
   // evidence for a task shares the same candidate SHA once the builder has committed).
   const candidateSha = allEvidence.find((e) => e.candidateSha)?.candidateSha;
 
-  // Builder resume tokens (TASK-32), reconstructed from the persisted agent_sessions rows so a worker
+  // Builder resume tokens, reconstructed from the persisted agent_sessions rows so a worker
   // restart resumes each slice's transcript instead of cold-starting.
   const builderResumeSessions = getBuilderResumeSessions(db, task.taskId);
 

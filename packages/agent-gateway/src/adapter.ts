@@ -19,7 +19,7 @@ export interface CreateAgentSessionInput {
   /** Allowed tool names for this session, derived from the capability broker for this role. */
   allowedTools: string[];
   /**
-   * Provider model override for this session (TASK-51). Lets a cheap role (e.g. the S/M/L size
+   * Provider model override for this session. Lets a cheap role (e.g. the S/M/L size
    * classifier) request a small/fast model without changing any other role's model. Optional — when
    * omitted the adapter uses its provider default. The mock adapter accepts and ignores it.
    */
@@ -27,12 +27,12 @@ export interface CreateAgentSessionInput {
   /**
    * Tool names this session must be DENIED (the complement of `allowedTools` over the core tool
    * universe). Enforced by the adapter as the SDK's `disallowedTools` so a read-only role provably
-   * cannot use them, even under `bypassPermissions` (TASK-24, §18/§33). Optional — the mock adapter
-   * ignores it, and a caller that omits it gets no deny-list (allow-only, pre-TASK-24 behavior).
+   * cannot use them, even under `bypassPermissions`. Optional — the mock adapter
+   * ignores it, and a caller that omits it gets no deny-list (allow-only behavior).
    */
   disallowedTools?: string[];
   /**
-   * A provider session/resume token from a PRIOR execution of the same logical session (TASK-32). When
+   * A provider session/resume token from a PRIOR execution of the same logical session. When
    * present, the adapter resumes that transcript instead of cold-starting — the retry after a transient
    * transport drop (`Connection closed mid-response`) continues rather than re-exploring from zero. The
    * key MUST be stable across Temporal attempts (derive it from taskId+phase+slice, not attemptNumber).
@@ -72,7 +72,7 @@ export interface AgentExecutionResult {
   /** A short human-readable summary of what happened, for semantic-event logging. */
   summary: string;
   /**
-   * The provider's real session/resume token captured during this execution (TASK-32), if the provider
+   * The provider's real session/resume token captured during this execution, if the provider
    * exposes one (the Claude SDK's `session_id`). Callers persist it durably and pass it back as
    * `CreateAgentSessionInput.resumeSessionId` on a later attempt to resume rather than cold-start.
    */
@@ -80,7 +80,7 @@ export interface AgentExecutionResult {
 }
 
 /**
- * Provider-neutral interface every coding-agent backend must implement (product spec §19).
+ * Provider-neutral interface every coding-agent backend must implement.
  * Callers never depend on a specific provider's SDK/CLI shape directly — only on this interface.
  */
 export interface CodingAgentAdapter {

@@ -51,8 +51,8 @@ registerResetCommands(program);
 registerMemoryCommands(program);
 
 // `pnpm --filter @awb/cli cli -- <args>` forwards a leading `--` into our argv. Commander treats
-// `--` as the options terminator, so it would swallow subcommand options like `--prompt`
-// (TASK-10). Strip a single `--` that appears before the first subcommand token so the documented
+// `--` as the options terminator, so it would swallow subcommand options like `--prompt`.
+// Strip a single `--` that appears before the first subcommand token so the documented
 // `pnpm … cli -- task create --prompt …` invocation parses identically to `awb task create …`.
 const argv = [...process.argv];
 const firstNonNodeArg = 2;

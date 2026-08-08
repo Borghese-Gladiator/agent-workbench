@@ -1,11 +1,11 @@
 import type { RunStateSnapshot, SemanticEvent, PhaseObservability } from '@awb/domain';
 
 /**
- * Thin HTTP client the worker uses to persist through the daemon's internal routes (TASK-21/27).
+ * Thin HTTP client the worker uses to persist through the daemon's internal routes.
  * The worker holds only a read-only DB handle, so all writes funnel here — the daemon is the single
- * application writer (spec §8 / docs/storage.md). Base URL from `AWB_DAEMON_URL`, defaulting to the
+ * application writer (docs/storage.md). Base URL from `AWB_DAEMON_URL`, defaulting to the
  * daemon's loopback port. Every call throws on a non-2xx so a failed persist fails the phase rather
- * than letting the lifecycle advance on unpersisted state (Decision 003).
+ * than letting the lifecycle advance on unpersisted state.
  */
 export function daemonBaseUrl(): string {
   return process.env.AWB_DAEMON_URL ?? 'http://127.0.0.1:4417';

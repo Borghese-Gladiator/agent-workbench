@@ -18,8 +18,8 @@ const FIXTURE_HTML = `<!doctype html>
   </body>
 </html>`;
 
-// TASK-42: a fixture that emits a console error at load, so the console-error capture test can
-// assert QA now *fails* on it (previously captured but ignored).
+// A fixture that emits a console error at load, so the console-error capture test can
+// assert QA fails on it.
 const CONSOLE_ERROR_HTML = `<!doctype html>
 <html>
   <head><title>QA Fixture (console error)</title></head>
@@ -79,7 +79,7 @@ describe('runBrowserQa', () => {
             { kind: 'navigate', url: '/' },
             { kind: 'type', selector: '#name-input', text: 'hello world' },
             { kind: 'click', selector: '#reveal-button' },
-            // TASK-42: a genuine post-action state assertion (state-transition) + a value match.
+            // A genuine post-action state assertion (state-transition) + a value match.
             { kind: 'expectVisible', selector: '#revealed' },
             { kind: 'expectText', selector: '#revealed', equals: 'Revealed Text' },
             { kind: 'screenshot', name: 'after-reveal' },
@@ -146,7 +146,7 @@ describe('runBrowserQa', () => {
         store,
       );
 
-      // TASK-42: a captured 4xx now produces a failing assertion and blocks the gate.
+      // A captured 4xx produces a failing assertion and blocks the gate.
       expect(result.failedRequests.some((f) => f.includes('404'))).toBe(true);
       expect(result.policyBlockingErrorsPresent).toBe(true);
       expect(result.evidence.status).toBe('failed');

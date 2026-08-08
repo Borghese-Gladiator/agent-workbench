@@ -7,9 +7,9 @@ export interface TaskWorkflowState {
   condition: string;
   deliveryState: string;
   attemptNumber: number;
-  /** Task size class (TASK-51); undefined until the specify classifier sets it. */
+  /** Task size class; undefined until the specify classifier sets it. */
   size?: TaskSize;
-  /** The ordered subset of phases this run walks (TASK-51); undefined before specify derives it. */
+  /** The ordered subset of phases this run walks; undefined before specify derives it. */
   phaseSet?: string[];
   latestCandidateEvidenceIds: string[];
   openFindingIds: string[];
@@ -25,7 +25,7 @@ export interface TaskWorkflowState {
   runtimeMsByPhase: Record<string, number>;
 }
 
-/** TASK-53: advisory maintainability annotation surfaced for the human (non-blocking). */
+/** Advisory maintainability annotation surfaced for the human (non-blocking). */
 export interface MaintainabilityFinding {
   id: string;
   path?: string;
@@ -37,11 +37,11 @@ export interface TaskStateResponse {
   state: TaskWorkflowState;
   openFindings: string[];
   pendingHumanGate: TaskWorkflowState['pendingHumanGate'];
-  /** TASK-53: advisory maintainability findings (category maintainability, severity note). */
+  /** Advisory maintainability findings (category maintainability, severity note). */
   maintainabilityFindings?: MaintainabilityFinding[];
 }
 
-/** A committed QA-media artifact the Evidence Viewer can play/preview locally (TASK-58). */
+/** A committed QA-media artifact the Evidence Viewer can play/preview locally. */
 export interface TaskMediaArtifact {
   id: string;
   kind: string;

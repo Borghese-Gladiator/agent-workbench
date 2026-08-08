@@ -66,11 +66,11 @@ function pair(ids: string[] | undefined, valid: Set<string>): [string, string] |
 }
 
 /**
- * Lint pass (Karpathy KB workflow, TASK-50). Reads a repository's live facts and asks the model to
+ * Lint pass (Karpathy KB workflow). Reads a repository's live facts and asks the model to
  * flag contradictions, stale/superseded facts, and new-connection candidates. Returns a structured
  * REPORT only — it never mutates the store (no auto-invalidation). Ids in the report are validated
- * against the real fact set, so a hallucinated id is dropped rather than surfaced. Md-first, advisory
- * (see ADR-009); feeding confirmed contradictions into `invalidateFacts` is left to the caller.
+ * against the real fact set, so a hallucinated id is dropped rather than surfaced. Md-first, advisory;
+ * feeding confirmed contradictions into `invalidateFacts` is left to the caller.
  */
 export async function lintMemory(
   db: DrizzleDb,

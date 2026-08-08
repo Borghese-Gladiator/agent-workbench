@@ -93,11 +93,11 @@ function unionProvenance(facts: RepositoryFact[]): { paths: string[]; hashes: st
 }
 
 /**
- * Compile pass (Karpathy KB workflow, TASK-50). Reads a repository's live atomic facts, clusters
+ * Compile pass (Karpathy KB workflow). Reads a repository's live atomic facts, clusters
  * them by source directory, and asks the model to synthesize each cluster into one denser
  * `kind: 'concept'` fact — preserving the union of the cluster's provenance (sourcePaths/sourceHashes)
  * so a compiled concept is still traceable to its sources. Purely additive: it appends concept facts
- * and never mutates or deletes the atomic ones. Md-first — no graph store (see ADR-009).
+ * and never mutates or deletes the atomic ones. Md-first — no graph store.
  */
 export async function compileConcepts(
   db: DrizzleDb,

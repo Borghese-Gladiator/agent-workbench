@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Evidence, EvidenceKind, EvidenceStatus } from '@awb/domain';
 
 /**
- * TASK-42: how strong an assertion is, so the gate can distinguish "the feature is wired and
+ * How strong an assertion is, so the gate can distinguish "the feature is wired and
  * live" from "the feature is correct".
  *  - `liveness`   — the step merely did not throw (navigate/click succeeded, an element exists).
  *                   Proves the wiring is alive; proves nothing about behaviour.
@@ -22,7 +22,7 @@ export interface QaAssertionResult {
   name: string;
   passed: boolean;
   detail?: string;
-  /** TASK-42: assertion strength; defaults to `liveness` when a producer omits it. */
+  /** Assertion strength; defaults to `liveness` when a producer omits it. */
   strength?: QaAssertionStrength;
 }
 
@@ -32,7 +32,7 @@ export function isStrongAssertion(a: QaAssertionResult): boolean {
 }
 
 /**
- * TASK-42: classify a scenario's assertions. A scenario is `weak` when every assertion is a
+ * Classify a scenario's assertions. A scenario is `weak` when every assertion is a
  * liveness check (did-not-throw / existence) — it passes exactly like one that exercises the
  * real behaviour, so the challenge phase treats it as a QA-quality finding rather than a silent
  * pass. `strong` means at least one assertion observes a state transition or a value.
@@ -42,7 +42,7 @@ export function scenarioStrength(assertions: QaAssertionResult[]): 'weak' | 'str
 }
 
 /**
- * TASK-42: whether a browser QA run hit a frontend-observable policy-blocking signal — an
+ * Whether a browser QA run hit a frontend-observable policy-blocking signal — an
  * unhandled console error or a failed/4xx+ network request. Feeds the exercise gate's
  * `policyBlockingErrorsPresent` (was hard-coded false), so a page that throws errors no longer
  * passes QA. We deliberately do NOT inspect the transport (WebSocket/SSE/polling): QA validates

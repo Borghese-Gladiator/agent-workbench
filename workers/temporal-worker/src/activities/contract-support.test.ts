@@ -28,7 +28,7 @@ describe('draftContractInputFromPrompt (Fix 9: real contract from prompt)', () =
     expect(contract.version).toBe(1);
   });
 
-  // TASK-54: the prompt-derived contract clears the specify gate's problem-statement check.
+  // The prompt-derived contract clears the specify gate's problem-statement check.
   it('supplies a problem statement', () => {
     const contract = draftContract(draftContractInputFromPrompt('task-1', prompt));
     expect(contractCompletionInputs(contract, true).problemStatementPresent).toBe(true);

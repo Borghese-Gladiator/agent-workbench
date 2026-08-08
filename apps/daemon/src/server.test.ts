@@ -87,7 +87,7 @@ describe('daemon server', () => {
   });
 
   it('drives the full add -> refresh -> approve -> inspect flow over HTTP', async () => {
-    // Refresh is now a Temporal workflow (RepositoryDiscoveryWorkflow, TASK-26/ADR 007), so this
+    // Refresh is now a Temporal workflow (RepositoryDiscoveryWorkflow), so this
     // flow runs against a TestWorkflowEnvironment with a worker registering the discovery workflow +
     // activity. The activity writes the snapshot daemon-side, so it needs the daemon's data dir.
     const testEnv = await TestWorkflowEnvironment.createLocal();

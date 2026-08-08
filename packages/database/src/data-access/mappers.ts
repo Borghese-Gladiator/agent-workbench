@@ -25,8 +25,8 @@ import type {
 } from '../row-types.js';
 
 /**
- * Row ⇄ domain mappers for the run-lifecycle entities the worker persists through the daemon
- * (TASK-27). The schema stores arrays/records as JSON text columns (`*_json`); these functions are
+ * Row ⇄ domain mappers for the run-lifecycle entities the worker persists through the daemon.
+ * The schema stores arrays/records as JSON text columns (`*_json`); these functions are
  * the single place that (de)serializes them, so the data-access helpers and the daemon's rehydration
  * route never hand-roll `JSON.parse`. Every mapper round-trips: `rowToX(xToRow(x)) deepEquals x`.
  */
@@ -185,7 +185,7 @@ export function rowToPlan(
   };
 }
 
-// --- ProgramDesign (TASK-52) ---
+// --- ProgramDesign ---
 
 export function programDesignToRow(design: ProgramDesign): ProgramDesignRow {
   return {

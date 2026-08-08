@@ -11,12 +11,12 @@ import {
 import type { DaemonClient } from '../daemon-client.js';
 
 /**
- * Emits CONTROL-PLANE lifecycle events (TASK-34): a phase starting/failing, a retry being scheduled, a
+ * Emits CONTROL-PLANE lifecycle events: a phase starting/failing, a retry being scheduled, a
  * transport drop, a session started/resumed. Distinct from the agent-produced stream (durable-event-
  * sink.ts) — these are produced by the workbench itself, so they carry `producer: 'workbench'`. They
  * land in `semantic_events` (via the same `POST /internal/events` single-writer path, so the dashboard
  * + catch-up route get them for free) AND drive the cross-run OTel metrics. Both are best-effort: a
- * dropped event or a telemetry hiccup must NEVER fail the phase (ADR-008: telemetry is not load-bearing).
+ * dropped event or a telemetry hiccup must NEVER fail the phase (telemetry is not load-bearing).
  */
 export interface ControlPlaneEmitterInput {
   taskId: string;

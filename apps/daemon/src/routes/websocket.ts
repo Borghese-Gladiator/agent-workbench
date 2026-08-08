@@ -4,7 +4,7 @@ import { listSemanticEventsAfter } from '@awb/database';
 import type { SemanticEventBus } from '../event-bus.js';
 
 /**
- * Live semantic-event stream over WebSocket + the reconnect catch-up REST route (spec §31, TASK-23).
+ * Live semantic-event stream over WebSocket + the reconnect catch-up REST route.
  * On (re)connect a client first calls `GET /api/events?runId=…&afterSequence=N` to backfill any
  * events it missed while disconnected, then relies on the WebSocket for new events. The WebSocket
  * only pushes; it never re-sends history — the catch-up route (reading the durable `semantic_events`

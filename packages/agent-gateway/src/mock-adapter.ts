@@ -24,8 +24,8 @@ export interface MockTurnScript {
 }
 
 /**
- * A fully deterministic, scriptable CodingAgentAdapter for automated tests (product spec §19,
- * §34). Scripts are queued per taskId+role pair; each execute() call consumes the next queued
+ * A fully deterministic, scriptable CodingAgentAdapter for automated tests. Scripts are queued
+ * per taskId+role pair; each execute() call consumes the next queued
  * turn (or repeats the last one if the queue for that key is exhausted).
  */
 export class MockAgentAdapter implements CodingAgentAdapter {
@@ -99,7 +99,7 @@ export class MockAgentAdapter implements CodingAgentAdapter {
       findings: turn.findings ?? [],
       usage: turn.usage,
       summary: turn.summary ?? `mock turn ${cursor + 1} for ${session.role}`,
-      // Deterministic resume token so the resume round-trip (TASK-32) is testable on the mock runtime.
+      // Deterministic resume token so the resume round-trip is testable on the mock runtime.
       sessionId: `mock-session-${session.taskId}-${session.role}`,
     };
   }

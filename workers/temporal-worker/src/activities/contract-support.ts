@@ -2,8 +2,8 @@ import type { DraftContractInput } from '@awb/planning';
 import type { TaskContract } from '@awb/domain';
 
 /**
- * Builds a deterministic draft-contract input from the task's natural-language prompt (Fix 9,
- * option a): the objective is the prompt verbatim, plus two derived falsifiable claims — a
+ * Builds a deterministic draft-contract input from the task's natural-language prompt: the
+ * objective is the prompt verbatim, plus two derived falsifiable claims — a
  * correctness claim backed by deterministic evidence (the repo's tests must pass) and a behavioral
  * claim backed by QA evidence (the feature must be exercised). The behavioral claim's
  * `qaEvidenceRequired: true` is what makes the exercise phase demand real QA rather than skip it.
@@ -16,7 +16,7 @@ export function draftContractInputFromPrompt(taskId: string, prompt: string): Dr
   return {
     taskId,
     objective,
-    // TASK-54: the problem statement the human aligns on at the specify gate. Deterministic MVP
+    // The problem statement the human aligns on at the specify gate. Deterministic MVP
     // substitute for a live specify session.
     problemStatement: `The repository does not yet satisfy: ${objective}`,
     constraints: [],
@@ -41,7 +41,7 @@ export function draftContractInputFromPrompt(taskId: string, prompt: string): Dr
 }
 
 /**
- * TASK-54: renders the contract's problem statement + acceptance claims into the specify gate
+ * Renders the contract's problem statement + acceptance claims into the specify gate
  * summary, so the human reviewing the `task-contract-approval` gate aligns on them before any
  * planning spend — without a separate contract read route in the daemon/UI.
  */

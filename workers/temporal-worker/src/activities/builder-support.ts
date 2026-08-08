@@ -10,16 +10,16 @@ export interface RealBuilderAttemptInput {
   taskId: string;
   worktreePath: string;
   slice: PlanSlice;
-  /** The program-design artifact (TASK-52), when one was produced (L tasks), fed as builder context. */
+  /** The program-design artifact, when one was produced (L tasks), fed as builder context. */
   programDesign?: ProgramDesign;
   allowedTools: string[];
-  /** Tools denied for the builder session; enforced via the adapter's `disallowedTools` (TASK-24). */
+  /** Tools denied for the builder session; enforced via the adapter's `disallowedTools`. */
   disallowedTools?: string[];
   tokenBudget: number;
   runtimeBudgetMs: number;
   eventSink: AgentEventSink;
   /**
-   * A prior provider session token for this slice (TASK-32). When set, the builder resumes that
+   * A prior provider session token for this slice. When set, the builder resumes that
    * transcript instead of cold-starting — a Temporal retry after a transient transport drop continues
    * rather than re-exploring from zero. Stable across attempts (keyed by slice, not attempt number).
    */
@@ -30,11 +30,11 @@ export interface RealBuilderAttemptResult {
   outcome: SliceAttemptOutcome;
   /** HEAD SHA after the attempt committed its changes; unchanged base SHA when nothing was committed. */
   headSha: string;
-  /** Agent usage the builder session reported, for per-phase aggregation (TASK-11). */
+  /** Agent usage the builder session reported, for per-phase aggregation. */
   usage?: ModelUsage;
-  /** Wall-clock the builder session took, for per-phase runtime aggregation (TASK-11). */
+  /** Wall-clock the builder session took, for per-phase runtime aggregation. */
   runtimeMs: number;
-  /** The provider session token this attempt ran under (TASK-32); persist it to resume on a retry. */
+  /** The provider session token this attempt ran under; persist it to resume on a retry. */
   sessionId?: string;
 }
 
@@ -45,7 +45,7 @@ export interface RealBuilderAttemptResult {
  * this only executes a single attempt and reports its outcome.
  */
 export async function runRealBuilderAttempt(input: RealBuilderAttemptInput): Promise<RealBuilderAttemptResult> {
-  // Open a `session.builder` child span under the active phase span (TASK-36). No explicit parent — it
+  // Open a `session.builder` child span under the active phase span. No explicit parent — it
   // runs inside `phase.implement`'s `withSpan` callback, so it auto-nests under that phase's trace,
   // giving the real tree `run → phase.implement → session.builder`.
   return withSpan(

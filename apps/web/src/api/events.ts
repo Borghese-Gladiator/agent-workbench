@@ -1,7 +1,7 @@
 /**
- * Semantic-event stream client (TASK-23). The browser talks only to the daemon's `/api` — the live
+ * Semantic-event stream client. The browser talks only to the daemon's `/api` — the live
  * WebSocket for new events, and the REST catch-up route to backfill anything missed while
- * disconnected (spec §31). Local type mirror; the browser never imports `packages/*`.
+ * disconnected. Local type mirror; the browser never imports `packages/*`.
  *
  * The WebSocket is not run-scoped: it pushes every run's events, so a single subscription can drive
  * both the per-task timeline (filtered by runId) and the tasks-list live refresh (any event).
@@ -23,7 +23,7 @@ export interface SemanticEvent {
   artifactId?: string;
 }
 
-/** REST catch-up: events for a run with sequence > afterSequence, in order (spec §31). */
+/** REST catch-up: events for a run with sequence > afterSequence, in order. */
 export async function fetchEventsAfter(runId: string, afterSequence: number): Promise<SemanticEvent[]> {
   const params = new URLSearchParams({ runId, afterSequence: String(afterSequence) });
   const response = await fetch(`/api/events?${params.toString()}`);

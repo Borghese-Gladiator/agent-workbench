@@ -53,7 +53,7 @@ beforeAll(async () => {
   setTemporalClientForTesting(testEnv.client);
   server = await buildServer();
 
-  // The tasks row now FK-references repositories (TASK-27 persistence). Seed the repo row the task
+  // The tasks row now FK-references repositories. Seed the repo row the task
   // is created under so `POST /api/tasks` can persist its durable task row. The workflow resolves the
   // fixture repo path from AWB_RUN_PHASE_FIXTURE_REPO, so the id just needs to satisfy the FK.
   const now = new Date().toISOString();

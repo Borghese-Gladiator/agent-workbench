@@ -9,7 +9,7 @@ const PLAYABLE_KINDS = new Set(['qa-video', 'qa-video-gif', 'screenshot', 'brows
 
 /**
  * Read-only routes serving committed QA media bytes to the local Evidence Viewer, so a run's
- * recording is watchable without opening the PR (TASK-58). The daemon is the single reader/writer
+ * recording is watchable without opening the PR. The daemon is the single reader/writer
  * of the artifact store, so it wires an `ArtifactStore` over the SQLite metadata + the durable
  * content-addressed blob dir and streams bytes with the artifact's real content-type. Loopback-only
  * like the rest of the daemon (server.ts binds 127.0.0.1).

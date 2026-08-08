@@ -11,11 +11,11 @@ import {
 
 /**
  * Opens a span around `fn`, tagging it with the caller's attributes (which MUST include the
- * `run_id`/`task_id` bridge ids per ADR-008 so a span links back to the run's `semantic_events`). On a
+ * `run_id`/`task_id` bridge ids so a span links back to the run's `semantic_events`). On a
  * thrown error the span is marked ERROR and records the exception before rethrowing. When telemetry is
  * disabled the global tracer is a no-op, so this adds negligible overhead and never changes behavior.
  *
- * One trace per run (TASK-36): passing `parentRunId` parents the span to a deterministic run-level
+ * One trace per run: passing `parentRunId` parents the span to a deterministic run-level
  * `SpanContext` derived from the run id, so every phase of the same run lands in ONE trace (a nested
  * span tree) instead of each phase minting its own random trace id. Spans opened *without* `parentRunId`
  * from inside a parented span auto-nest under it via the active context (e.g. `session.builder` under
@@ -32,7 +32,7 @@ export interface SpanAttributes extends Attributes {
 
 export interface WithSpanOptions {
   /**
-   * When set, the span parents to a deterministic run-level trace derived from this run id (TASK-36),
+   * When set, the span parents to a deterministic run-level trace derived from this run id,
    * so all phases of a run share one trace id. Omit to inherit the current active context.
    */
   parentRunId?: string;

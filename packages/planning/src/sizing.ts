@@ -1,8 +1,8 @@
 import type { TaskSize } from '@awb/domain';
 
 /**
- * A bounded set of reason codes the size classifier may cite (TASK-51). Constrained rather than
- * free-text so classifier behavior is inspectable and the shadow-evaluation log (TASK-61) can bucket
+ * A bounded set of reason codes the size classifier may cite. Constrained rather than
+ * free-text so classifier behavior is inspectable and the shadow-evaluation log can bucket
  * decisions by cause. Advisory — never gates anything.
  */
 export const SIZE_REASON_CODES = [
@@ -35,7 +35,7 @@ export interface SizingInput {
 }
 
 /**
- * The instruction handed to the size classifier (TASK-51). It teaches the model WHAT small / medium /
+ * The instruction handed to the size classifier. It teaches the model WHAT small / medium /
  * large tasks look like — task characteristics + worked examples — and lets it judge the arbitrary
  * instruction, rather than describing our phase machinery. `M` is the "when unsure" default so an
  * uncertain task is never single-shotted (S) nor over-planned (L) on a guess.

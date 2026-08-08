@@ -9,7 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export const TASK_QUEUE = 'awb-task-queue';
 
 export async function startWorker(): Promise<Worker> {
-  // Boot OpenTelemetry (TASK-34) before any activity runs. A no-op unless `awb up` set an OTLP
+  // Boot OpenTelemetry before any activity runs. A no-op unless `awb up` set an OTLP
   // endpoint, so a plain test/dev run starts no exporter.
   initTelemetry('awb-worker');
   const worker = await Worker.create({

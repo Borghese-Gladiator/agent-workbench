@@ -6,20 +6,20 @@ import { EvidenceSchema, FindingSchema, ArtifactRecordSchema } from './evidence.
 
 /**
  * The serializable snapshot of the worker's per-task run-state that crosses the worker→daemon
- * boundary (TASK-27). The worker's live `TaskRunState` also holds an `ArtifactStore` instance (a
+ * boundary. The worker's live `TaskRunState` also holds an `ArtifactStore` instance (a
  * class, not data) — that is intentionally excluded here; only its content-addressed metadata rows
  * (`artifacts`) are persisted. The daemon fans this out to the run-lifecycle data-access helpers in
- * one transaction, so the daemon stays the single writer (spec §8 / docs/storage.md).
+ * one transaction, so the daemon stays the single writer (docs/storage.md).
  */
 export const RunStateSnapshotSchema = z.object({
   taskId: z.string(),
   repositoryId: z.string(),
   prompt: z.string().optional(),
-  /** Task size class (TASK-51), classified at specify and driving the phase set. */
+  /** Task size class, classified at specify and driving the phase set. */
   size: TaskSizeSchema.optional(),
   contract: TaskContractSchema.optional(),
   plan: ImplementationPlanSchema.optional(),
-  /** Program-design artifact (TASK-52), produced for L tasks between plan and prepare. */
+  /** Program-design artifact, produced for L tasks between plan and prepare. */
   programDesign: ProgramDesignSchema.optional(),
   baseSha: z.string().optional(),
   candidateSha: z.string().optional(),
@@ -31,7 +31,7 @@ export const RunStateSnapshotSchema = z.object({
   artifacts: z.array(ArtifactRecordSchema),
   dependenciesInstalled: z.boolean().optional(),
   /**
-   * Builder resume tokens keyed by plan-slice id (TASK-32). Populated on load from the persisted
+   * Builder resume tokens keyed by plan-slice id. Populated on load from the persisted
    * `agent_sessions.resume_session_id` rows so a worker restart resumes each slice's transcript. The
    * durable source of truth is the agent_sessions table (written via the observability path); this
    * field carries the reconstructed map back onto the worker's `TaskRunState`.

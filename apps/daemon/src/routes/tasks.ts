@@ -37,7 +37,7 @@ export interface CreatedTaskRecord {
   phase: string;
   condition: string;
   deliveryState: string;
-  /** Task size class (TASK-51); null until the specify classifier sets it. */
+  /** Task size class; null until the specify classifier sets it. */
   size: TaskSize | null;
   createdAt: string;
   updatedAt: string;
@@ -53,12 +53,12 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
     await client.workflow.start(TaskWorkflow, {
       taskQueue: TASK_QUEUE,
       workflowId,
-      // An optional intake size hint (CLI --size) seeds the classifier (TASK-51); it still decides.
+      // An optional intake size hint (CLI --size) seeds the classifier; it still decides.
       args: [{ taskId, repositoryId, prompt, ...(size ? { size } : {}) }],
     });
 
     // Persist the task row so it survives a daemon restart and `task show` reads lifecycle state
-    // from SQLite (TASK-27), replacing the previous session-scoped in-memory array.
+    // from SQLite, replacing the previous session-scoped in-memory array.
     upsertTask(database.db, { id: taskId, repositoryId, prompt, ...(size ? { size } : {}) });
 
     reply.code(201);
@@ -92,10 +92,10 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
         const state = await handle.query(getCurrentStateQuery);
         const openFindings = await handle.query(getOpenFindingsQuery);
         const pendingHumanGate = await handle.query(getPendingHumanGateQuery);
-        // §27 breakdown from SQLite (not Workflow state, which stays compact — docs/temporal-workflows).
+        // Token breakdown from SQLite (not Workflow state, which stays compact — docs/temporal-workflows).
         const tokenBreakdown = getTokenBreakdown(database.db, request.params.taskId);
         const runtimeAttribution = getRuntimeAttribution(database.db, request.params.taskId);
-        // TASK-53: advisory maintainability annotations (category maintainability, severity note),
+        // Advisory maintainability annotations (category maintainability, severity note),
         // read from persisted findings. Non-blocking — surfaced for the human, distinct from the
         // blocking open findings above.
         const maintainabilityFindings = listFindingsByTask(database.db, request.params.taskId)
@@ -122,7 +122,7 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
       const client = await getTemporalClient();
       const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
       try {
-        // A human may override the classified size at the gate (TASK-51); it wins over the classifier.
+        // A human may override the classified size at the gate; it wins over the classifier.
         const { contractVersion, size } = request.body;
         await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion, ...(size ? { size } : {}) }] });
         if (size) upsertTask(database.db, { id: request.params.taskId, repositoryId: request.params.repositoryId, prompt: '', size });
@@ -183,7 +183,7 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
     '/api/tasks/:repositoryId/:taskId',
     async (request, reply) => {
       // Terminate the workflow first (best-effort) so a still-running run can't re-persist rows after
-      // the cascade deletes them; then drop the task + every FK-descendant row (TASK-37).
+      // the cascade deletes them; then drop the task + every FK-descendant row.
       const client = await getTemporalClient();
       const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
       try {
@@ -260,7 +260,7 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
     },
   );
 
-  // §29 PR-feedback ingest (TASK-25): classify one comment and route it — auto-loop clear
+  // PR-feedback ingest: classify one comment and route it — auto-loop clear
   // implementation defects (signal the workflow to re-enter the review loop) or return a
   // human-gate decision for anything ambiguous/scope/plan/contract-related. This is the runtime
   // caller for classifyFeedback/canAutoLoop/routeFeedback (previously unwired). A background

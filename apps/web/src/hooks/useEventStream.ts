@@ -6,7 +6,7 @@ import { fetchEventsAfter, openEventStream, type SemanticEvent } from '../api/ev
 export type EventStreamStatus = 'connecting' | 'connected' | 'reconnecting';
 
 /**
- * Live semantic-event timeline for a task (TASK-23 / spec §31, TASK-57). History is backfilled on
+ * Live semantic-event timeline for a task. History is backfilled on
  * mount via `GET /api/events?afterSequence=N` — independent of the WebSocket, so stored events render
  * even if the socket never connects. The socket then delivers new events and, on every (re)connect,
  * re-runs catch-up to fill any gap. Events are deduped and kept ordered by `sequence`, so a
@@ -53,7 +53,7 @@ export function useEventStream(taskId: string | undefined): {
     };
 
     // Backfill immediately on mount, independent of the socket — history must render even if the WS
-    // never opens (TASK-57 defect 1).
+    // never opens.
     void catchUp();
 
     const close = openEventStream({

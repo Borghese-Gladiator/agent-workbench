@@ -17,7 +17,7 @@ interface PlannerPlanJson {
 
 /** The instruction handed to the planner session, telling it exactly what JSON to emit. */
 export function plannerInstruction(contract: TaskContract, hasMemory = false): string {
-  // When project memory was injected into the context payload (read side of TASK-50), point the
+  // When project memory was injected into the context payload, point the
   // planner at it so accumulated pitfalls/conventions/commands actually inform the plan.
   const memoryLine = hasMemory
     ? 'The context includes a "memory" array of facts prior runs learned about this repository ' +
@@ -42,7 +42,7 @@ export function plannerInstruction(contract: TaskContract, hasMemory = false): s
     '"requiredTargetedChecks": string[] (non-empty), "claimIds": string[], "dependencies": string[],',
     '"qaScenarioIds": string[]}]}',
     'as a fenced ```json code block. Each slice must have at least one targeted check.',
-    // Bias toward the smallest plan that covers the work (TASK-19): each slice is executed as a
+    // Bias toward the smallest plan that covers the work: each slice is executed as a
     // separate, cold builder session, so extra slices multiply runtime and token cost. Investigation
     // is not its own slice — fold discovery and verification into the slice that makes the change.
     'IMPORTANT: use as FEW slices as possible — prefer a SINGLE slice unless the work spans genuinely',

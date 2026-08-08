@@ -8,7 +8,7 @@ interface ProgramDesignJson {
 }
 
 /**
- * The instruction handed to the program-design session (TASK-52). It sees the accepted plan and must
+ * The instruction handed to the program-design session. It sees the accepted plan and must
  * emit the projected structure — file-tree diff + type/function signatures WITH one-line intents but
  * NO bodies — as a JSON block. Mirrors `plannerInstruction`'s contract so the parse/gate can check it.
  */

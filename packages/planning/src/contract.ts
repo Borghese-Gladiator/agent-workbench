@@ -5,14 +5,14 @@ export interface DraftContractInput {
   taskId: string;
   objective: string;
   /**
-   * TASK-54: the problem the task solves, aligned on with the human before any planning
+   * The problem the task solves, aligned on with the human before any planning
    * spend. Defaults to the objective when the drafting agent supplies nothing.
    */
   problemStatement?: string;
   constraints?: string[];
   nonGoals?: string[];
   risk?: TaskRisk;
-  /** Task size class (TASK-51); defaults to `M` until the classifier or a human sets it. */
+  /** Task size class; defaults to `M` until the classifier or a human sets it. */
   size?: TaskSize;
   claims: Omit<AcceptanceClaim, 'id'>[];
 }
@@ -61,7 +61,7 @@ export function supersedeContract(contract: TaskContract): TaskContract {
 }
 
 /**
- * Specify-phase completion checklist (product spec §11), expressed as a pure function over a
+ * Specify-phase completion checklist, expressed as a pure function over a
  * TaskContract so it can feed `@awb/workflow`'s CompletionContext.specify shape directly.
  */
 export function contractCompletionInputs(contract: TaskContract, noUnresolvedAmbiguity: boolean) {
@@ -74,9 +74,9 @@ export function contractCompletionInputs(contract: TaskContract, noUnresolvedAmb
     constraintsArrayPresent: Array.isArray(contract.constraints),
     nonGoalsArrayPresent: Array.isArray(contract.nonGoals),
     noUnresolvedAmbiguity,
-    // TASK-54: reviewer-alignment before implementation — the human aligns on the problem at the
-    // specify gate before any planning spend. What must be true is captured by the acceptance
-    // claims (which QA is already held to); this is the human-facing "why".
+    // The human aligns on the problem at the specify gate before any planning spend. What must be
+    // true is captured by the acceptance claims (which QA is already held to); this is the
+    // human-facing "why".
     problemStatementPresent: contract.problemStatement.trim().length > 0,
     contractStatus: contract.status,
   };

@@ -2,7 +2,7 @@ import type { Finding } from '@awb/domain';
 import type { DiffLineStats } from '@awb/repository';
 
 /**
- * WSFF "decay" signals for one run (TASK-55). These are the buildable subset — diff size, the
+ * WSFF "decay" signals for one run. These are the buildable subset — diff size, the
  * reviewed-diff ratio, and review-finding density — sourced from what the challenge phase already has
  * in hand (the reviewed diff + the adversarial findings). Duplication-delta is deliberately omitted:
  * it needs a prior-run baseline / a duplication probe that does not exist yet.
@@ -66,7 +66,7 @@ export function computeDecaySignals(inputs: DecayInputs): DecaySignals {
   };
 }
 
-/** Flattens the signals into `awb.decay.*` span attributes for the run trace (TASK-55). */
+/** Flattens the signals into `awb.decay.*` span attributes for the run trace. */
 export function decaySpanAttributes(signals: DecaySignals): Record<string, number> {
   return {
     'awb.decay.diff_lines': signals.diffLines,

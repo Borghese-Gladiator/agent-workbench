@@ -45,7 +45,7 @@ export function taskIdFromRunId(runId: string): string {
 /**
  * Task-row lifecycle helpers. The daemon persists a `tasks` row when a task is created and updates
  * its phase/condition/delivery-state as the workflow advances, so `task show` and `GET /api/tasks`
- * read from SQLite instead of a session-scoped in-memory array (TASK-27). Also owns `runs` and
+ * read from SQLite instead of a session-scoped in-memory array. Also owns `runs` and
  * `phase_attempts`, which evidence/artifact rows reference by foreign key — those parent rows must
  * exist before a child evidence row is inserted.
  */
@@ -57,7 +57,7 @@ export interface UpsertTaskInput {
   phase?: TaskPhase;
   condition?: RunCondition;
   deliveryState?: DeliveryState;
-  /** Task size class (TASK-51); set at intake as a hint or once the classifier decides. */
+  /** Task size class; set at intake as a hint or once the classifier decides. */
   size?: TaskSize;
 }
 
@@ -200,7 +200,7 @@ export function ensurePhaseAttempt(
 /**
  * Deletes a task and every descendant row across the ~24 FK-linked tables, in one transaction and in
  * FK-safe order (children before parents), so `foreign_keys=ON` never rejects a delete and no orphaned
- * rows survive (TASK-37). Returns false when the task row was absent (nothing deleted).
+ * rows survive. Returns false when the task row was absent (nothing deleted).
  *
  * Rows carrying `task_id` directly are deleted by that column; join/detail tables that only FK to an
  * intermediate parent (agent sessions, evidence, plans, contracts, pull requests) are deleted via an
@@ -283,7 +283,7 @@ export function deleteTask(db: DrizzleDb, taskId: string): boolean {
     }
     tx.delete(plans).where(eq(plans.taskId, taskId)).run();
 
-    // program-design artifacts (FK → tasks, TASK-52)
+    // program-design artifacts (FK → tasks)
     tx.delete(programDesigns).where(eq(programDesigns.taskId, taskId)).run();
 
     // 11-12. contract claims (FK → task_contracts) before contracts

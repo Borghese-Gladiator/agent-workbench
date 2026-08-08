@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// TASK-46 token-cost measurement. Reads the live workbench SQLite and prints, per AGENT SESSION
+// Token-cost measurement. Reads the live workbench SQLite and prints, per AGENT SESSION
 // (each phase/role/slice is its own session — phases do NOT share one), the full token breakdown
 // (fresh / cache-read / cache-write / output), a per-MODEL rollup, and a recomputed cost that is
 // VALIDATED against the SDK-reported cost_usd so a pricing/accounting drift is visible. Read-only.

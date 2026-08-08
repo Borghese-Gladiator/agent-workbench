@@ -1,5 +1,5 @@
 /**
- * The default per-slice diff cap (TASK-56 "amplify, don't automate"). When a slice's committed diff
+ * The default per-slice diff cap ("amplify, don't automate"). When a slice's committed diff
  * exceeds either bound, the builder forces a human checkpoint instead of continuing — the antidote to
  * WSFF's 2000-line-dump anti-pattern. Named constants so the caps are tunable in one place; overridable
  * per run via env. OFF for the mock path (deterministic tests never trip it), ON for a real-agent path.
@@ -21,8 +21,8 @@ function intFromEnv(name: string, fallback: number): number {
 }
 
 /**
- * Resolves the slice-diff cap for a run (TASK-56). `realPath` comes from the RuntimeProfile
- * (`usesRealAgent`, TASK-38) — never a runtime string. On a real-agent path the guardrail is on by
+ * Resolves the slice-diff cap for a run. `realPath` comes from the RuntimeProfile
+ * (`usesRealAgent`) — never a runtime string. On a real-agent path the guardrail is on by
  * default and the bounds are env-overridable (`AWB_SLICE_DIFF_LINE_CAP` / `AWB_SLICE_DIFF_FILE_CAP`);
  * set `AWB_SLICE_DIFF_CAP=0` to disable it. On the mock path it is always off.
  */
@@ -43,7 +43,7 @@ export interface SliceDiffStat {
 }
 
 /**
- * Whether a slice's diff exceeds the cap (TASK-56). Pure — takes the resolved cap + the measured diff
+ * Whether a slice's diff exceeds the cap. Pure — takes the resolved cap + the measured diff
  * so it is trivially unit-testable. A disabled cap never trips.
  */
 export function sliceDiffExceedsCap(cap: SliceDiffCap, stat: SliceDiffStat): boolean {

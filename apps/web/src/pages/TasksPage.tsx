@@ -65,7 +65,7 @@ export function TasksPage() {
   }, [refresh]);
 
   // Live status: refresh the list when the event stream reports activity, so rows advance without a
-  // manual refresh (TASK-49). The poll above stays as a fallback if the socket is down.
+  // manual refresh. The poll above stays as a fallback if the socket is down.
   useTaskListLiveRefresh(() => void refresh());
 
   const repoLabel = (task: TaskSummary) => task.repositoryName ?? shortId(task.repositoryId);

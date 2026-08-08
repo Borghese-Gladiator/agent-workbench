@@ -39,7 +39,7 @@ export const planClaimCoverage = sqliteTable('plan_claim_coverage', {
 });
 
 /**
- * Program-design artifacts (TASK-52), one row per (task, version). The signatures/file-tree diff are
+ * Program-design artifacts, one row per (task, version). The signatures/file-tree diff are
  * small structured JSON, so unlike plans they are stored as JSON columns on a single row rather than
  * fanned into child tables.
  */

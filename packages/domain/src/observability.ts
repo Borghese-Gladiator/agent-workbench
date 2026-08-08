@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { TaskPhaseSchema } from './lifecycle.js';
 
-/** The 12 runtime-attribution buckets (spec §27) — where a phase attempt's wall-clock went. */
+/** The 12 runtime-attribution buckets — where a phase attempt's wall-clock went. */
 export const RuntimeAttributionSchema = z.object({
   environmentSetupMs: z.number().int().nonnegative().default(0),
   dependencyInstallMs: z.number().int().nonnegative().default(0),
@@ -18,7 +18,7 @@ export const RuntimeAttributionSchema = z.object({
 });
 export type RuntimeAttribution = z.infer<typeof RuntimeAttributionSchema>;
 
-/** The 8 context-composition buckets (spec §27) — token count by source in an assembled context. */
+/** The 8 context-composition buckets — token count by source in an assembled context. */
 export const ContextCompositionSchema = z.object({
   contractTokens: z.number().int().nonnegative().default(0),
   planTokens: z.number().int().nonnegative().default(0),
@@ -51,7 +51,7 @@ export const AgentSessionRecordSchema = z.object({
   role: AgentSessionRoleSchema,
   runtime: z.string(),
   model: z.string().optional(),
-  /** The provider's resumable session token for this session (TASK-32); persisted for retry resume. */
+  /** The provider's resumable session token for this session; persisted for retry resume. */
   resumeSessionId: z.string().optional(),
   startedAt: z.string(),
   endedAt: z.string().optional(),
@@ -73,7 +73,7 @@ export const AgentSessionRecordSchema = z.object({
 });
 export type AgentSessionRecord = z.infer<typeof AgentSessionRecordSchema>;
 
-/** The observability payload the worker posts to the daemon at the end of a phase attempt (spec §27). */
+/** The observability payload the worker posts to the daemon at the end of a phase attempt. */
 export const PhaseObservabilitySchema = z.object({
   taskId: z.string(),
   runId: z.string(),
@@ -85,7 +85,7 @@ export const PhaseObservabilitySchema = z.object({
 });
 export type PhaseObservability = z.infer<typeof PhaseObservabilitySchema>;
 
-/** By-model token/cost rollup for `task show` (spec §27 "not just the flat total"). */
+/** By-model token/cost rollup for `task show` ("not just the flat total"). */
 export const TokenBreakdownSchema = z.object({
   totals: z.object({
     inputTokens: z.number().int().nonnegative(),

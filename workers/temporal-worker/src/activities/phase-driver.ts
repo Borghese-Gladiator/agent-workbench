@@ -16,8 +16,8 @@ import type { ControlPlaneEmitter } from './control-plane-events.js';
 import { runIdForTask } from '@awb/database';
 
 /**
- * Per-runPhase-invocation usage accumulator (TASK-11), carried on the driver's `PhaseContext`
- * instead of a module-level global (TASK-30). Each phase's agent sessions call `record` with the
+ * Per-runPhase-invocation usage accumulator, carried on the driver's `PhaseContext`
+ * instead of a module-level global. Each phase's agent sessions call `record` with the
  * adapter's reported tokens + measured wall-clock; the driver reads `forResult()` back and attaches
  * it to the PhaseAttemptResult so the Workflow can accumulate `tokenUsageTotal` + `runtimeMsByPhase`.
  * A fresh instance per invocation removes the reset-a-global dance the old code needed.
@@ -42,10 +42,10 @@ export class UsageAccumulator {
 }
 
 /**
- * Phase-level lifecycle event the driver emits around every attempt. This is the single hook TASK-22
- * wires a real `SemanticEventBus`/SQLite sink into; today it defaults to a no-op so behavior is
+ * Phase-level lifecycle event the driver emits around every attempt. This is the single hook a real
+ * `SemanticEventBus`/SQLite sink wires into; today it defaults to a no-op so behavior is
  * unchanged (only per-agent-turn events reach a sink; there is no phase-level event yet). The
- * `phase.completed` event carries the rolled-up usage so TASK-22 can route it to `UsageAggregator`
+ * `phase.completed` event carries the rolled-up usage so it can be routed to `UsageAggregator`
  * without reaching into a global.
  */
 export type PhaseEvent =
@@ -67,8 +67,8 @@ export const NOOP_PHASE_EVENT_EMITTER: PhaseEventEmitter = () => {};
  * Everything a phase handler needs for one attempt, threaded by the driver: the Workflow state, the
  * task's accumulated `TaskRunState`, the store (so a handler that mutates `runState` persists it),
  * the runtime strategy resolved ONCE at driver entry (so no handler re-decides real-vs-mock per
- * phase — TASK-29), the per-invocation usage accumulator (TASK-30, was a module global), and the
- * phase-event emitter (TASK-22 seam).
+ * phase), the per-invocation usage accumulator (was a module global), and the
+ * phase-event emitter seam.
  */
 export interface PhaseContext {
   state: TaskWorkflowState;
@@ -76,11 +76,11 @@ export interface PhaseContext {
   store: RunStateStore;
   /**
    * The selected runtime name, kept for adapter selection + the observability `runtime:` label. Do
-   * NOT branch real-vs-mock on this (that was the TASK-38 anti-pattern) — ask `profile` instead.
+   * NOT branch real-vs-mock on this (that was the anti-pattern) — ask `profile` instead.
    */
   strategy: AgentRuntime;
   /**
-   * The RuntimeProfile for `strategy`, resolved once at driver entry (TASK-38). Every real-vs-mock
+   * The RuntimeProfile for `strategy`, resolved once at driver entry. Every real-vs-mock
    * decision in a phase handler routes through a capability on this profile (`usesRealAgent`,
    * `usesRealWorktree`, `usesDurableRunState`, `usesSdkToolNames`) so "run the real path" is a
    * property of the selected runtime, not a string equality on one vendor's name.
@@ -88,12 +88,12 @@ export interface PhaseContext {
   profile: RuntimeProfile;
   usage: UsageAccumulator;
   emit: PhaseEventEmitter;
-  /** §27 runtime-attribution + per-session observability for this attempt (TASK-22). */
+  /** Runtime-attribution + per-session observability for this attempt. */
   observability: ObservabilityAccumulator;
   /** Daemon client for persisting observability; undefined on the mock path (nothing to persist). */
   daemon?: DaemonClient;
   /**
-   * Control-plane lifecycle emitter (TASK-34) so a handler can emit session-started/session-resumed
+   * Control-plane lifecycle emitter so a handler can emit session-started/session-resumed
    * with the cwd + resume key each session ran under. Undefined on the mock path (no daemon to post to).
    */
   controlPlane?: ControlPlaneEmitter;
@@ -117,8 +117,8 @@ export type PhaseOutcome =
       /** Overrides for the completion candidate literal (versions/SHAs); the rest is boilerplate. */
       candidateOverrides?: Partial<CompletionCandidate>;
       /**
-       * Extra fields to attach to a `candidate` PhaseAttemptResult beyond the candidate itself
-       * (TASK-51): specify uses this to report the classified `size` to the Workflow. Ignored on a
+       * Extra fields to attach to a `candidate` PhaseAttemptResult beyond the candidate itself:
+       * specify uses this to report the classified `size` to the Workflow. Ignored on a
        * non-complete (blocked) decision.
        */
       candidateExtra?: { size?: TaskSize };
@@ -170,7 +170,7 @@ export function blockedResult(phase: TaskPhase, missing: string[]): PhaseAttempt
 }
 
 /**
- * The shared driver TASK-28 factors out of the nine `runX` functions: emit `phase.started`, run the
+ * The shared driver factored out of the nine `runX` functions: emit `phase.started`, run the
  * handler, and for the `evaluate` path build the boilerplate candidate, call
  * `evaluatePhaseCompletion` once, and map the decision (complete → candidate; else → the handler's
  * `onBlocked` or `blockedResult`). Handler mutations to `ctx.runState` are persisted via the store,
@@ -201,7 +201,7 @@ export async function drivePhase(handler: PhaseHandler, ctx: PhaseContext): Prom
     const decision = evaluatePhaseCompletion(candidate, outcome.completion);
     if (decision.complete) {
       result = candidateResult(candidate);
-      // Attach the classified size (TASK-51) so the Workflow can derive the run's phase set.
+      // Attach the classified size so the Workflow can derive the run's phase set.
       if (outcome.candidateExtra?.size && result.outcome === 'candidate') {
         result = { ...result, size: outcome.candidateExtra.size };
       }
@@ -213,7 +213,7 @@ export async function drivePhase(handler: PhaseHandler, ctx: PhaseContext): Prom
   }
 
   // Attach the agent usage this attempt accumulated so the Workflow can aggregate token +
-  // per-phase runtime totals (TASK-11). undefined when no agent session ran (or on the mock
+  // per-phase runtime totals. undefined when no agent session ran (or on the mock
   // runtime, whose adapter reports no usage) — the Workflow simply skips accumulation then.
   const usage = ctx.usage.forResult();
   if (usage) result = { ...result, usage };
@@ -227,7 +227,7 @@ export async function drivePhase(handler: PhaseHandler, ctx: PhaseContext): Prom
     usage,
   });
 
-  // Persist §27 observability for this attempt (runtime-attribution buckets + agent sessions +
+  // Persist observability for this attempt (runtime-attribution buckets + agent sessions +
   // model invocations + context composition). Best-effort: a failed persist never fails the phase.
   if (ctx.daemon) {
     const payload = ctx.observability.toPayload({

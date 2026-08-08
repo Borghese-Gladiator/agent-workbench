@@ -20,7 +20,7 @@ export interface ClassifySizeInput {
   attemptNumber: number;
   cwd: string;
   /**
-   * Whether to spend a real model call for the authoritative classification (TASK-38 profile-driven:
+   * Whether to spend a real model call for the authoritative classification (profile-driven:
    * pass `profile.usesSdkToolNames`). When false, no authoritative call is made and the result is
    * `undefined` so the contract's `size ?? 'M'` default applies — the mock runtime stays model-free.
    */
@@ -35,7 +35,7 @@ export interface ClassifySizeInput {
 }
 
 /**
- * Orchestrates size classification (TASK-51): runs the authoritative (Claude/Haiku) classifier and,
+ * Orchestrates size classification: runs the authoritative (Claude/Haiku) classifier and,
  * when the shadow evaluator is enabled (`AWB_CLASSIFIER_SHADOW=1`), the LOCAL (Ollama) classifier in
  * parallel, then records the comparison. Both classifiers live in `size-classifiers.ts` as sibling
  * functions; this module only decides when to run each and how to report. Returns the AUTHORITATIVE
@@ -65,8 +65,8 @@ export async function classifyTaskSize(input: ClassifySizeInput): Promise<SizeCl
 }
 
 /**
- * Records the Claude-vs-local comparison BOTH as a durable semantic event (queryable per-run, feeds
- * TASK-61) and a daemon.log line (quick eyeballing). Best-effort — never throws.
+ * Records the Claude-vs-local comparison BOTH as a durable semantic event (queryable per-run) and a
+ * daemon.log line (quick eyeballing). Best-effort — never throws.
  */
 async function recordShadowComparison(
   input: ClassifySizeInput,

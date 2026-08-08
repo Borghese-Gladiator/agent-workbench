@@ -35,7 +35,6 @@ describe('draftContract', () => {
     expect(new Set(ids).size).toBe(2);
   });
 
-  // TASK-54: problem statement.
   it('defaults the problem statement to the objective', () => {
     const contract = draftContract({ taskId: 'task-1', objective: 'Add dark mode', claims: [baseClaim] });
     expect(contract.problemStatement).toBe('Add dark mode');
@@ -117,7 +116,6 @@ describe('contractCompletionInputs', () => {
     expect(contractCompletionInputs(contract, true).objectiveNonEmpty).toBe(false);
   });
 
-  // TASK-54: reviewer-alignment before implementation.
   it('reports the problem statement present for a drafted contract', () => {
     const contract = draftContract({ taskId: 'task-1', objective: 'Add dark mode', claims: [baseClaim] });
     expect(contractCompletionInputs(contract, true).problemStatementPresent).toBe(true);

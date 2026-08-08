@@ -38,7 +38,7 @@ describe('derivePrTitle', () => {
     expect(derivePrTitle('', ['portal/src/Portal.jsx'])).toBe('Update portal/src');
   });
 
-  // TASK-40: repo-name scope prefix is dropped; truncation lands on a word boundary.
+  // Repo-name scope prefix is dropped; truncation lands on a word boundary.
   it('drops the scope prefix when the scope is just the target repo name', () => {
     const title = derivePrTitle(
       'In wip-browser-games, add a one-line note to README.md stating how many games are available',
@@ -66,7 +66,7 @@ describe('derivePrTitle', () => {
     expect(beforeEllipsis.split(' ').pop()).not.toBe('');
   });
 
-  // TASK-41: mechanizable house-style rules — the renderer never injects a bot prefix.
+  // Mechanizable house-style rules — the renderer never injects a bot prefix.
   it('never injects an [AWB]/bot prefix into the title', () => {
     expect(derivePrTitle('add a dark-mode toggle to settings')).not.toContain('[AWB]');
     expect(derivePrTitle('In the portal header, show the game count', [], 'other-repo')).not.toContain('[AWB]');
@@ -101,7 +101,7 @@ describe('renderPrBody', () => {
     expect(body).toContain('❌ **unit-test** — boom');
   });
 
-  // TASK-41: the objective lives in Background; Changes must NOT re-narrate the whole prompt.
+  // The objective lives in Background; Changes must NOT re-narrate the whole prompt.
   it('does not echo the whole objective inside the Changes section', () => {
     const objective =
       'In wip-browser-games, add a one-line note to README.md stating how many games are available in the portal';
@@ -144,7 +144,7 @@ describe('renderQaMediaSection', () => {
     expect(section).not.toContain('undefined');
   });
 
-  // TASK-58: a GIF is embedded inline (image markdown) as the primary recording; the WEBM demotes
+  // A GIF is embedded inline (image markdown) as the primary recording; the WEBM demotes
   // to a secondary full-fidelity link (NOT the blob-view player).
   it('embeds the GIF inline and keeps the WEBM as a secondary link when both are present', () => {
     const section = renderQaMediaSection({

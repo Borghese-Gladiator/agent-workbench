@@ -86,7 +86,7 @@ export async function discoverUnits(rootDir: string): Promise<RepositoryUnit[]> 
   }
   // Workspace-declared packages (npm/yarn `workspaces`, pnpm-workspace.yaml) may live outside the
   // conventional container dirs (e.g. `games/*`, `portal`) or be nested (`packages/engines/*`), so
-  // discovery must honor the declared globs too (TASK-8). Only dirs with a manifest are kept.
+  // discovery must honor the declared globs too. Only dirs with a manifest are kept.
   const workspaceGlobs = await readWorkspaceGlobs(rootDir);
   for (const dir of await expandWorkspaceGlobs(rootDir, workspaceGlobs)) {
     if (await pathExists(join(dir, 'package.json'))) candidateSet.add(dir);
@@ -95,8 +95,8 @@ export async function discoverUnits(rootDir: string): Promise<RepositoryUnit[]> 
 
   // The root is a discoverable unit in its own right — critically, in a workspace repo whose test/
   // build scripts live in the ROOT package.json (e.g. a single root `vitest run` covering every
-  // workspace package), dropping it here was exactly why refresh discovered 0 verification commands
-  // (TASK-8). Always include the root when it classifies, alongside any sub-packages.
+  // workspace package), dropping it here was exactly why refresh discovered 0 verification commands.
+  // Always include the root when it classifies, alongside any sub-packages.
   if (rootClassification) {
     units.push({
       id: randomUUID(),

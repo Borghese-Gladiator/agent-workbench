@@ -6,11 +6,11 @@ import { getRepository, refreshRepositorySnapshot } from '@awb/repository';
 import type { SemanticEventBus } from '../event-bus.js';
 
 /**
- * Internal worker→daemon data channel (TASK-21/27). The worker's Activities hold only a read-only DB
+ * Internal worker→daemon data channel. The worker's Activities hold only a read-only DB
  * handle; every WRITE they need goes through these loopback-only routes so the daemon stays the
  * single application writer (spec §8 / docs/storage.md). Not a public API — the daemon binds
  * 127.0.0.1 only (server.ts). A failed persist returns a non-2xx so the worker fails the phase
- * rather than advancing on unpersisted state (Decision 003).
+ * rather than advancing on unpersisted state.
  */
 export function registerInternalRoutes(
   app: FastifyInstance,
@@ -62,7 +62,7 @@ export function registerInternalRoutes(
     }
   });
 
-  // The real discovery write (spec §9/§15, TASK-26), invoked by the RepositoryDiscoveryWorkflow's
+  // The real discovery write, invoked by the RepositoryDiscoveryWorkflow's
   // discoverRepository activity. The write stays daemon-side (single writer); the public
   // /api/repositories/:id/refresh route starts the workflow rather than writing inline.
   app.post<{ Params: { id: string } }>('/internal/repositories/:id/discover', async (request, reply) => {

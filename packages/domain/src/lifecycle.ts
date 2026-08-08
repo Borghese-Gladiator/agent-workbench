@@ -95,7 +95,7 @@ export type FindingRef = z.infer<typeof FindingRefSchema>;
 
 /**
  * Aggregate agent usage a phase attempt consumed, reported by the Activity back to the Workflow so
- * it can accumulate `tokenUsageTotal` + `runtimeMsByPhase` (TASK-11). Optional on every result
+ * it can accumulate `tokenUsageTotal` + `runtimeMsByPhase`. Optional on every result
  * variant — phases with no agent session (or the mock runtime) simply omit it.
  */
 export const PhaseUsageSchema = z.object({
@@ -111,7 +111,7 @@ export const PhaseAttemptResultSchema = z.discriminatedUnion('outcome', [
     candidate: CompletionCandidateSchema,
     usage: PhaseUsageSchema.optional(),
     /**
-     * The task size the specify phase classified (TASK-51). Only the specify candidate sets this; the
+     * The task size the specify phase classified. Only the specify candidate sets this; the
      * Workflow reads it to derive the run's `phaseSet`. Omitted by every other phase.
      */
     size: TaskSizeSchema.optional(),
@@ -124,7 +124,7 @@ export const PhaseAttemptResultSchema = z.discriminatedUnion('outcome', [
   }),
   z.object({
     outcome: z.literal('replan'),
-    // `program-design` is a valid replan target on L runs (TASK-60): a structural finding routes to
+    // `program-design` is a valid replan target on L runs: a structural finding routes to
     // the program-design phase, not plan. M/S runs (no program-design phase) still use plan/specify.
     target: z.enum(['plan', 'program-design', 'specify']),
     findings: z.array(FindingRefSchema),

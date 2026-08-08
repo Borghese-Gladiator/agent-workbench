@@ -1,7 +1,7 @@
 import type { FindingCategory, TaskPhase } from '@awb/domain';
 
 /**
- * Loop-routing table (product spec §12). Given the phase a "repair"/"replan" outcome originated
+ * Loop-routing table. Given the phase a "repair"/"replan" outcome originated
  * from and, where relevant, the category of the finding that triggered it, determines which
  * phase the Workflow should route back to. Pure lookup — no I/O, no agent involvement.
  */
@@ -14,11 +14,11 @@ export type LoopTrigger =
   | { kind: 'release-candidate-sha-changed' };
 
 /**
- * `phaseSet` is the run's ordered phase list (TASK-51). It matters only for structural loop-backs:
+ * `phaseSet` is the run's ordered phase list. It matters only for structural loop-backs:
  * a "the structure is wrong" finding (architecture / design-misunderstanding) routes to
- * `program-design` when the run HAS that phase (L tasks — TASK-60), otherwise to `plan`. Passing
- * `undefined` (or a set without `program-design`) preserves the pre-TASK-60 behavior of routing to
- * `plan`, so M/S runs and callers that don't track the phase set are unaffected.
+ * `program-design` when the run HAS that phase (L tasks), otherwise to `plan`. Passing
+ * `undefined` (or a set without `program-design`) routes to `plan`, so M/S runs and callers that
+ * don't track the phase set are unaffected.
  */
 export function routeLoop(trigger: LoopTrigger, phaseSet?: TaskPhase[]): TaskPhase {
   switch (trigger.kind) {
@@ -39,7 +39,7 @@ export function routeLoop(trigger: LoopTrigger, phaseSet?: TaskPhase[]): TaskPha
 
 /**
  * The phase that owns structural review for this run: `program-design` when the run walks it (L),
- * else `plan`. This is the single place TASK-60's "route structure findings to the structure phase"
+ * else `plan`. This is the single place the "route structure findings to the structure phase"
  * decision lives.
  */
 function structuralReviewPhase(phaseSet: TaskPhase[] | undefined): TaskPhase {
@@ -59,7 +59,7 @@ function routeChallengeFinding(category: FindingCategory, phaseSet: TaskPhase[] 
 
 /**
  * Escalation triggers that must produce a HumanGate rather than another loop iteration, even
- * though the phase itself hasn't reached a terminal outcome (product spec §12, §14).
+ * though the phase itself hasn't reached a terminal outcome.
  */
 export type EscalationTrigger =
   | { kind: 'repeated-identical-failure'; occurrences: number; threshold: number }

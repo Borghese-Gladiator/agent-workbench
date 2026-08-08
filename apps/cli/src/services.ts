@@ -6,7 +6,7 @@ import { resolveLayout } from '@awb/config';
 export const DAEMON_PORT = 4417;
 export const TEMPORAL_PORT = 7233;
 export const UI_PORT = 5317;
-/** OTLP/HTTP receiver port of the local collector (grafana/otel-lgtm all-in-one), TASK-34. */
+/** OTLP/HTTP receiver port of the local collector (grafana/otel-lgtm all-in-one). */
 export const OTEL_OTLP_PORT = 4318;
 /** The collector's Grafana UI port (traces/metrics/logs explorer). */
 export const OTEL_UI_PORT = 3000;
@@ -17,7 +17,7 @@ export type ServiceKey = 'temporal' | 'worker' | 'daemon' | 'ui' | 'otel';
 
 /**
  * Services that make up the core runtime, in start order. The OTel collector starts FIRST so the
- * worker + daemon see `OTEL_EXPORTER_OTLP_ENDPOINT` at boot and export from their first span (TASK-34).
+ * worker + daemon see `OTEL_EXPORTER_OTLP_ENDPOINT` at boot and export from their first span.
  * `ui` is intentionally excluded from `up`.
  */
 export const RUNTIME_SERVICES: ServiceKey[] = ['otel', 'temporal', 'worker', 'daemon'];
@@ -127,7 +127,7 @@ export function serviceDefinitions(mode: RuntimeMode = resolveRuntimeMode()): Re
       label: 'OTel collector (grafana/otel-lgtm)',
       // All-in-one collector: OTLP receiver + Tempo (traces) + Prometheus (metrics) + Loki (logs) + a
       // Grafana explorer on 3000. Run under Docker so `awb up` needs no separate binary install; --rm
-      // keeps it disposable (traces/metrics are diagnostics, not durable product data — ADR-008). Named
+      // keeps it disposable (traces/metrics are diagnostics, not durable product data). Named
       // so `down`/restart can target it. We publish only OTLP/HTTP (4318, what @awb/telemetry exports to)
       // and Grafana (3000); the gRPC receiver (4317) is left unpublished so this never collides with an
       // unrelated collector already holding 4317 on the host.

@@ -23,18 +23,18 @@ export interface TaskWorkflowState {
   tokenUsageTotal: { inputTokens: number; outputTokens: number };
   runtimeMsByPhase: Partial<Record<TaskPhase, number>>;
   /**
-   * Task size class (TASK-51), set once the specify phase's classifier runs (or seeded from an
+   * Task size class, set once the specify phase's classifier runs (or seeded from an
    * intake hint / gate-time override). Drives `phaseSet`. Undefined until specify completes.
    */
   size?: TaskSize;
   /**
-   * The ordered subset of `TASK_PHASE_ORDER` this run actually walks (TASK-51). Derived from `size`
+   * The ordered subset of `TASK_PHASE_ORDER` this run actually walks. Derived from `size`
    * when leaving specify; `nextPhase` walks this instead of the module constant. Undefined before
    * specify sets it, in which case advancement falls back to the full order.
    */
   phaseSet?: TaskPhase[];
   /**
-   * True when a human set `size` at the contract gate (TASK-51). The specify candidate's classifier
+   * True when a human set `size` at the contract gate. The specify candidate's classifier
    * result must NOT overwrite a human override, so this pins the size against the classifier.
    */
   sizeHumanOverridden?: boolean;
@@ -47,7 +47,7 @@ export interface TaskWorkflowInput {
   /** Optional intake size hint (e.g. CLI `--size`); the specify classifier uses it as a prior/override. */
   size?: TaskSize;
   /**
-   * Present only on a continue-as-new re-seed (spec §34): the full coordination state carried over
+   * Present only on a continue-as-new re-seed: the full coordination state carried over
    * from the previous run so the new execution resumes exactly where the old one left off, with a
    * fresh (empty) event history. Absent on the initial start.
    */

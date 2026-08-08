@@ -106,12 +106,12 @@ export interface ClaudeSdkQueryOptions {
   /**
    * Tools to DENY (the SDK's `disallowedTools`). A bare tool name removes the tool from the session
    * entirely, in every permission mode INCLUDING `bypassPermissions` — this is what actually enforces
-   * a read-only role's capability scope (TASK-24, §18/§33).
+   * a read-only role's capability scope.
    */
   disallowedTools?: string[];
   maxTurns?: number;
   resume?: string;
-  /** Provider model to use for this query (TASK-51); when omitted the SDK uses its default model. */
+  /** Provider model to use for this query; when omitted the SDK uses its default model. */
   model?: string;
   abortController?: AbortController;
   /**
@@ -148,7 +148,7 @@ export class CompletionError extends Error {
 
 /**
  * Single-turn text completion over the SDK — no tools, no session, just prompt → text. For synthesis
- * steps that are not the full agent loop (e.g. the repository-memory compile/lint passes, TASK-50).
+ * steps that are not the full agent loop (e.g. the repository-memory compile/lint passes).
  * The `queryFn` seam lets a test supply a scripted generator instead of spawning Claude Code.
  *
  * Fails LOUDLY (throws `CompletionError`) rather than returning '' so a caller can never mistake a
@@ -186,11 +186,11 @@ export async function completeOnce(prompt: string, queryFn: ClaudeQueryFn = real
 interface ClaudeSessionState {
   cwd: string;
   allowedTools: string[];
-  /** Tools denied for this session; enforced via the SDK's `disallowedTools` (TASK-24). */
+  /** Tools denied for this session; enforced via the SDK's `disallowedTools`. */
   disallowedTools: string[];
   /** The caller's context payload (contract/plan/diff/evidence), serialized into the first prompt. */
   contextPayload: unknown;
-  /** Optional provider model override for this session (TASK-51). */
+  /** Optional provider model override for this session. */
   model?: string;
   resumeSessionId?: string;
   liveQuery?: ClaudeSdkQueryHandle;
@@ -252,7 +252,7 @@ function primaryUsage(modelUsage: Record<string, ClaudeSdkModelUsage> | undefine
 
 /**
  * Real CodingAgentAdapter backed by `@anthropic-ai/claude-agent-sdk`'s `query()` streaming API
- * (product spec §19: use the SDK's structured event stream, not CLI text parsing).
+ * (uses the SDK's structured event stream, not CLI text parsing).
  */
 export class ClaudeAgentAdapter implements CodingAgentAdapter {
   readonly id = 'claude-agent-sdk';
@@ -265,7 +265,7 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
   }
 
   async createSession(input: CreateAgentSessionInput): Promise<AgentSession> {
-    // The cwd MUST be absolute (TASK-31): a relative or empty cwd would resolve against the SDK
+    // The cwd MUST be absolute: a relative or empty cwd would resolve against the SDK
     // subprocess's own working directory (the worker/workbench repo), letting path-less agent
     // discovery drift out of the pinned task worktree. Fail loudly rather than silently drift.
     if (!input.cwd || !isAbsolute(input.cwd)) {
@@ -284,7 +284,7 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
       disallowedTools: input.disallowedTools ?? [],
       contextPayload: input.contextPayload,
       model: input.model,
-      // TASK-32: seed the resume token if the caller is resuming a prior (possibly cross-process)
+      // Seed the resume token if the caller is resuming a prior (possibly cross-process)
       // session. When set, `execute` skips the context preamble and passes `resume` to the SDK.
       resumeSessionId: input.resumeSessionId,
     });
@@ -323,7 +323,7 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
         cwd: state.cwd,
         // allowedTools auto-approves the granted tools (no prompt in the headless worker);
         // disallowedTools hard-removes everything else, enforced even under bypassPermissions —
-        // this is what makes a read-only role provably unable to Write/Edit/Bash (TASK-24, §18/§33).
+        // this is what makes a read-only role provably unable to Write/Edit/Bash.
         allowedTools: state.allowedTools,
         disallowedTools: state.disallowedTools,
         maxTurns: assignment.stopConditions?.maxTurns,
@@ -413,7 +413,7 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
       usage,
       summary: summary || (completed ? 'execution completed' : 'interrupted during execution'),
       // Surface the SDK's resumable session_id (captured into state above) so callers can persist it
-      // durably and resume this transcript on a later attempt (TASK-32).
+      // durably and resume this transcript on a later attempt.
       sessionId: state.resumeSessionId,
     };
   }

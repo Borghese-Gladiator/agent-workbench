@@ -1,8 +1,8 @@
 import type { TaskPhase, TaskSize } from '@awb/domain';
 
 /**
- * The canonical full lifecycle order (product spec §9 + TASK-52's program-design). `assimilate` is
- * terminal. This is the SUPERSET + ordering source; a given run walks a per-run `phaseSet` (TASK-51)
+ * The canonical full lifecycle order, including program-design. `assimilate` is
+ * terminal. This is the SUPERSET + ordering source; a given run walks a per-run `phaseSet`
  * that is a subset of this — S/M tasks omit some of the planning phases (`plan`, `program-design`).
  */
 export const TASK_PHASE_ORDER: TaskPhase[] = [
@@ -19,7 +19,7 @@ export const TASK_PHASE_ORDER: TaskPhase[] = [
 ];
 
 /**
- * The planning phases sizing may skip (TASK-51). Every OTHER phase — specify, prepare, implement,
+ * The planning phases sizing may skip. Every OTHER phase — specify, prepare, implement,
  * verify, exercise, challenge, release, assimilate — always runs, regardless of size, so QA/verify/
  * review guarantees are never weakened by a smaller size.
  */
@@ -33,7 +33,7 @@ const SKIPPABLE_PLANNING_PHASES: Record<TaskSize, TaskPhase[]> = {
 };
 
 /**
- * The ordered subset of `TASK_PHASE_ORDER` a run of the given size walks (TASK-51). A subset of the
+ * The ordered subset of `TASK_PHASE_ORDER` a run of the given size walks. A subset of the
  * full order with the size's skippable planning phases removed; ordering is preserved.
  */
 export function phaseSetForSize(size: TaskSize): TaskPhase[] {
@@ -42,7 +42,7 @@ export function phaseSetForSize(size: TaskSize): TaskPhase[] {
 }
 
 /**
- * The phase after `phase` within a specific run's ordered `phaseSet` (TASK-51). Falls back to the
+ * The phase after `phase` within a specific run's ordered `phaseSet`. Falls back to the
  * full order when no per-run set is threaded (initial start before specify sets one), and to
  * `assimilate` past the end. Pure — no I/O — so it stays inside the deterministic Workflow.
  */

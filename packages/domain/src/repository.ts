@@ -128,7 +128,7 @@ export const RepositoryFactKindSchema = z.enum([
   'service',
   'risk',
   'pitfall',
-  // Synthesized by the compile pass (TASK-50): a denser per-concept summary that clusters and
+  // Synthesized by the compile pass: a denser per-concept summary that clusters and
   // backlinks several atomic facts, preserving their union provenance. Not extracted from source.
   'concept',
 ]);

@@ -1,4 +1,4 @@
-// TASK-42 end-to-end proof: real chromium QA (@awb/qa runBrowserQa) wired to the real completion
+// End-to-end proof: real chromium QA (@awb/qa runBrowserQa) wired to the real completion
 // gate (@awb/workflow evaluatePhaseCompletion) exactly the way the exercise phase does it in
 // run-phase.ts — no mocks. Demonstrates that the gate BLOCKS a broken feature and CLEARS a correct
 // one, so "run success" now means "working artifact", not "the page loaded".

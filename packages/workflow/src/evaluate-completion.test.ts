@@ -65,7 +65,6 @@ describe('evaluatePhaseCompletion — specify', () => {
     expect(evaluatePhaseCompletion(candidateFor('specify'), ctx).complete).toBe(false);
   });
 
-  // TASK-54: reviewer-alignment before implementation.
   it('is not complete when the problem statement is empty', () => {
     const ctx: CompletionContext = {
       specify: { ...completeContext.specify!, problemStatementPresent: false },
@@ -300,7 +299,7 @@ describe('evaluatePhaseCompletion — exercise', () => {
     expect(evaluatePhaseCompletion(candidateFor('exercise'), ctx).complete).toBe(false);
   });
 
-  // TASK-42: a behavioral claim covered only by liveness assertions must not clear the gate.
+  // A behavioral claim covered only by liveness assertions must not clear the gate.
   it('is not complete when a behavioral claim lacks a strong assertion', () => {
     const ctx: CompletionContext = {
       exercise: { ...completeContext.exercise!, behavioralClaimsMissingStrongAssertion: ['claim-1'] },

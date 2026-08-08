@@ -34,7 +34,7 @@ export const TaskRiskSchema = z.enum(['low', 'medium', 'high']);
 export type TaskRisk = z.infer<typeof TaskRiskSchema>;
 
 /**
- * Task size class (TASK-51 / WSFF 80/20). Drives which planning phases run: `S` skips plan +
+ * Task size class (WSFF 80/20). Drives which planning phases run: `S` skips plan +
  * program-design (single-shot straight to a slice), `M` runs one combined plan artifact but skips
  * program-design, `L` runs the full plan + program-design. Lives on the contract (like `risk`) so a
  * human sees it and can override it at the contract gate.
@@ -48,7 +48,7 @@ export const TaskContractSchema = z.object({
   version: z.number().int().positive(),
   objective: z.string(),
   /**
-   * TASK-54: the problem the task solves, aligned on with the human at the specify gate before any
+   * The problem the task solves, aligned on with the human at the specify gate before any
    * planning spend. What the acceptance claims must satisfy is captured by `claims`; this is the
    * human-facing "why".
    */

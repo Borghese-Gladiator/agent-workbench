@@ -6,7 +6,7 @@ interface GatePanelProps {
   taskId: string;
   phase: TaskWorkflowState['phase'];
   gate: NonNullable<TaskWorkflowState['pendingHumanGate']>;
-  /** The classified size shown at the contract gate; the human may override it before approving (TASK-51). */
+  /** The classified size shown at the contract gate; the human may override it before approving. */
   size?: TaskSize;
   busy: boolean;
   onApproveContract: (sizeOverride?: TaskSize) => void;

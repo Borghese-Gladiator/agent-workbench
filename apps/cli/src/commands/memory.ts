@@ -8,7 +8,7 @@ import { emitJson, outputOptions, printInfo, printResult } from '../output.js';
 
 /**
  * `awb memory` — on-demand knowledge-base maintenance over a repository's accumulated facts
- * (TASK-50, Karpathy KB workflow). `compile` densifies atomic facts into linked concept summaries;
+ * (Karpathy KB workflow). `compile` densifies atomic facts into linked concept summaries;
  * `lint` reports contradictions/staleness; `sync` regenerates the markdown file projection. All
  * operate directly on the workbench DB, mirroring `awb repo`'s data-access shape.
  */

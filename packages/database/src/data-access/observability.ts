@@ -10,7 +10,7 @@ import type { DrizzleDb } from '../connection.js';
 import { ensureRunAndPhaseAttempt } from './tasks.js';
 
 /**
- * Persists a phase attempt's observability (spec §27, TASK-22): agent_sessions + their
+ * Persists a phase attempt's observability: agent_sessions + their
  * model_invocations, the per-attempt runtime-attribution buckets, and per-session context-composition
  * buckets. Written only by the daemon (single writer). Idempotent per id so a phase re-run overwrites
  * rather than duplicates.
@@ -92,8 +92,8 @@ export function persistPhaseObservability(db: DrizzleDb, payload: PhaseObservabi
 }
 
 /**
- * By-model token/cost rollup for a task (spec §27 — the finer breakdown `task show` reports beyond
- * the flat total). Joins model_invocations through agent_sessions to the task.
+ * By-model token/cost rollup for a task — the finer breakdown `task show` reports beyond
+ * the flat total. Joins model_invocations through agent_sessions to the task.
  */
 export function getTokenBreakdown(db: DrizzleDb, taskId: string): TokenBreakdown {
   const rows = db
@@ -146,7 +146,7 @@ export function getRuntimeAttribution(db: DrizzleDb, taskId: string) {
 
 /**
  * Reconstructs the builder's per-slice resume tokens for a task from the persisted `agent_sessions`
- * rows (TASK-32). The implement phase writes one session per slice with id
+ * rows. The implement phase writes one session per slice with id
  * `${taskId}-implement-${attempt}-${sliceId}` and its `resume_session_id`; this parses the slice id
  * back out (the id is opaque otherwise) and keeps the latest non-null token per slice, so a worker
  * restart resumes each slice's transcript. Returns undefined when no resume tokens are persisted.

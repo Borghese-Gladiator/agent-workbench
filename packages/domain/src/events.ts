@@ -11,7 +11,7 @@ export const EventProducerSchema = z.enum([
   'reviewer',
   'tool',
   // The control plane itself (run-phase driver / retry boundary), distinct from any agent role.
-  // Emits lifecycle events (phase started/failed, retry scheduled, transport drop) — TASK-34.
+  // Emits lifecycle events (phase started/failed, retry scheduled, transport drop).
   'workbench',
 ]);
 export type EventProducer = z.infer<typeof EventProducerSchema>;
@@ -27,7 +27,7 @@ export const EventTypeSchema = z.enum([
   'usage-reported',
   'status-changed',
   'message',
-  // Control-plane lifecycle events (TASK-34) — emitted by the 'workbench' producer, not an agent.
+  // Control-plane lifecycle events — emitted by the 'workbench' producer, not an agent.
   // These make a phase failing / retrying / a transport drop first-class in the durable stream
   // instead of an undifferentiated 'message' or a stderr-only [WARN] line.
   'phase-started',

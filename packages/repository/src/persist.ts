@@ -25,7 +25,7 @@ export interface RegisterRepositoryOptions {
 }
 
 /**
- * Registers a repository (spec §15 onboarding step 1-2): validates it's a real Git repo, records
+ * Registers a repository: validates it's a real Git repo, records
  * it in the `repositories` table as untrusted, and returns the row. Does not run full discovery —
  * call `refreshRepositorySnapshot` separately so callers can gate expensive discovery behind
  * explicit confirmation.
@@ -129,8 +129,8 @@ export async function approveRepository(db: DrizzleDb, repositoryId: string): Pr
 }
 
 /**
- * Runs full discovery for a repository and persists the resulting snapshot (spec §15-16 steps
- * 2-6). Safe to call repeatedly — each call inserts a new snapshot row rather than mutating a
+ * Runs full discovery for a repository and persists the resulting snapshot. Safe to call
+ * repeatedly — each call inserts a new snapshot row rather than mutating a
  * prior one, since snapshots are point-in-time by design.
  */
 export async function refreshRepositorySnapshot(
@@ -205,7 +205,7 @@ export async function refreshRepositorySnapshot(
 
   // Persist the discovery facts (previously computed on `snapshot.facts` then discarded — the missing
   // memory write). Refresh semantics: replace this repo's prior DISCOVERY facts (re-derived every
-  // discovery), but PRESERVE compiled `concept` facts (TASK-50) so accumulated synthesis survives a
+  // discovery), but PRESERVE compiled `concept` facts so accumulated synthesis survives a
   // re-scan. Facts remain traceable via their sourcePaths/sourceHashes provenance.
   await persistDiscoveryFacts(db, repository.id, snapshot.facts);
 

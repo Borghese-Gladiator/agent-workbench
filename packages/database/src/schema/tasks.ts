@@ -11,7 +11,7 @@ export const tasks = sqliteTable('tasks', {
   phase: text('phase').notNull().$type<TaskPhase>(),
   condition: text('condition').notNull().$type<RunCondition>(),
   deliveryState: text('delivery_state').notNull().$type<DeliveryState>(),
-  /** Task size class (TASK-51); nullable until the specify classifier sets it. */
+  /** Task size class; nullable until the specify classifier sets it. */
   size: text('size').$type<TaskSize>(),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),

@@ -21,7 +21,7 @@ export interface TaskActivities {
 const activities = proxyActivities<TaskActivities>({
   startToCloseTimeout: '30 minutes',
   retry: {
-    // Deterministic engineering failures are never Activity exceptions (spec §12) — only
+    // Deterministic engineering failures are never Activity exceptions — only
     // transient infrastructure failures (provider timeout, GitHub blip, process crash, fs
     // hiccup, upload interruption) retry here.
     maximumAttempts: 3,
@@ -70,7 +70,7 @@ export const getPendingHumanGateQuery = defineQuery<TaskWorkflowState['pendingHu
 const NO_PROGRESS_THRESHOLD = 3;
 
 /**
- * History-length threshold for continue-as-new (spec §34). A long task — especially one that loops
+ * History-length threshold for continue-as-new. A long task — especially one that loops
  * many times through repair/replan, or waits a long time on PR feedback — grows Temporal workflow
  * history unbounded. Past this many events we continue-as-new: re-seed a fresh execution from the
  * current coordination state so history resets while the task proceeds seamlessly.
@@ -131,7 +131,7 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
     if (state.phase !== 'specify' || state.pendingHumanGate?.reason !== 'task-contract-approval') {
       throw ApplicationFailure.nonRetryable('No pending contract approval gate for this task');
     }
-    // A human may override the classifier's size at the gate (TASK-51). When they do, it wins over
+    // A human may override the classifier's size at the gate. When they do, it wins over
     // whatever specify's candidate later reports: pin the size + derived phase set and mark them human-set.
     const override = args?.size;
     state = {
@@ -196,7 +196,7 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
       if (cancelled) break;
     }
 
-    // Continue-as-new before history grows unbounded (spec §34). Do this at the top of the loop —
+    // Continue-as-new before history grows unbounded. Do this at the top of the loop —
     // never mid-phase — and only while running with no pending gate, so the re-seeded execution
     // starts from a clean, resumable coordination state. `state` carries everything the next run needs.
     if (
@@ -216,7 +216,7 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
     const phaseThatRan = state.phase;
     const result = await activities.runPhase({ phase: state.phase, state });
 
-    // Accumulate the agent usage this attempt reported (TASK-11) before routing mutates state.phase.
+    // Accumulate the agent usage this attempt reported before routing mutates state.phase.
     // Tokens sum across the whole task; runtime accumulates per phase across its attempts/loop-backs.
     if (result.usage) {
       state = {
@@ -239,7 +239,7 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
           latestCandidateEvidenceIds: result.candidate.evidenceIds,
           openFindingIds: result.candidate.openFindingIds,
         };
-        // The specify candidate reports the classified size (TASK-51). Adopt it to derive the run's
+        // The specify candidate reports the classified size. Adopt it to derive the run's
         // phase set — UNLESS a human already overrode it at the contract gate, which wins.
         if (phaseThatRan === 'specify' && result.size && !state.sizeHumanOverridden) {
           state = { ...state, size: result.size, phaseSet: phaseSetForSize(result.size) };

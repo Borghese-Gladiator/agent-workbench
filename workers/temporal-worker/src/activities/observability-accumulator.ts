@@ -26,7 +26,7 @@ const ZERO_ATTRIBUTION: RuntimeAttribution = {
 };
 
 /**
- * Per-phase-attempt observability accumulator (spec §27, TASK-22). Handlers add wall-clock into the
+ * Per-phase-attempt observability accumulator. Handlers add wall-clock into the
  * 12 runtime-attribution buckets at the natural seams (model turns, test/QA execution, dependency
  * install, github ops, …) and register each agent session (its model invocations + context makeup).
  * The driver drains it into a `PhaseObservability` payload the daemon persists. A fresh instance per
@@ -67,7 +67,7 @@ export class ObservabilityAccumulator {
     usage?: ModelUsage;
     runtimeMs: number;
     contextComposition?: ContextComposition;
-    /** Provider resume token for this session (TASK-32); persisted so a retry resumes the transcript. */
+    /** Provider resume token for this session; persisted so a retry resumes the transcript. */
     resumeSessionId?: string;
   }): void {
     const now = new Date().toISOString();
@@ -131,7 +131,7 @@ export class ObservabilityAccumulator {
 }
 
 /**
- * Coarse context-composition estimate (spec §27) from an agent session's contextPayload. Token count
+ * Coarse context-composition estimate from an agent session's contextPayload. Token count
  * is approximated as chars/4 (the standard rough heuristic — exact tokenization would need the model's
  * tokenizer and isn't worth it for a UI breakdown). Maps the payload's known shapes to buckets.
  */

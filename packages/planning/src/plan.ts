@@ -27,7 +27,7 @@ function buildClaimCoverage(claims: AcceptanceClaim[], slices: PlanSlice[]): Cla
       // one. (Previously hardcoded to [], which made everyBehavioralClaimHasQaScenario impossible
       // to satisfy — the plan phase then always blocked as repeated-failure-no-progress.)
       qaScenarioIds: [...new Set(coveringSlices.flatMap((s) => s.qaScenarioIds ?? []))],
-      // TASK-42: aggregate the expected per-claim assertions this claim's covering slices declare.
+      // Aggregate the expected per-claim assertions this claim's covering slices declare.
       expectedAssertions: coveringSlices
         .flatMap((s) => s.expectedAssertions ?? [])
         .filter((a) => a.claimId === claim.id),
@@ -74,7 +74,7 @@ export function supersedePlan(plan: ImplementationPlan): ImplementationPlan {
   return { ...plan, status: 'superseded' };
 }
 
-/** True when every acceptance claim maps to at least one plan slice (product spec §11 Plan criterion). */
+/** True when every acceptance claim maps to at least one plan slice. */
 export function everyClaimMappedToSlice(plan: ImplementationPlan): boolean {
   return plan.claimCoverage.every((c) => c.planSliceIds.length > 0);
 }

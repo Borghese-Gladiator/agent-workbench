@@ -104,7 +104,7 @@ export type { TaskRunState } from './run-state-store.js';
 /**
  * Process-wide stores. The mock runtime creates no real DB rows (mock adapter, deterministic tests),
  * so it keeps the in-memory store — every existing test is unchanged. The claude runtime uses the
- * durable SQLite-backed store (TASK-27) so a worker restart mid-task resumes with real state. Set
+ * durable SQLite-backed store so a worker restart mid-task resumes with real state. Set
  * `AWB_DURABLE_RUN_STATE=0` to force the in-memory store even on claude (e.g. a daemon-less smoke run).
  */
 const inMemoryStore: RunStateStore = new InMemoryRunStateStore();
@@ -135,7 +135,7 @@ function allowedToolsForBrokerRole(
 }
 
 /**
- * The SDK tools this role must be DENIED (TASK-24, §18/§33). The SDK's `allowedTools` only
+ * The SDK tools this role must be DENIED. The SDK's `allowedTools` only
  * auto-approves — it does not restrict — so a read-only role would still be able to Write/Edit/Bash
  * under `bypassPermissions` without this. `disallowedSdkTools` returns the complement of the role's
  * grant over the core tool universe; passed as the adapter's `disallowedTools` it removes those tools
@@ -152,8 +152,8 @@ function deniedToolsForBrokerRole(
 /**
  * Resolves the working directory for a real (claude) phase. On the claude runtime the pinned worktree
  * is the ONLY acceptable cwd — falling back to `process.cwd()` (the worker's own dir, the workbench
- * repo) lets path-less agent discovery and command execution drift into the wrong repository (TASK-31,
- * live run 5a513429 "This is an 'agentic workbench' project"). So on claude a missing worktreePath is a
+ * repo) lets path-less agent discovery and command execution drift into the wrong repository
+ * (live run "This is an 'agentic workbench' project"). So on claude a missing worktreePath is a
  * loud failure; only the mock/fixture path may fall back to `process.cwd()`.
  */
 export function requireWorktreeCwd(
@@ -231,7 +231,7 @@ const specifyHandler: PhaseHandler = {
 
     if (state.attemptNumber <= 1) {
       // On a real-agent runtime with a real prompt, draft a contract that reflects the actual request +
-      // a QA-required behavioral claim (Fix 9) — the real plan phase produces QA scenarios that can
+      // a QA-required behavioral claim — the real plan phase produces QA scenarios that can
       // cover it. The mock runtime keeps the generic single-correctness-claim stub, since its scripted
       // plan cannot satisfy a QA-required behavioral claim (everyBehavioralClaimHasQaScenario).
       const useRealContract = ctx.profile.usesRealAgent && Boolean(state.prompt);
@@ -252,7 +252,7 @@ const specifyHandler: PhaseHandler = {
               },
             ],
           };
-      // Classify task size (TASK-51) before drafting the contract, so the contract carries the size a
+      // Classify task size before drafting the contract, so the contract carries the size a
       // human reviews at the gate. The authoritative (Haiku) call is Claude-SDK-specific, so it runs
       // only on a profile that uses SDK tool/model names; every other profile (mock + non-Claude CLI
       // adapters) gets `undefined`, and the contract's `size ?? 'M'` default applies. An intake hint
@@ -285,9 +285,9 @@ const specifyHandler: PhaseHandler = {
             taskId: state.taskId,
             phase: 'specify',
             reason: 'task-contract-approval',
-            // TASK-54: surface the problem statement + measurable success criteria in the gate
+            // Surface the problem statement + measurable success criteria in the gate
             // summary so the human aligns on them before planning spend (no separate read route).
-            // TASK-51: the summary also carries the classified size the human can override here.
+            // The summary also carries the classified size the human can override here.
             summary: formatContractGateSummary(contract),
             createdAt: new Date().toISOString(),
           },
@@ -299,7 +299,7 @@ const specifyHandler: PhaseHandler = {
       return { kind: 'early', result: blockedResult('specify', ['no contract was drafted before approval was expected']) };
     }
     runState.contract = markContractApproved(runState.contract);
-    // Report the classified size to the Workflow (TASK-51) so it derives the run's phase set. The
+    // Report the classified size to the Workflow so it derives the run's phase set. The
     // contract's size is authoritative — a gate-time human override rewrote it on the contract.
     const reportedSize = runState.contract.size;
     runState.size = reportedSize;
@@ -332,7 +332,7 @@ const planHandler: PhaseHandler = {
     // prepare creates the worktree, so resolve the registered repo's canonical path on a real-agent
     // runtime; without this the planner ran in process.cwd() (the workbench) and planned against the
     // wrong repository. On a real runtime a missing worktree AND unresolvable repo path is a loud
-    // failure (TASK-31) — never drift to the workbench cwd; only the mock path falls back to cwd.
+    // failure — never drift to the workbench cwd; only the mock path falls back to cwd.
     const resolvedRepoPath =
       runState.worktreePath ??
       (ctx.profile.usesRealAgent ? await resolveRepositoryPath(state.repositoryId) : undefined);
@@ -524,7 +524,7 @@ const planHandler: PhaseHandler = {
 };
 
 // ---------------------------------------------------------------------------------------------
-// program-design (TASK-52) — only in the phase set for L tasks
+// program-design — only in the phase set for L tasks
 // ---------------------------------------------------------------------------------------------
 
 const programDesignHandler: PhaseHandler = {
@@ -649,7 +649,7 @@ const programDesignHandler: PhaseHandler = {
 
 /**
  * Derives the prepare completion inputs from the real workspace lease + filesystem, replacing the
- * hardcoded `true`s (Fix 3). `dependenciesPrepared` reflects a real install attempt; baseline
+ * hardcoded `true`s. `dependenciesPrepared` reflects a real install attempt; baseline
  * command running + pre-existing-failure classification are not yet implemented, so they are
  * reported honestly as attempted-but-trivial rather than asserted as done work.
  */
@@ -678,7 +678,7 @@ export async function computeRealPrepareInputs(
 
 /**
  * On the claude runtime, materializes a real git worktree + branch (Stage 1) and derives the
- * prepare completion inputs from the real lease + a filesystem check (Fix 3). On the mock runtime
+ * prepare completion inputs from the real lease + a filesystem check. On the mock runtime
  * (the default, and every deterministic test) it keeps the synthetic base SHA + `process.cwd()`
  * placeholder and rubber-stamps the inputs, since no real worktree is created there.
  *
@@ -747,7 +747,7 @@ const implementHandler: PhaseHandler = {
   phase: 'implement',
   async run(ctx): Promise<PhaseOutcome> {
     const { state, runState } = ctx;
-    // Single-shot (S) tasks skip the plan phase (TASK-51), so there is no accepted plan here. Synthesize
+    // Single-shot (S) tasks skip the plan phase, so there is no accepted plan here. Synthesize
     // a one-slice plan straight from the contract objective — that IS the single-shot: go directly to a
     // slice. This fires whenever the plan phase was skipped (no plan) but a contract exists, so it does
     // not depend on runState.size (which a gate-time override may not have propagated onto run-state).
@@ -801,7 +801,7 @@ const implementHandler: PhaseHandler = {
         assignment,
         runAttempt: async () => {
           if (ctx.profile.usesRealAgent && (!adapter || !runState.worktreePath)) {
-            // Real path with no worktree is never a legitimate success (TASK-31): the builder would
+            // Real path with no worktree is never a legitimate success: the builder would
             // otherwise run path-less discovery against the worker's process.cwd() (the workbench repo)
             // and the phase would rubber-stamp a fake candidate SHA. Fail loudly instead of taking the
             // mock success path so a lost/never-set worktree surfaces as a phase failure, not silent drift.
@@ -822,13 +822,12 @@ const implementHandler: PhaseHandler = {
             attemptNumber: state.attemptNumber,
             durable: ctx.profile.usesDurableRunState,
           });
-          // Resume this slice's prior session if one was persisted (TASK-32): a Temporal retry after a
+          // Resume this slice's prior session if one was persisted: a Temporal retry after a
           // transport drop continues the transcript instead of cold-restarting. Keyed by slice.id, which
           // is stable across attempts (unlike attemptNumber), so the key survives retries + restarts.
           const priorSessionId = runState.builderResumeSessions?.[slice.id];
-          // Record which cwd + resume key this session ran under (TASK-34): the runtime-decision context
-          // missing from the 5a513429 write-up. session-resumed vs session-started distinguishes a warm
-          // continuation from a cold start.
+          // Record which cwd + resume key this session ran under. session-resumed vs session-started
+          // distinguishes a warm continuation from a cold start.
           if (priorSessionId) {
             await ctx.controlPlane?.sessionResumed({
               role: 'builder',
@@ -847,7 +846,7 @@ const implementHandler: PhaseHandler = {
             taskId: state.taskId,
             worktreePath: runState.worktreePath,
             slice,
-            // Feed the program design (TASK-52) as context so the builder implements to the reviewed structure.
+            // Feed the program design as context so the builder implements to the reviewed structure.
             ...(runState.programDesign ? { programDesign: runState.programDesign } : {}),
             allowedTools: allowedToolsForBrokerRole('builder', ctx.profile),
             disallowedTools: deniedToolsForBrokerRole('builder', ctx.profile),
@@ -888,7 +887,7 @@ const implementHandler: PhaseHandler = {
     runState.baseSha = runState.baseSha ?? '0'.repeat(40);
     runState.candidateSha = candidateSha;
 
-    // Velocity guardrail (TASK-56): if the run's committed diff exceeds the configurable cap, force a
+    // Velocity guardrail: if the run's committed diff exceeds the configurable cap, force a
     // human checkpoint before continuing rather than dumping a large unreviewed diff downstream. Off on
     // the mock path; on for the real path. Only meaningful once a real commit exists.
     const cap = resolveSliceDiffCap(ctx.profile.usesRealAgent);
@@ -1038,11 +1037,11 @@ const exerciseHandler: PhaseHandler = {
       claimIds: runState.contract?.claims.map((c) => c.id) ?? [],
     };
 
-    // Real browser QA (Fix 5): when AWB_QA_MODE=browser and the repo has a discovered dev-server
+    // Real browser QA: when AWB_QA_MODE=browser and the repo has a discovered dev-server
     // start command, start it and run runBrowserQa (real chromium → real .webm video + .zip trace)
     // against it. Otherwise fall back to the CLI QA executor. `ranBrowserQa` tracks which path ran so
     // `browserScenariosHaveTraces` reflects a real trace artifact rather than a hardcoded true.
-    // QA executor selection by repo surface (TASK-25). AWB_QA_MODE picks the executor: `browser`
+    // QA executor selection by repo surface. AWB_QA_MODE picks the executor: `browser`
     // (real dev-server + chromium), `http-api` (scripted real HTTP against a running API), `library`
     // (a real consumer script exercising the built library), or the default CLI executor. The
     // http-api/library modes were fully-implemented but had no runtime caller before this.
@@ -1113,7 +1112,7 @@ const exerciseHandler: PhaseHandler = {
     const structuredAssertionsPass = qaResult.assertions.every((a) => a.passed);
     const hasTraceArtifact = qaResult.artifacts.some((a) => a.kind === 'browser-trace');
 
-    // TASK-42: derive the two gate signals that were previously hard-coded.
+    // Derive the two gate signals that were previously hard-coded.
     // (1) policyBlockingErrorsPresent — the browser executor reports whether it saw an unhandled
     //     console error, a failed/4xx network request, or a leaked/duplicate WebSocket open. Other
     //     executors don't observe those signals, so they report no blocking error.
@@ -1266,7 +1265,7 @@ const challengeHandler: PhaseHandler = {
 
     runState.reviewerSessionId = review.reviewerSessionId;
 
-    // TASK-53: advisory maintainability review — a separate pass that surfaces duplication /
+    // Advisory maintainability review — a separate pass that surfaces duplication /
     // coupling / dead-abstraction / naming candidates for the human, distinct from correctness.
     // Its findings are advisory-only (category `maintainability`, severity `note`) so they NEVER
     // enter the challenge gate's blocking predicates below — they are persisted alongside the
@@ -1321,7 +1320,7 @@ const challengeHandler: PhaseHandler = {
     // below read only `review.findings`, so the advisory notes cannot block.
     runState.reviewFindings = [...review.findings, ...advisoryFindings];
 
-    // WSFF decay signals (TASK-55): the challenge phase is the one place both the reviewed diff and
+    // WSFF decay signals: the challenge phase is the one place both the reviewed diff and
     // the findings are in hand. Emit them as a nested run.decay span (auto-parents to the phase's run
     // trace). Best-effort — telemetry is diagnostics-only and must never fail the phase.
     if (ctx.profile.usesRealAgent && runState.worktreePath && runState.candidateSha) {
@@ -1368,7 +1367,7 @@ const challengeHandler: PhaseHandler = {
       onBlocked: () => {
         // Route the open findings through the spec's loop table (routeLoop) rather than a bespoke
         // requirements-vs-implement check, so structural (architecture) findings reach the phase that
-        // owns structure — `program-design` on an L run, else `plan` (TASK-60). Requirements outrank
+        // owns structure — `program-design` on an L run, else `plan`. Requirements outrank
         // architecture outrank everything else; the phase set decides plan-vs-program-design.
         const open = review.findings.filter((f) => f.status === 'open');
         const category = open.some((f) => f.category === 'requirements')
@@ -1408,7 +1407,7 @@ const releaseHandler: PhaseHandler = {
     const candidateSha = resolveCandidateSha(runState);
     const worktreePath = requireWorktreeCwd(ctx.profile, runState.worktreePath, 'release', state.taskId);
 
-    // Real delivery (Fix 6): on a real-agent runtime, open a real draft PR on the repo's actual remote
+    // Real delivery: on a real-agent runtime, open a real draft PR on the repo's actual remote
     // via the Octokit client (authed with the ambient `gh` token) + git-CLI push. The mock runtime
     // keeps the in-memory fakes and a synthetic ref, so every deterministic test is unchanged.
     const realDelivery = ctx.profile.usesRealAgent;
@@ -1605,17 +1604,17 @@ const HANDLERS: Record<TaskPhase, PhaseHandler> = {
 
 /**
  * Real `runPhase` Activity implementation. A thin driver: it resolves the runtime strategy ONCE
- * (never per phase — TASK-29), loads the task's `TaskRunState` through the `RunStateStore` seam
- * (TASK-30), selects the phase handler from the exhaustive closed set, and runs it through the
- * shared driver (TASK-28: emit → run → save → evaluate/map → attach usage). The per-phase
+ * (never per phase), loads the task's `TaskRunState` through the `RunStateStore` seam,
+ * selects the phase handler from the exhaustive closed set, and runs it through the
+ * shared driver (emit → run → save → evaluate/map → attach usage). The per-phase
  * completion policy is still `evaluatePhaseCompletion` (from `@awb/workflow`), called once by the
  * driver, so the Workflow's trust in "candidate means complete" stays backed by the same
  * deterministic policy the product spec defines — not a rubber stamp.
  *
  * State threads across phase attempts via the store (an in-memory Map by default — lost on worker
- * restart, documented limitation; TASK-27 swaps a durable impl behind the same seam). Usage is a
- * per-invocation accumulator on the context (TASK-30, was a module global) attached to the result
- * for the Workflow's `tokenUsageTotal` + `runtimeMsByPhase` aggregation (TASK-11).
+ * restart, documented limitation; a durable impl swaps in behind the same seam). Usage is a
+ * per-invocation accumulator on the context (was a module global) attached to the result
+ * for the Workflow's `tokenUsageTotal` + `runtimeMsByPhase` aggregation.
  */
 export async function runPhase(input: {
   phase: TaskPhase;
@@ -1631,7 +1630,7 @@ export async function runPhase(input: {
   const durable = profile.usesDurableRunState;
   const daemon = durable ? createDaemonClient() : undefined;
 
-  // Control-plane observability (TASK-34): emit lifecycle events + open a phase span so a phase
+  // Control-plane observability: emit lifecycle events + open a phase span so a phase
   // failing/retrying + a transport drop are first-class in the durable stream and the trace, not an
   // undifferentiated 'message' or a stderr-only [WARN]. Best-effort — never fails the phase.
   const emitter = createControlPlaneEmitter({
@@ -1667,7 +1666,7 @@ export async function runPhase(input: {
       },
       () => drivePhase(HANDLERS[input.phase], ctx),
       // Parent every phase to the run's deterministic trace so all phases of a task nest under ONE
-      // trace (TASK-36) instead of each phase minting its own random trace id.
+      // trace instead of each phase minting its own random trace id.
       { parentRunId: runIdForTask(input.state.taskId) },
     );
 
@@ -1682,7 +1681,7 @@ export async function runPhase(input: {
   } catch (err) {
     // A throw here propagates to Temporal, which retries the runPhase Activity up to maximumAttempts.
     // Record why + whether a retry is coming, so the retry decision lives in the durable store + metrics
-    // instead of only Temporal's stderr logger (the exact 5a513429 gap).
+    // instead of only Temporal's stderr logger.
     const message = err instanceof Error ? err.message : String(err);
     const resumable = isResumableTransportError(err);
     const retryScheduled = currentActivityAttempt() < MAX_ACTIVITY_ATTEMPTS;

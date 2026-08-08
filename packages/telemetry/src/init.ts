@@ -12,7 +12,7 @@ let sdk: NodeSDK | undefined;
 let activeConfig: TelemetryConfig | undefined;
 
 /**
- * Boots the OpenTelemetry NodeSDK (traces + metrics) exporting to the OTLP collector (TASK-34). A
+ * Boots the OpenTelemetry NodeSDK (traces + metrics) exporting to the OTLP collector. A
  * no-op when no OTLP endpoint is configured — telemetry is diagnostics-only, so a test run or the mock
  * runtime never starts an exporter. Idempotent: a second call while running is ignored so both the
  * worker and daemon bootstraps can call it defensively.

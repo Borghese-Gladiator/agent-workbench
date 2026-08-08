@@ -13,7 +13,7 @@ export interface MemoryFactForContext {
 
 /**
  * Fetches the project-memory facts most useful to the NEXT implementation and shapes them for a
- * planner/builder `contextPayload.memory`. This is the read side of project memory (TASK-50 follow-up):
+ * planner/builder `contextPayload.memory`. This is the read side of project memory:
  * without it, the accumulated `repository_facts` never reach a run and the `memoryTokens` bucket stays
  * 0. Read-only DB handle (single-writer invariant — the daemon owns writes). Bounded by `limit` so
  * memory injection can't itself become a large re-sent context cost (see docs/token-cost-measurement).

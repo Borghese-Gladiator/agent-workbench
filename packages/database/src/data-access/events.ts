@@ -6,10 +6,10 @@ import type { SemanticEventRow } from '../row-types.js';
 import { ensureRunAndPhaseAttempt } from './tasks.js';
 
 /**
- * Semantic-event persistence (TASK-22/23). The worker's agent sessions emit normalized
+ * Semantic-event persistence. The worker's agent sessions emit normalized
  * `SemanticEvent`s; the daemon writes them here (single writer) and serves the reconnect catch-up
- * query keyed on `sequence` (spec §31). The raw provider stream is never stored — only the compact
- * semantic summary (spec §19); `payloadJson` holds small structured payloads (e.g. a Finding) only.
+ * query keyed on `sequence`. The raw provider stream is never stored — only the compact
+ * semantic summary; `payloadJson` holds small structured payloads (e.g. a Finding) only.
  */
 
 function eventToRow(event: SemanticEvent): SemanticEventRow {
@@ -48,7 +48,7 @@ function rowToEvent(row: SemanticEventRow): SemanticEvent {
  * Persists a semantic event and returns it with its authoritative `sequence`. The daemon (single
  * writer) assigns the sequence as `max(sequence for run) + 1` inside the same transaction, so
  * ordering is race-free regardless of how the worker filled the field — the reconnect catch-up
- * (spec §31) depends on a gapless monotonic sequence per run. Idempotent by event id.
+ * depends on a gapless monotonic sequence per run. Idempotent by event id.
  */
 export function insertSemanticEvent(db: DrizzleDb, event: SemanticEvent): SemanticEvent {
   return db.transaction((tx) => {
@@ -68,7 +68,7 @@ export function insertSemanticEvent(db: DrizzleDb, event: SemanticEvent): Semant
   });
 }
 
-/** Reconnect catch-up (spec §31): events for a run with sequence > afterSequence, in order. */
+/** Reconnect catch-up: events for a run with sequence > afterSequence, in order. */
 export function listSemanticEventsAfter(
   db: DrizzleDb,
   runId: string,

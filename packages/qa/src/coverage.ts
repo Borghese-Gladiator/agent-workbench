@@ -2,7 +2,7 @@ import type { QaAssertionResult } from './shared.js';
 import { isStrongAssertion } from './shared.js';
 
 /**
- * TASK-42: check that QA actually exercises each behavioral claim's observable behaviour, not
+ * Check that QA actually exercises each behavioral claim's observable behaviour, not
  * merely that a scenario ran for it. `everyBehavioralClaimCovered` was hard-coded `true` at the
  * exercise gate; this computes it honestly.
  *

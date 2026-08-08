@@ -179,7 +179,7 @@ describe('phase observability persistence (§27)', () => {
     expect(b.byModel['claude-haiku']?.outputTokens).toBe(60);
   });
 
-  // TASK-32: the durable resume round-trip. An implement-phase session persists its resume token; the
+  // The durable resume round-trip. An implement-phase session persists its resume token; the
   // builder resume map is reconstructed keyed by slice id, and the latest attempt's token wins.
   it('reconstructs builder resume sessions keyed by slice id from persisted agent_sessions', () => {
     const implementSession = (attempt: number, sliceId: string, resumeSessionId: string) =>

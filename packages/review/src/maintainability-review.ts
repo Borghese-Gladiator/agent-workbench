@@ -2,7 +2,7 @@ import type { Finding } from '@awb/domain';
 import type { ReviewInputs } from './review-inputs.js';
 
 /**
- * TASK-53: an advisory maintainability review, distinct from correctness.
+ * An advisory maintainability review, distinct from correctness.
  *
  * WSFF's thesis is correctness ≠ maintainability, and maintainability has no reliable model
  * self-signal ("if a model could tell good code from bad it would have written the good version").

@@ -52,14 +52,14 @@ export interface RuntimeProfile {
 
   /**
    * Whether the runtime operates inside a real git worktree/checkout (the pinned task worktree is the
-   * only acceptable cwd; a missing worktree is a loud failure, never a `process.cwd()` fallback —
-   * TASK-31). `mock` does not; every real runtime does.
+   * only acceptable cwd; a missing worktree is a loud failure, never a `process.cwd()` fallback).
+   * `mock` does not; every real runtime does.
    */
   readonly usesRealWorktree: boolean;
 
   /**
    * Whether phase run-state persists to the durable SQLite store so a worker restart mid-task resumes
-   * with real state (TASK-27). Off for `mock` (its in-memory store keeps deterministic tests
+   * with real state. Off for `mock` (its in-memory store keeps deterministic tests
    * unchanged). Forced off globally by `AWB_DURABLE_RUN_STATE=0` at the call site.
    */
   readonly usesDurableRunState: boolean;

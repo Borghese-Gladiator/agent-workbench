@@ -70,7 +70,7 @@ describe('parsePlannerOutput', () => {
   });
 
   // A behavioral + qaEvidenceRequired claim whose covering slice omits qaScenarioIds must get a
-  // synthesized scenario, or the plan gate stalls the task (TASK-1 root cause).
+  // synthesized scenario, or the plan gate stalls the task.
   it('synthesizes a qa scenario for a covered behavioral claim when the planner omits one', () => {
     const behavioralContract = {
       ...contract,

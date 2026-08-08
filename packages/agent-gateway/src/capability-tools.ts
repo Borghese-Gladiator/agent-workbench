@@ -1,5 +1,5 @@
 /**
- * Maps the workbench's abstract capability names (from `@awb/capability-broker`, product spec §18)
+ * Maps the workbench's abstract capability names (from `@awb/capability-broker`)
  * to the concrete Claude Agent SDK tool names the session must be granted via the SDK's `tools`
  * option.
  *
@@ -86,7 +86,7 @@ export const ALL_SDK_TOOLS: readonly SdkToolName[] = [
 ];
 
 /**
- * The complement of a role's granted SDK tools — the tools it must be DENIED (TASK-24, §18/§33).
+ * The complement of a role's granted SDK tools — the tools it must be DENIED.
  * The SDK's `allowedTools` only auto-approves; it does not restrict — unlisted tools still fall
  * through to the permission mode, and `bypassPermissions` (required for the headless worker) would
  * then let them run. Passing this list as `disallowedTools` with bare tool names removes those tools

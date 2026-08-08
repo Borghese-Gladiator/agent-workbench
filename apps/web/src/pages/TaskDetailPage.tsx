@@ -15,7 +15,7 @@ const EVENT_STREAM_LABEL: Record<string, string> = {
 };
 
 /**
- * Control-plane lifecycle event types (TASK-34), rendered distinctly from agent-produced events so a
+ * Control-plane lifecycle event types, rendered distinctly from agent-produced events so a
  * phase failing / retrying / a transport drop stands out on the timeline. The value is a CSS modifier
  * class; anything not listed renders with the default agent-event style.
  */
@@ -34,7 +34,7 @@ export function TaskDetailPage() {
   const [maintainabilityFindings, setMaintainabilityFindings] = useState<MaintainabilityFinding[]>([]);
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
-  // Live semantic-event timeline over the WebSocket, with reconnect catch-up (TASK-23).
+  // Live semantic-event timeline over the WebSocket, with reconnect catch-up.
   const { events, status } = useEventStream(taskId);
 
   async function refresh(): Promise<void> {

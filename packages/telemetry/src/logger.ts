@@ -1,5 +1,5 @@
 /**
- * A tiny leveled, structured logger stamped with the run/task bridge ids (TASK-34 / ADR-008). It
+ * A tiny leveled, structured logger stamped with the run/task bridge ids. It
  * replaces raw `console.log`/Temporal-SDK-logger stderr diagnostics with a single JSON line per record
  * carrying `run_id`/`task_id`, so a control-plane failure is queryable by the same ids that link to
  * `semantic_events` and OTel traces. Deliberately dependency-free (no OTel logs SDK): it writes to

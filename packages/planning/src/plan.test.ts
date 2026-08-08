@@ -51,7 +51,7 @@ describe('draftPlan', () => {
     expect(plan.claimCoverage[0]?.planSliceIds).toEqual([]);
   });
 
-  // TASK-42: expected per-claim assertions aggregate from covering slices into ClaimCoverage.
+  // Expected per-claim assertions aggregate from covering slices into ClaimCoverage.
   it('aggregates a slice\'s expected assertions into the covered claim', () => {
     const claim = makeClaim({ id: 'claim-1' });
     const plan = draftPlan(
@@ -142,7 +142,7 @@ describe('everyBehavioralClaimHasQaScenario', () => {
     expect(everyBehavioralClaimHasQaScenario(plan, [claim])).toBe(true);
   });
 
-  // Regression for the plan-stall bug (TASK-1): buildClaimCoverage must derive qaScenarioIds from
+  // Regression for the plan-stall bug: buildClaimCoverage must derive qaScenarioIds from
   // the covering slices, not hardcode []. A slice that declares a scenario for its behavioral claim
   // makes the gate pass without any post-draft mutation.
   it('derives coverage qaScenarioIds from the slices so the gate passes', () => {

@@ -17,7 +17,7 @@ export const GIF_MAX_BYTES = 10 * 1024 * 1024;
 
 /**
  * Ordered encode ladder: start at the full budget (640px / 10fps), then step DOWN width first, then
- * fps — matching TASK-58's "width → 480, then fps → 5". Each rung is only reached if the previous
+ * fps (width → 480, then fps → 5). Each rung is only reached if the previous
  * one came back over `GIF_MAX_BYTES`.
  */
 export const GIF_STEP_DOWN: ReadonlyArray<{ width: number; fps: number }> = [

@@ -14,7 +14,7 @@ describe('requireWorktreeCwd (TASK-31/38: no process.cwd() drift on a real-workt
   });
 
   it('applies to ANY real-worktree runtime, not just claude (profile-driven, no vendor string)', () => {
-    // TASK-38: a non-claude real runtime takes the same loud-failure branch, keyed on the profile.
+    // A non-claude real runtime takes the same loud-failure branch, keyed on the profile.
     expect(() => requireWorktreeCwd(runtimeProfile('codex'), undefined, 'verify', 'task-1')).toThrow(
       /the codex runtime requires runState\.worktreePath/,
     );

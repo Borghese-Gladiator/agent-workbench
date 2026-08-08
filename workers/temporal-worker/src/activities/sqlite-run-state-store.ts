@@ -10,10 +10,10 @@ import { createDaemonClient, type DaemonClient } from '../daemon-client.js';
 import type { RunStateStore, TaskRunState } from './run-state-store.js';
 
 /**
- * Durable `RunStateStore` (TASK-27). Reads persisted lifecycle rows through a read-only DB handle and
- * writes exclusively through the daemon (single-writer invariant, spec §8 / docs/storage.md). A
+ * Durable `RunStateStore`. Reads persisted lifecycle rows through a read-only DB handle and
+ * writes exclusively through the daemon (single-writer invariant, docs/storage.md). A
  * worker restart mid-task therefore resumes with the real contract/plan/candidate-SHA/evidence
- * instead of the empty state the in-memory Map produced (ADR 006 / Decision 003).
+ * instead of the empty state the in-memory Map produced.
  *
  * The `ArtifactStore` keeps an in-memory metadata store during a phase — its blobs live in the
  * durable content-addressed dir (`layout.artifactsDir`), and its metadata rows are captured in the
