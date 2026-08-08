@@ -99,6 +99,8 @@ export const TokenBreakdownSchema = z.object({
     z.object({
       inputTokens: z.number().int().nonnegative(),
       outputTokens: z.number().int().nonnegative(),
+      cachedInputTokens: z.number().int().nonnegative(),
+      cacheCreationInputTokens: z.number().int().nonnegative(),
       costUsd: z.number().nonnegative(),
     }),
   ),

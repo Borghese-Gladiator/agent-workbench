@@ -23,6 +23,7 @@
     "@awb/planning": "workspace:*",
     "@awb/qa": "workspace:*",
     "@awb/repository": "workspace:*",
+    "@awb/repository-memory": "workspace:*",
     "@awb/review": "workspace:*",
     "@awb/telemetry": "workspace:*",
     "@awb/verification": "workspace:*",

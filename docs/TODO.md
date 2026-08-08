@@ -760,6 +760,13 @@ un-runnable — found live while doing the TASK-46 dogfood:
    the pinned service defs `ENOENT`s when the detached spawn's PATH lacks the active
    node (e.g. fnm), and — if PATH is forced — can pick up a *different* node whose
    ABI mismatches the compiled `better-sqlite3` (`NODE_MODULE_VERSION` error).
+5. **A fresh `AWB_DATA_DIR` isn't fully provisioned before Temporal starts.** Temporal
+   `start-dev --db-filename <dataDir>/temporal/temporal.sqlite` crashes with
+   "failed checking dir for database file … no such file or directory" because the
+   `temporal/` subdir isn't pre-created — yet `up` still reports `runtime ready`
+   (health check doesn't catch it), so the daemon later 500s with "Failed to connect
+   before the deadline" on the first `task create`. `initDataDir`/`up` should
+   `mkdir -p` every service's data subdir first.
 
 Net effect: a clean isolated worktree run needs an isolated `AWB_DATA_DIR` **and**
 non-default ports **and** a unique task queue **and** its own Temporal — none of

@@ -678,6 +678,9 @@ importers:
       '@awb/repository':
         specifier: workspace:*
         version: link:../../packages/repository
+      '@awb/repository-memory':
+        specifier: workspace:*
+        version: link:../../packages/repository-memory
       '@awb/review':
         specifier: workspace:*
         version: link:../../packages/review

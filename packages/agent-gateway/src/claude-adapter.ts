@@ -132,19 +132,51 @@ export type ClaudeQueryFn = (params: { prompt: string; options?: ClaudeSdkQueryO
 /** Default query function: the real SDK. */
 const realQuery: ClaudeQueryFn = (params) => query(params) as unknown as ClaudeSdkQueryHandle;
 
+/** Thrown by `completeOnce` when the completion did not produce usable text (SDK error, error result, or empty output). */
+export class CompletionError extends Error {
+  constructor(
+    message: string,
+    /** The SDK result `subtype` when one was seen (e.g. 'error_max_turns'), else undefined. */
+    readonly subtype?: string,
+  ) {
+    super(message);
+    this.name = 'CompletionError';
+  }
+}
+
 /**
  * Single-turn text completion over the SDK — no tools, no session, just prompt → text. For synthesis
  * steps that are not the full agent loop (e.g. the repository-memory compile/lint passes, TASK-50).
- * Drains the query stream and returns the final `result` message's text. The `queryFn` seam lets a
- * test supply a scripted generator instead of spawning Claude Code. Returns '' if no result text.
+ * The `queryFn` seam lets a test supply a scripted generator instead of spawning Claude Code.
+ *
+ * Fails LOUDLY (throws `CompletionError`) rather than returning '' so a caller can never mistake a
+ * provider failure for "the model legitimately had nothing to say": the SDK signals failure via a
+ * `result` message with `is_error: true` (e.g. `subtype: 'error_max_turns'`), and a stream that ends
+ * with no `result` at all is also a failure. Only a clean, non-empty result is returned as text.
  */
 export async function completeOnce(prompt: string, queryFn: ClaudeQueryFn = realQuery): Promise<string> {
-  const handle = queryFn({ prompt, options: { permissionMode: 'bypassPermissions', maxTurns: 1 } });
-  let text = '';
-  for await (const message of handle) {
-    if (message.type === 'result') {
-      text = (message as ClaudeSdkResultMessage).result ?? '';
+  let result: ClaudeSdkResultMessage | undefined;
+  try {
+    const handle = queryFn({ prompt, options: { permissionMode: 'bypassPermissions', maxTurns: 1 } });
+    for await (const message of handle) {
+      if (message.type === 'result') {
+        result = message as ClaudeSdkResultMessage;
+      }
     }
+  } catch (err) {
+    // The SDK threw mid-stream (spawn failure, transport drop, abort). Surface it as a CompletionError.
+    throw new CompletionError(`completion stream failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  if (!result) {
+    throw new CompletionError('completion produced no result message');
+  }
+  if (result.is_error) {
+    throw new CompletionError(`completion ended with an error (${result.subtype})`, result.subtype);
+  }
+  const text = result.result ?? '';
+  if (text.trim() === '') {
+    throw new CompletionError('completion returned empty text', result.subtype);
   }
   return text;
 }

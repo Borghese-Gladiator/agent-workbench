@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@awb/domain';
-import { ClaudeAgentAdapter } from './claude-adapter.js';
+import { ClaudeAgentAdapter, completeOnce, CompletionError } from './claude-adapter.js';
 import type { ClaudeSdkMessage, ClaudeSdkQueryHandle, ClaudeQueryFn } from './claude-adapter.js';
 
 /** Wraps a plain AsyncGenerator of SDK-shaped messages into the control-method interface ClaudeSdkQueryHandle requires. */
@@ -334,5 +334,39 @@ describe('ClaudeAgentAdapter', () => {
       );
       expect(result.completed).toBe(true);
     });
+  });
+});
+
+describe('completeOnce', () => {
+  it('returns the result text on a clean, non-error result', async () => {
+    const { queryFn } = fakeQuery([
+      { type: 'result', subtype: 'success', session_id: 's1', is_error: false, result: 'the synthesis' },
+    ]);
+    await expect(completeOnce('prompt', queryFn)).resolves.toBe('the synthesis');
+  });
+
+  it('throws CompletionError when the result is flagged is_error (does not return "")', async () => {
+    const { queryFn } = fakeQuery([
+      { type: 'result', subtype: 'error_max_turns', session_id: 's1', is_error: true, result: '' },
+    ]);
+    await expect(completeOnce('prompt', queryFn)).rejects.toBeInstanceOf(CompletionError);
+    await expect(completeOnce('prompt', queryFn)).rejects.toMatchObject({ subtype: 'error_max_turns' });
+  });
+
+  it('throws when the stream ends with no result message', async () => {
+    const { queryFn } = fakeQuery([{ type: 'assistant', session_id: 's1', message: { content: [] } }]);
+    await expect(completeOnce('prompt', queryFn)).rejects.toBeInstanceOf(CompletionError);
+  });
+
+  it('throws when the result text is empty/whitespace', async () => {
+    const { queryFn } = fakeQuery([
+      { type: 'result', subtype: 'success', session_id: 's1', is_error: false, result: '   ' },
+    ]);
+    await expect(completeOnce('prompt', queryFn)).rejects.toBeInstanceOf(CompletionError);
+  });
+
+  it('wraps an SDK stream exception as a CompletionError', async () => {
+    const { queryFn } = fakeQuery([], { throws: new Error('spawn failed') });
+    await expect(completeOnce('prompt', queryFn)).rejects.toBeInstanceOf(CompletionError);
   });
 });

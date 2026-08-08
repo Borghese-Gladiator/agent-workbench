@@ -74,4 +74,26 @@ describe('compileConcepts', () => {
     const result = await compileConcepts(testDb.handle.db, testDb.handle.sqlite, 'repo-1', complete);
     expect(result.concepts).toHaveLength(0);
   });
+
+  it('skips a cluster whose completion rejects instead of aborting the whole pass', async () => {
+    await recordFacts(testDb.handle.db, 'repo-1', [
+      fact({ id: 'a1', sourcePaths: ['src/auth/login.ts'], sourceHashes: ['h'] }),
+      fact({ id: 'a2', sourcePaths: ['src/auth/logout.ts'], sourceHashes: ['h'] }),
+      fact({ id: 'b1', sourcePaths: ['src/pay/charge.ts'], sourceHashes: ['h'] }),
+      fact({ id: 'b2', sourcePaths: ['src/pay/refund.ts'], sourceHashes: ['h'] }),
+    ]);
+
+    // Fail the first cluster's completion, succeed on the rest — the pass must survive and still
+    // compile the good cluster.
+    let seen = 0;
+    const flaky = async () => {
+      seen += 1;
+      if (seen === 1) throw new Error('provider failed');
+      return JSON.stringify({ title: 'C', statement: 'ok.' });
+    };
+
+    const result = await compileConcepts(testDb.handle.db, testDb.handle.sqlite, 'repo-1', flaky);
+    expect(result.concepts).toHaveLength(1);
+    expect(result.skipped).toBe(1);
+  });
 });

@@ -6,9 +6,10 @@ import { recordFacts } from './store.js';
 import { queryMemory } from './query.js';
 
 /**
- * A single-turn text completion. Injected so compile is testable with a fake and the CLI can wire
- * the real provider (`ClaudeQueryFn` + `contextPreamble`) without this package depending on the
- * agent gateway. Given a prompt, return the model's text response.
+ * A single-turn text completion. Injected so compile/lint are testable with a fake and the CLI can
+ * wire the real provider (`@awb/agent-gateway`'s `completeOnce`) without this package depending on
+ * the agent gateway. Resolves with the model's text, or REJECTS if the provider failed (compile
+ * treats a rejection as "skip this cluster"; lint lets it propagate).
  */
 export type CompleteFn = (prompt: string) => Promise<string>;
 
@@ -24,6 +25,8 @@ export interface CompileResult {
   concepts: RepositoryFact[];
   /** How many atomic facts were folded into those concepts. */
   compactedFrom: number;
+  /** Clusters skipped because the completion failed or returned unparseable output. */
+  skipped: number;
 }
 
 /** The shape we ask the model to return per cluster (schema-constrained by the prompt). */
@@ -112,10 +115,22 @@ export async function compileConcepts(
 
   const concepts: RepositoryFact[] = [];
   let compactedFrom = 0;
+  let skipped = 0;
 
   for (const [dir, group] of limited) {
-    const draft = parseConcept(await complete(buildPrompt(dir, group)));
-    if (!draft) continue;
+    // A completion failure on one cluster must not lose the others — skip and keep going.
+    let raw: string;
+    try {
+      raw = await complete(buildPrompt(dir, group));
+    } catch {
+      skipped += 1;
+      continue;
+    }
+    const draft = parseConcept(raw);
+    if (!draft) {
+      skipped += 1;
+      continue;
+    }
     const { paths, hashes } = unionProvenance(group);
     const backlinkSuffix =
       draft.backlinks && draft.backlinks.length > 0 ? ` [[${draft.backlinks.join(']] [[')}]]` : '';
@@ -137,5 +152,5 @@ export async function compileConcepts(
   if (concepts.length > 0) {
     await recordFacts(db, repositoryId, concepts);
   }
-  return { concepts, compactedFrom };
+  return { concepts, compactedFrom, skipped };
 }

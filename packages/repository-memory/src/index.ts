@@ -13,3 +13,4 @@ export {
   type Contradiction,
   type ConnectionCandidate,
 } from './lint.js';
+export { projectMemoryToFiles, type ProjectFilesResult } from './project-files.js';

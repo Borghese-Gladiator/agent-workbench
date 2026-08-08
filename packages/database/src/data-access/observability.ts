@@ -124,9 +124,17 @@ export function getTokenBreakdown(db: DrizzleDb, taskId: string): TokenBreakdown
     totals.cachedInputTokens += r.cachedInputTokens ?? 0;
     totals.cacheCreationInputTokens += r.cacheCreationInputTokens ?? 0;
     totals.costUsd += r.costUsd ?? 0;
-    const m = (byModel[r.model] ??= { inputTokens: 0, outputTokens: 0, costUsd: 0 });
+    const m = (byModel[r.model] ??= {
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedInputTokens: 0,
+      cacheCreationInputTokens: 0,
+      costUsd: 0,
+    });
     m.inputTokens += r.inputTokens;
     m.outputTokens += r.outputTokens;
+    m.cachedInputTokens += r.cachedInputTokens ?? 0;
+    m.cacheCreationInputTokens += r.cacheCreationInputTokens ?? 0;
     m.costUsd += r.costUsd ?? 0;
   }
   return { totals, byModel };

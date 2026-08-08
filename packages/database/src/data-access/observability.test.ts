@@ -123,7 +123,13 @@ describe('phase observability persistence (§27)', () => {
       cacheCreationInputTokens: 30,
       costUsd: 0.01,
     });
-    expect(breakdown.byModel['claude-opus']).toEqual({ inputTokens: 500, outputTokens: 120, costUsd: 0.01 });
+    expect(breakdown.byModel['claude-opus']).toEqual({
+      inputTokens: 500,
+      outputTokens: 120,
+      cachedInputTokens: 50,
+      cacheCreationInputTokens: 30,
+      costUsd: 0.01,
+    });
   });
 
   it('is idempotent per phase attempt (no duplicate attribution/session rows on re-run)', () => {
