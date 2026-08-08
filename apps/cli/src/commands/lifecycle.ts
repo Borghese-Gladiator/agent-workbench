@@ -5,7 +5,7 @@ import type { Command } from 'commander';
 import { ensureDataDir, resolveDataDir, isolatedOverrides, resolveRuntimeConfig } from '@awb/config';
 import { probeHealth, type RuntimeHealth, type ServiceHealth } from '../health.js';
 import { RUNTIME_SERVICES, logPathFor, repoRoot, type ServiceKey } from '../services.js';
-import { startService, stopService, waitForDaemonHealth } from '../process-control.js';
+import { startService, stopService, waitForDaemonHealth, streamServiceLogs } from '../process-control.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
 import { parseDuration } from '../duration.js';
 
@@ -26,7 +26,7 @@ function formatUptime(ms?: number): string {
 }
 
 /** Starts the three runtime services (idempotent) and waits for the daemon to answer health. */
-async function ensureRuntime(): Promise<{ ready: boolean; alreadyReady: boolean; elapsedMs: number }> {
+async function ensureRuntime(opts: { verbose?: boolean } = {}): Promise<{ ready: boolean; alreadyReady: boolean; elapsedMs: number }> {
   const start = Date.now();
   const before = await probeHealth();
   if (before.runtime === 'ready') {
@@ -40,8 +40,15 @@ async function ensureRuntime(): Promise<{ ready: boolean; alreadyReady: boolean;
   for (const key of RUNTIME_SERVICES) {
     startService(key);
   }
-  const ready = await waitForDaemonHealth();
-  return { ready, alreadyReady: false, elapsedMs: Date.now() - start };
+  // With --verbose, tail the runtime services' logs to the terminal while we poll for health, so the
+  // wait isn't a silent black box (temporal/worker/daemon startup, and any boot error, show live).
+  const stream = opts.verbose ? streamServiceLogs(['temporal', 'worker', 'daemon']) : undefined;
+  try {
+    const ready = await waitForDaemonHealth();
+    return { ready, alreadyReady: false, elapsedMs: Date.now() - start };
+  } finally {
+    stream?.stop();
+  }
 }
 
 /**
@@ -69,11 +76,13 @@ export function registerLifecycleCommands(program: Command): void {
       '--isolated',
       'Derive a deterministic port block + task queue + OTel container + data dir from this checkout, so N worktrees run concurrent stacks without collision',
     )
-    .action(async (opts: { dev?: boolean; isolated?: boolean }) => {
+    .option('-v, --verbose', 'Stream temporal/worker/daemon startup output to the terminal while waiting for health')
+    .action(async (opts: { dev?: boolean; isolated?: boolean; verbose?: boolean }) => {
       if (opts.dev === true) process.env.AWB_RUNTIME_MODE = 'dev';
       if (opts.isolated === true) applyIsolation();
       const cfg = resolveRuntimeConfig();
-      const { ready, alreadyReady, elapsedMs } = await ensureRuntime();
+      const verbose = opts.verbose === true || outputOptions().verbose;
+      const { ready, alreadyReady, elapsedMs } = await ensureRuntime({ verbose });
       const stack = {
         daemonUrl: cfg.daemonUrl,
         temporalAddress: cfg.temporalAddress,

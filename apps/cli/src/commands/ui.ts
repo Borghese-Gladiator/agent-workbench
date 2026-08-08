@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { Command } from 'commander';
 import { probeHealth } from '../health.js';
 import { uiPort, logPathFor } from '../services.js';
-import { startService, stopService, waitForUi } from '../process-control.js';
+import { startService, stopService, waitForUi, streamServiceLogs } from '../process-control.js';
 import { ensureRuntime } from './lifecycle.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
 
@@ -17,15 +17,22 @@ function openBrowser(url: string): void {
   child.unref();
 }
 
-async function ensureUi(withDeps: boolean): Promise<{ ready: boolean; runtimeReady: boolean }> {
+async function ensureUi(withDeps: boolean, verbose = false): Promise<{ ready: boolean; runtimeReady: boolean }> {
   let runtimeReady = true;
   if (withDeps) {
-    const runtime = await ensureRuntime();
+    const runtime = await ensureRuntime({ verbose });
     runtimeReady = runtime.ready;
   }
   startService('ui');
-  const ready = await waitForUi();
-  return { ready, runtimeReady };
+  // With --verbose, tail the vite log to the terminal while waiting for the port so the user sees
+  // startup (and any bind error) live instead of a silent wait on a detached process.
+  const stream = verbose ? streamServiceLogs(['ui']) : undefined;
+  try {
+    const ready = await waitForUi();
+    return { ready, runtimeReady };
+  } finally {
+    stream?.stop();
+  }
 }
 
 export function registerUiCommands(program: Command): void {
@@ -57,9 +64,11 @@ export function registerUiCommands(program: Command): void {
     .command('up')
     .description('Start the UI (and its runtime dependencies unless --no-deps)')
     .option('--no-deps', 'Do not start runtime dependencies first (advanced)')
-    .action(async (opts: { deps?: boolean }) => {
+    .option('-v, --verbose', 'Stream vite (and runtime) startup output to the terminal while waiting')
+    .action(async (opts: { deps?: boolean; verbose?: boolean }) => {
       const withDeps = opts.deps !== false;
-      const { ready, runtimeReady } = await ensureUi(withDeps);
+      const verbose = opts.verbose === true || outputOptions().verbose;
+      const { ready, runtimeReady } = await ensureUi(withDeps, verbose);
       if (withDeps && !runtimeReady) {
         printError('runtime unhealthy: cannot start the UI without a healthy runtime');
         process.exitCode = 1;
