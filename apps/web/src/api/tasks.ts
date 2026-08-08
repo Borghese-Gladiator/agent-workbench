@@ -3,6 +3,8 @@ export type TaskSize = 'S' | 'M' | 'L';
 export interface TaskWorkflowState {
   taskId: string;
   repositoryId: string;
+  /** The natural-language prompt, threaded through workflow state; used for the detail-page title. */
+  prompt?: string;
   phase: string;
   condition: string;
   deliveryState: string;
