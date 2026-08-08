@@ -33,10 +33,34 @@ test -d "<REPO_PATH>/.git" && echo OK || echo "NOT A GIT REPO"
 If that prints anything but `OK` (missing path, not absolute, not a git repo),
 stop and ask the user for a valid absolute path. Only continue once it passes.
 
+**Then check for a greenfield / no-remote repo — a valid `.git` is not enough.** A
+repo can be a git repo with zero commits and no remote, and both break the workbench
+in ways that only surface much later (a wasted live run):
+
+```
+git -C "<REPO_PATH>" rev-parse HEAD 2>/dev/null || echo "NO COMMITS"
+git -C "<REPO_PATH>" remote -v
+```
+
+- **No commits (no `HEAD`):** `repo refresh` hard-fails on `git rev-parse HEAD`.
+  Seed one first: `git -C "<REPO_PATH>" commit --allow-empty -m "Initial commit"`.
+- **No remote (`origin`):** the happy path ends at a `pr-readiness` gate that expects
+  to push/open a PR — there is nowhere to deliver. Decide the delivery story with the
+  user *now*, not at the gate: either add a remote, or run "local branch only" and
+  plan to land the worktree code directly (see step 7's recover-and-land path).
+
+**Greenfield + large scope is the workbench's worst case.** An empty repo taking a
+full-app build trips several gates that a mature-repo change never sees (diff cap,
+`program-design` checks, no QA start command — TASK-65..68). If the user asks for a
+large greenfield build, say so up front and consider scoping the first task to a
+skeleton, or expect and pre-plan for those gates.
+
 Set these for the rest of the run so every command is unambiguous:
 - `REPO_PATH` = the validated absolute path (e.g. `/Users/you/GitHub/wip-browser-games`)
 - Repo/task ids are remembered between CLI calls, so you pass them only to target
-  something other than the most recent.
+  something other than the most recent. **Arg order is positional: `[repositoryId]
+  [taskId]`** — `task cancel <taskId>` alone errors; pass repo first, or rely on the
+  remembered "most recent" and pass neither.
 
 ## 1. Choose runtime, THEN boot
 
@@ -56,6 +80,15 @@ pnpm --filter @awb/cli cli -- up
 ```
 
 Wait for `ready.`. Logs stream to `~/.agentic-workbench/runtime/logs/`.
+
+**If `up` says "runtime already ready", the env you just passed did NOT take.** A warm
+stack from a prior session keeps whatever runtime/QA/cap env it booted with — your new
+flags are ignored (env is read at worker spawn), and there is currently no way to read
+the active runtime back (`/api/health` only returns `{status:"ok"}`; TASK-70). So a
+"live" run can silently execute as MOCK. Tells that it's MOCK: a fake PR in ~90s and
+zero tokens. If you need specific env and a stack is already warm, `down` then `up`
+with the env inline — this is safe **only before a task exists**; never `down`/`up`
+mid-task.
 
 ### If `up` times out ("Waiting for the daemon to become healthy… timed out")
 
@@ -148,6 +181,31 @@ fires only if planner/critic can't converge. If `condition` is `blocked` or the
 gate `reason` has no CLI command (waiver / permission / budget / scope), STOP and
 tell the user — do not fabricate a way past it.
 
+**Non-happy-path gates you may hit (esp. large/greenfield tasks), and what they
+really mean:**
+- `slice-diff-exceeds-cap` — the implement diff exceeds the velocity cap. Cleared by
+  the *reused* `approve-plan` update, but it **re-raises every implement pass with no
+  memory of the ack**, so approving loops forever on a legitimately large diff. Do NOT
+  loop it: the only real escape is a restart with `AWB_SLICE_DIFF_CAP=0` + a fresh task
+  (see TASK-68), which you must clear with the user.
+- `repeated-failure-no-progress` — a phase's completion gate keeps failing. This is
+  often a workbench false-positive, not bad agent output (e.g. `program-design`'s
+  bodyless-signature check, TASK-67). Diagnose the *specific* failing predicate (step
+  7) before re-running; do not assume the agent is at fault.
+- A `blocked` at `exercise` on a greenfield repo usually means **no QA start command
+  exists** (TASK-65) — browser QA has nothing to launch. This is not resolvable by
+  approving; it needs a start command wired or the QA story decided with the user.
+
+If a gate loops, or a `blocked` reason has no first-class CLI resolve, treat the
+pipeline as stuck and go to step 7 — including the "recover the code directly" path.
+
+**If `task show` returns blank/empty (not an error, not a state):** the CLI itself is
+likely the broken link, not the task — a stale `@awb/*` dist crashes the CLI on import
+while the daemon+worker (running from source) keep advancing the task (TASK-69). Do
+NOT read a blank `task show` as a stall. Rebuild the offending package
+(`pnpm --filter @awb/<pkg> build`, or `pnpm build`) and, meanwhile, read ground truth
+straight from SQLite (see step 7).
+
 ## 6. Complete the task
 
 A task does NOT finish on its own at `release` — it waits for the PR outcome:
@@ -175,8 +233,15 @@ error is NOT in `task show`; find it here, in order:
    never fired (do NOT report "0 changes" from a DB count alone):
    `git -C ~/.agentic-workbench/worktrees/<repoId>/<taskId> status --short`
    `git -C ~/.agentic-workbench/worktrees/<repoId>/<taskId> diff`
+   Note the agent commits its work, so `status` may be clean while the branch is
+   full — check `git log --oneline` and `git diff <baseSha> HEAD` too.
+4. **SQLite ground truth** — when the CLI is down (blank `task show`) or you need the
+   exact failing predicate, read the DB directly. Useful tables:
+   `phase_attempts` (per-phase attempts + outcomes), `program_designs`,
+   `repository_commands` (is a `start` command present?), `acceptance_claims`
+   (does the contract require QA/behavioral evidence?), `semantic_events`.
 
-Known failure modes seen live (check TASK-31/32/34 in `docs/TODO.md` for status):
+Known failure modes seen live (check TASK-31/32/34/65-70 in `docs/TODO.md` for status):
 - **`FOREIGN KEY constraint failed` at the plan phase** — a run-state durability
   bug (fixed 2026-07-24; if it recurs, `packages/database/.../run-lifecycle.ts`
   plus a stale `@awb/database` dist is the suspect — rebuild it).
@@ -188,6 +253,28 @@ Known failure modes seen live (check TASK-31/32/34 in `docs/TODO.md` for status)
 
 Distinguish an **agent/transport failure** (retry/re-run may help) from a
 **workbench code bug** (must be fixed first) before re-driving.
+
+### 7a. When the pipeline is stuck but the code is done — recover and land directly
+
+A run can be blocked late (e.g. at `exercise`/QA) with the **implementation already
+complete and past `implement` + `verify`**. The deliverable then lives in the worktree
+branch even though the task will never reach `release`. Don't throw that away chasing
+the gate — recover it:
+
+1. **Confirm the code is real and works** before touching anything — inspect the
+   branch (`git -C <worktree> log/diff`) and, for an app, actually boot it (e.g.
+   `uvicorn`/`vite` from the worktree) and hit an endpoint. A verified worktree is the
+   deliverable.
+2. **Recover BEFORE cancelling.** `task cancel` may garbage-collect the worktree — runs
+   that blocked *before* implementing leave nothing, and even a completed one is not
+   guaranteed to persist. Copy the code out first.
+3. **Land it** into the target repo (works with no remote): copy only tracked files,
+   excluding `.venv`/build cruft, via
+   `git -C <worktree> archive HEAD | tar -x -C "<REPO_PATH>"`, then commit in the
+   target repo. Verify a clean-install boot in the target (fresh venv from its own
+   manifest) so a new developer can reproduce it.
+4. This is the right ending for a **no-remote** run (step 0): there is no PR to sign
+   off, so the merged-PR gate never applies — the landed local commit *is* delivery.
 
 ## 8. Tear down
 

@@ -419,3 +419,57 @@ first-class resolve path in the CLI/daemon, not the reused `approve-plan` update
 diff size, or is gated exactly once with an ack that persists so the run proceeds on
 the next pass — verified by an implement diff over the cap reaching `verify` without
 `AWB_SLICE_DIFF_CAP=0` and without looping.
+
+### [ ] TASK-69: A stale `@awb/*` dist silently breaks the CLI mid-run (not just the daemon)
+
+**What's wrong.** The daemon/worker run via `tsx` (source), but the **CLI resolves
+`@awb/*` packages from their built `dist/`**. When a package's source gains an export
+that its `dist/` doesn't have yet (stale build), the CLI crashes on import — seen
+live: `SyntaxError: The requested module '@awb/config' does not provide an export
+named 'resolveRuntimeConfig'`. This is insidious during a run: the task keeps
+advancing (daemon+worker are fine on source), but `task show` starts returning
+**empty/no output**, so the driver loses all visibility and can misread a healthy run
+as stalled. The existing "stale dist" knowledge was scoped to the daemon; it applies
+to the CLI too, and the failure mode (blank `task show`, not an obvious error) is
+worse because it looks like a hang.
+
+**What to do.** (1) Make the CLI resilient: catch the import/`ERR_*` failure and
+print an actionable message (`@awb/<pkg> dist is stale — run \`pnpm build\``) instead
+of a raw stack, so a blank `task show` is never mistaken for a stalled task.
+(2) Consider running the CLI from source (tsx) like the daemon/worker, or ensure a
+build runs before CLI invocation, so source/dist can't drift. (3) Document that
+direct SQLite reads (`phase_attempts`, `program_designs`, `repository_commands`,
+`semantic_events`) are the ground-truth fallback when the CLI is down.
+
+**Where.** `apps/cli/src/services.ts` (the `@awb/config` import site),
+`apps/cli/src/index.ts` / command entrypoints, the `cli` script, build ordering.
+
+**How we'll know it's done.** With a deliberately stale `@awb/config` dist, `task
+show` prints a clear "stale dist — run pnpm build" message (not a blank line or a raw
+`SyntaxError`), and the recovery is one documented command.
+
+### [ ] TASK-70: `up` no-ops on a warm stack, hiding which runtime/env is actually live
+
+**What's wrong.** `up` prints "runtime already ready" when a stack from a *prior*
+session is still running — but that warm stack may have booted with a **different
+env** (MOCK instead of `AWB_AGENT_RUNTIME=claude`, or without `AWB_QA_MODE=browser` /
+`AWB_SLICE_DIFF_CAP`). Re-running `up` with new env flags does **not** change the
+running worker (env is read at spawn). There is no way to see the active runtime/env
+from the CLI (`/api/health` only reports `{status:"ok"}`; there is no
+`/api/runtime-config`), so a "live" run can silently execute as MOCK. The only safe
+workaround is a full `down`+`up` before creating a task — which is easy to forget.
+
+**What to do.** (1) Surface the active runtime + QA mode + relevant caps in a health
+/ status field (e.g. extend `/api/health` or add `awb status`), so the driver can
+confirm the stack matches its intended env before creating a task. (2) Make `up`
+detect when passed env flags differ from the running stack's and either refuse to
+no-op (prompt for `--restart`) or warn loudly. (3) Document "restart before a task if
+you need specific env; never restart mid-task."
+
+**Where.** `apps/cli` (`up` command + a `status` view), `apps/daemon/src/routes`
+(health/runtime-config route), wherever the worker reads its runtime env at spawn.
+
+**How we'll know it's done.** After `up` on a warm stack booted with different env,
+the CLI reports the *actual* active runtime/QA mode (not a bare "ready"), and either
+refuses the no-op or clearly warns that the running env differs from the requested
+one.
