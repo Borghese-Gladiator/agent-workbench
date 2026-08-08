@@ -5,6 +5,7 @@ export * from './event-normalization.js';
 export * from './claude-adapter.js';
 export * from './cli-runtime.js';
 export * from './codex-adapter.js';
+export * from './codex-sandbox.js';
 export * from './pi-adapter.js';
 export * from './pi-tools.js';
 export * from './opencode-adapter.js';
