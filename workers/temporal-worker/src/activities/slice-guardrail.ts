@@ -20,14 +20,27 @@ function intFromEnv(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+export interface SliceDiffCapInput {
+  /** From the RuntimeProfile (`usesRealAgent`) — never a runtime string. Off entirely on the mock path. */
+  realPath: boolean;
+  /**
+   * The run's contract size. An `L` task is a large/greenfield change that legitimately exceeds any
+   * per-slice cap, so the guardrail is disabled for it (TASK-68 per-task override) — the cap dead-ended
+   * such runs with no acknowledgeable escape. `S`/`M` tasks stay gated. Undefined is treated as gated.
+   */
+  size?: 'S' | 'M' | 'L';
+}
+
 /**
- * Resolves the slice-diff cap for a run. `realPath` comes from the RuntimeProfile
- * (`usesRealAgent`) — never a runtime string. On a real-agent path the guardrail is on by
- * default and the bounds are env-overridable (`AWB_SLICE_DIFF_LINE_CAP` / `AWB_SLICE_DIFF_FILE_CAP`);
- * set `AWB_SLICE_DIFF_CAP=0` to disable it. On the mock path it is always off.
+ * Resolves the slice-diff cap for a run. On a real-agent path the guardrail is on by default and the
+ * bounds are env-overridable (`AWB_SLICE_DIFF_LINE_CAP` / `AWB_SLICE_DIFF_FILE_CAP`); set
+ * `AWB_SLICE_DIFF_CAP=0` to disable it globally. It is off on the mock path and off for an `L`-size
+ * task, which is a large/greenfield change that legitimately exceeds any per-slice cap (TASK-68).
  */
-export function resolveSliceDiffCap(realPath: boolean): SliceDiffCap {
-  if (!realPath || process.env.AWB_SLICE_DIFF_CAP === '0') {
+export function resolveSliceDiffCap(input: SliceDiffCapInput | boolean): SliceDiffCap {
+  const { realPath, size } = typeof input === 'boolean' ? { realPath: input, size: undefined } : input;
+  const disabled = !realPath || process.env.AWB_SLICE_DIFF_CAP === '0' || size === 'L';
+  if (disabled) {
     return { enabled: false, lineCap: DEFAULT_SLICE_DIFF_LINE_CAP, fileCap: DEFAULT_SLICE_DIFF_FILE_CAP };
   }
   return {

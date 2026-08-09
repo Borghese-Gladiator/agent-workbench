@@ -36,6 +36,20 @@ describe('resolveSliceDiffCap (TASK-56)', () => {
     expect(cap.lineCap).toBe(50);
     expect(cap.fileCap).toBe(3);
   });
+
+  it('accepts the object form and stays enabled for S/M tasks (TASK-68)', () => {
+    expect(resolveSliceDiffCap({ realPath: true, size: 'S' }).enabled).toBe(true);
+    expect(resolveSliceDiffCap({ realPath: true, size: 'M' }).enabled).toBe(true);
+    expect(resolveSliceDiffCap({ realPath: true, size: undefined }).enabled).toBe(true);
+  });
+
+  it('is disabled for an L-size task — a large/greenfield change legitimately exceeds the cap (TASK-68)', () => {
+    expect(resolveSliceDiffCap({ realPath: true, size: 'L' }).enabled).toBe(false);
+  });
+
+  it('L-size override does not re-enable the cap on the mock path', () => {
+    expect(resolveSliceDiffCap({ realPath: false, size: 'S' }).enabled).toBe(false);
+  });
 });
 
 describe('sliceDiffExceedsCap (TASK-56)', () => {

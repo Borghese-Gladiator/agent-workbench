@@ -71,4 +71,34 @@ describe('runBrowserQaViaServer (Fix 5: real browser QA)', () => {
       }),
     ).rejects.toThrow(/did not become ready/);
   }, 20_000);
+
+  it('surfaces captured server output when a start crashes, not a bare timeout (TASK-66)', async () => {
+    await expect(
+      runBrowserQaViaServer({
+        startCommand: 'node -e "console.error(\'BOOM: missing dependency vite\'); process.exit(3)"',
+        worktreePath: artifactsDir,
+        baseUrl: 'http://127.0.0.1:5323',
+        scenario: { baseUrl: 'http://127.0.0.1:5323', steps: [] },
+        context,
+        artifactStore: store,
+        readinessTimeoutMs: 5_000,
+      }),
+    ).rejects.toThrow(/BOOM: missing dependency vite/);
+  }, 20_000);
+
+  it('persists a command-log artifact with the server output on a failed start (TASK-66)', async () => {
+    await expect(
+      runBrowserQaViaServer({
+        startCommand: 'node -e "console.log(\'starting up...\'); console.error(\'fatal: EADDRINUSE\'); process.exit(1)"',
+        worktreePath: artifactsDir,
+        baseUrl: 'http://127.0.0.1:5324',
+        scenario: { baseUrl: 'http://127.0.0.1:5324', steps: [] },
+        context,
+        artifactStore: store,
+        readinessTimeoutMs: 5_000,
+      }),
+    ).rejects.toThrow(/exited/);
+    const log = store.listByTask('task-1').find((r) => r.kind === 'command-log');
+    expect(log).toBeDefined();
+  }, 20_000);
 });
