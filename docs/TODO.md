@@ -296,7 +296,7 @@ four separate times, each on workbench machinery rather than bad agent output. T
 implementation was complete and passed `implement` + `verify`; the gates around it
 were the problem. These four items are those blockers.
 
-### [ ] TASK-65: No QA command exists from the initial task write — `exercise` can't self-bootstrap
+### [x] TASK-65: No QA command exists from the initial task write — `exercise` can't self-bootstrap
 
 **What's wrong.** When a task is created against a repo, there is no QA/start
 command associated with it, so the `exercise` (browser QA) phase has nothing to
@@ -329,7 +329,7 @@ real browser QA against that app with **no** manual `repository_commands` insert
 *Test:* a task fixture with an empty starting repo and a produced FastAPI/Vite app
 resolves a start command and `exercise` launches it.
 
-### [ ] TASK-66: UI dev servers are too brittle to start — add a verbose flag AND make startup robust
+### [x] TASK-66: UI dev servers are too brittle to start — add a verbose flag AND make startup robust
 
 **What's wrong.** (Added by the user — the UI keeps failing to start.) Browser QA
 starts a dev server and waits for it to serve; when the server doesn't come up in
@@ -357,7 +357,7 @@ output in the phase evidence, not just a bare timeout string. *Manual:* a standa
 Vite app starts reliably across repeated runs; an intentionally broken start prints
 the underlying error.
 
-### [ ] TASK-67: `program-design` bodyless-signature check false-positives on valid TS type shapes
+### [x] TASK-67: `program-design` bodyless-signature check false-positives on valid TS type shapes
 
 **What's wrong.** `signatureIsBodyless()` in
 `workers/temporal-worker/src/activities/program-design-support.ts` decides whether a
@@ -393,7 +393,7 @@ bodyless; only real statements read as a body — covering both live false-posit
 cases above. *Manual:* an L greenfield task walks `program-design` in one attempt
 with a design that carries realistic TS UI contracts.
 
-### [ ] TASK-68: `slice-diff-exceeds-cap` is an arbitrary line/file cap that dead-ends large legitimate work
+### [x] TASK-68: `slice-diff-exceeds-cap` is an arbitrary line/file cap that dead-ends large legitimate work
 
 **What's wrong.** The velocity guardrail (`slice-guardrail.ts`, default 400 lines /
 20 files) fires a `slice-diff-exceeds-cap` human gate on any real-agent implement
@@ -420,7 +420,7 @@ diff size, or is gated exactly once with an ack that persists so the run proceed
 the next pass — verified by an implement diff over the cap reaching `verify` without
 `AWB_SLICE_DIFF_CAP=0` and without looping.
 
-### [ ] TASK-69: A stale `@awb/*` dist silently breaks the CLI mid-run (not just the daemon)
+### [x] TASK-69: A stale `@awb/*` dist silently breaks the CLI mid-run (not just the daemon)
 
 **What's wrong.** The daemon/worker run via `tsx` (source), but the **CLI resolves
 `@awb/*` packages from their built `dist/`**. When a package's source gains an export
@@ -448,7 +448,7 @@ direct SQLite reads (`phase_attempts`, `program_designs`, `repository_commands`,
 show` prints a clear "stale dist — run pnpm build" message (not a blank line or a raw
 `SyntaxError`), and the recovery is one documented command.
 
-### [ ] TASK-70: `up` no-ops on a warm stack, hiding which runtime/env is actually live
+### [x] TASK-70: `up` no-ops on a warm stack, hiding which runtime/env is actually live
 
 **What's wrong.** `up` prints "runtime already ready" when a stack from a *prior*
 session is still running — but that warm stack may have booted with a **different

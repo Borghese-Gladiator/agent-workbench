@@ -3,7 +3,15 @@ import { join } from 'node:path';
 import { runCommand } from '@awb/execution';
 import { createReadOnlyDatabase } from '@awb/database';
 import { initDataDir } from '@awb/config';
-import { getRepositoryCommands, getRepository, runGit, getChangedPaths } from '@awb/repository';
+import {
+  getRepositoryCommands,
+  getRepository,
+  runGit,
+  getChangedPaths,
+  discoverCommands,
+  resolveRunCommand,
+  type RunCommandSource,
+} from '@awb/repository';
 import type { ValidatedCommand, CommandPurpose } from '@awb/domain';
 
 function inheritedEnv(): Record<string, string> {
@@ -124,6 +132,56 @@ export async function resolveStartCommand(repositoryId: string): Promise<string 
   } finally {
     database.close();
   }
+}
+
+/**
+ * A resolved start command for the browser-QA path. `serves: true` carries the `baseUrl` a browser
+ * loads; `serves: false` is a one-shot run / CLI / compiled binary (captured for a future non-browser
+ * QA consumer, never driven by `waitForServer`). Mirrors `@awb/repository`'s `ResolvedRunCommand`, with
+ * the extra `repository-commands` / `worktree-discovery` sources for the persisted/discovered tiers.
+ */
+export type ResolvedStartCommand =
+  | { command: string; serves: true; baseUrl: string; source: RunCommandSource | 'repository-commands' | 'worktree-discovery' }
+  | { command: string; serves: false; source: RunCommandSource | 'repository-commands' | 'worktree-discovery' };
+
+/**
+ * Resolves a run command for a task worktree, for the browser-QA path (TASK-65).
+ *
+ * A greenfield task starts against an EMPTY repo, so `repository_commands` (populated by `repo
+ * refresh` from the registered snapshot) has no `start` row — the runnable form of the app only exists
+ * *after* implement, in the worktree. This resolves against the worktree in tiers so `exercise` has a
+ * real target without a human hand-inserting a `start` row into SQLite:
+ *   1. the persisted `repository_commands` `start` (a pre-existing repo that already ships a dev server);
+ *   2. fresh discovery over the worktree (`discoverCommands` maps a package.json `start`/`dev` script
+ *      to purpose `start`), for an app that produced its own scripts;
+ *   3. comprehensive, cross-ecosystem inference (`@awb/repository`'s `resolveRunCommand`): explicit run
+ *      declarations first (Procfile / docker-compose / Make-Task-just / Pipfile / pyproject scripts),
+ *      then framework/convention inference (Django/FastAPI/Flask, Next/Vite/CRA, Spring Boot, Go http),
+ *      then a bare language default — each tagged `serves` (a web server vs a CLI/binary).
+ *
+ * Returns undefined only when no tier recognizes the project at all; the caller then keeps its CLI
+ * fallback. Tiers 1-2 are assumed to be servers (a discovered `start`/`dev` script is a dev server);
+ * tier 3 carries its own `serves` tag.
+ */
+export async function resolveStartCommandForWorktree(input: {
+  repositoryId: string;
+  worktreePath: string;
+  /** The browser baseUrl the caller intends to use (env/default); inference matches its port when set. */
+  requestedBaseUrl?: string;
+}): Promise<ResolvedStartCommand | undefined> {
+  const baseUrl = input.requestedBaseUrl ?? 'http://localhost:5173';
+
+  const persisted = await resolveStartCommand(input.repositoryId);
+  if (persisted) {
+    return { command: persisted, serves: true, baseUrl, source: 'repository-commands' };
+  }
+
+  const discovered = (await discoverCommands(input.worktreePath)).find((c) => c.purpose === 'start');
+  if (discovered) {
+    return { command: discovered.command, serves: true, baseUrl, source: 'worktree-discovery' };
+  }
+
+  return resolveRunCommand(input.worktreePath, { requestedBaseUrl: input.requestedBaseUrl });
 }
 
 /**

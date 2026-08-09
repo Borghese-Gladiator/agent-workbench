@@ -27,7 +27,7 @@ import {
   resolveVerificationCommands,
   resolveReviewDiff,
   resolveDiffNumstat,
-  resolveStartCommand,
+  resolveStartCommandForWorktree,
   resolveRepositoryPath,
   installWorktreeDependencies,
 } from './command-support.js';
@@ -891,7 +891,7 @@ const implementHandler: PhaseHandler = {
     // Velocity guardrail: if the run's committed diff exceeds the configurable cap, force a
     // human checkpoint before continuing rather than dumping a large unreviewed diff downstream. Off on
     // the mock path; on for the real path. Only meaningful once a real commit exists.
-    const cap = resolveSliceDiffCap(ctx.profile.usesRealAgent);
+    const cap = resolveSliceDiffCap({ realPath: ctx.profile.usesRealAgent, size: runState.contract?.size });
     if (cap.enabled && realBuilder && runState.worktreePath && candidateSha !== runState.baseSha) {
       const stat = await resolveDiffNumstat({
         worktreePath: runState.worktreePath,
@@ -1054,18 +1054,33 @@ const exerciseHandler: PhaseHandler = {
     let qaResult: QaResult;
     let ranBrowserQa = false;
     const qaMode = ctx.profile.usesRealAgent ? process.env.AWB_QA_MODE : undefined;
-    const startCommand =
-      qaMode === 'browser' ? await resolveStartCommand(state.repositoryId) : undefined;
+    // TASK-65: resolve the start command against the task WORKTREE (post-implement), not just the
+    // registered-repo snapshot — a greenfield app's runnable form only exists after implement, so the
+    // DB `start` row is empty. Tiers: persisted command → worktree discovery → framework inference.
+    const resolvedStart =
+      qaMode === 'browser' && runState.worktreePath
+        ? await resolveStartCommandForWorktree({
+            repositoryId: state.repositoryId,
+            worktreePath: runState.worktreePath,
+            requestedBaseUrl: process.env.AWB_QA_BASE_URL,
+          })
+        : undefined;
 
-    if (startCommand && runState.worktreePath) {
+    // Only a server (`serves: true`) can be browser-QA'd — it carries a baseUrl to point Chromium at.
+    // A `serves: false` result (a CLI / compiled binary / one-shot run) has no URL, so we skip browser
+    // QA rather than hand `waitForServer` a port nothing binds (which would hang until timeout).
+    if (resolvedStart?.serves === true && runState.worktreePath) {
       ranBrowserQa = true;
+      // A caller-supplied AWB_QA_BASE_URL still wins; otherwise use the resolver's baseUrl (which the
+      // framework-inference tier matches to the port its start command binds to).
+      const baseUrl = process.env.AWB_QA_BASE_URL ?? resolvedStart.baseUrl;
       qaResult = await ctx.observability.time('qaExecutionMs', () =>
         runBrowserQaViaServer({
-          startCommand,
+          startCommand: resolvedStart.command,
           worktreePath: runState.worktreePath as string,
-          baseUrl: process.env.AWB_QA_BASE_URL ?? 'http://localhost:5173',
+          baseUrl,
           scenario: {
-            baseUrl: process.env.AWB_QA_BASE_URL ?? 'http://localhost:5173',
+            baseUrl,
             steps: [{ kind: 'navigate', url: '/' }, { kind: 'screenshot', name: 'landing' }],
           },
           context,
@@ -1090,6 +1105,26 @@ const exerciseHandler: PhaseHandler = {
           {
             consumerScriptSource:
               process.env.AWB_QA_LIBRARY_SCRIPT ?? 'console.log("ASSERT:library-importable=true");',
+          },
+          context,
+          runState.artifactStore,
+        ),
+      );
+    } else if (qaMode === 'browser') {
+      // Browser QA was requested but no start command could be resolved from the DB, the worktree, or
+      // the produced project shape (TASK-65). Do NOT silently fall through to the trivial `echo`
+      // check — that reads as a false pass while covering no behavioral claim. Fail QA legibly so the
+      // gate blocks with an actionable reason instead of masking a missing runnable target.
+      qaResult = await ctx.observability.time('qaExecutionMs', () =>
+        runCliQa(
+          {
+            command: 'sh',
+            args: [
+              '-c',
+              'echo "no start command could be resolved for browser QA (see TASK-65)"; exit 1',
+            ],
+            cwd,
+            expectations: [{ kind: 'exitCode', equals: 0 }],
           },
           context,
           runState.artifactStore,

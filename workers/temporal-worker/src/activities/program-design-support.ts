@@ -42,16 +42,25 @@ function toSignatures(raw: Array<{ signature?: string; intent?: string }> | unde
 }
 
 /**
- * A signature is "bodyless" when it does not embed a `{ ... }` block containing statements. Design
- * declarations (a TS interface's `{ field: T }` shape is fine — no `;`-terminated statements/`return`)
- * pass; a pasted function body does not. Deliberately conservative: flags obvious implementation leaks.
+ * A signature is "bodyless" when it does not embed a `{ ... }` block containing executable statements.
+ * A design artifact legitimately carries type structure in its signatures — a TS interface / type
+ * literal / class shape, or an inline object return type like `Promise<{ rows: Record<string, T>[];
+ * total: number }>`. Those are declarations, not bodies, even though they use `;`/`,` and nested
+ * generics. Only unambiguous statement markers signal a leaked implementation: an explicit `return`,
+ * control flow (`if`/`for`/`while`/`switch (…)`), an `await`, or a bare `const|let|var` declaration
+ * inside the braces. This avoids the fragile member-splitting that mis-flagged commas inside generic
+ * type arguments, and it deliberately does NOT flag a `=>`: a function-type member such as
+ * `interface Props { onClick: () => void }` is a legitimate declaration, not an arrow body — a real
+ * leaked arrow body carries one of the statement markers above (or a `return`) and is caught by those.
  */
 export function signatureIsBodyless(signature: string): boolean {
   const braceBody = signature.match(/\{([\s\S]*)\}/);
   if (!braceBody) return true;
-  const inner = braceBody[1] ?? '';
-  // A `return`, a `;`-terminated statement, or control flow inside the braces means a body leaked in.
-  return !/\breturn\b|;|\bif\s*\(|\bfor\s*\(|\bwhile\s*\(/.test(inner);
+  const inner = (braceBody[1] ?? '').trim();
+  if (inner.length === 0) return true;
+  return !/\breturn\b|\bif\s*\(|\bfor\s*\(|\bwhile\s*\(|\bswitch\s*\(|\bawait\b|\b(?:const|let|var)\s/.test(
+    inner,
+  );
 }
 
 export interface ParsedProgramDesign {

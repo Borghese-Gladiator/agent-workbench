@@ -5,7 +5,7 @@ import { Worker } from '@temporalio/worker';
 import { buildServer, type DaemonServer } from '../server.js';
 import { setTemporalClientForTesting } from '../temporal-client.js';
 import { taskQueueName } from '../temporal-worker-constants.js';
-import { describeRuntimeStatus } from './status.js';
+import { describeRuntimeStatus, describeRuntimeConfig } from './status.js';
 
 /**
  * A minimal Client stand-in whose describeTaskQueue rejects, simulating Temporal being unreachable
@@ -37,6 +37,38 @@ describe('daemon /api/status', () => {
       testEnv = undefined;
     }
     delete process.env.AWB_DATA_DIR;
+    for (const k of ['AWB_AGENT_RUNTIME', 'AWB_QA_MODE', 'AWB_SLICE_DIFF_CAP', 'AWB_SLICE_DIFF_LINE_CAP', 'AWB_SLICE_DIFF_FILE_CAP']) {
+      delete process.env[k];
+    }
+  });
+
+  describe('describeRuntimeConfig (TASK-70)', () => {
+    it('reports the runtime env the stack booted with', () => {
+      process.env.AWB_AGENT_RUNTIME = 'claude';
+      process.env.AWB_QA_MODE = 'browser';
+      process.env.AWB_SLICE_DIFF_CAP = '0';
+      const cfg = describeRuntimeConfig();
+      expect(cfg.agentRuntime).toBe('claude');
+      expect(cfg.qaMode).toBe('browser');
+      expect(cfg.sliceDiffCap.disabled).toBe(true);
+    });
+
+    it('degrades an unset/unknown runtime to mock and reports qa off', () => {
+      const cfg = describeRuntimeConfig();
+      expect(cfg.agentRuntime).toBe('mock');
+      expect(cfg.qaMode).toBeNull();
+      expect(cfg.sliceDiffCap.disabled).toBe(false);
+
+      process.env.AWB_AGENT_RUNTIME = 'not-a-runtime';
+      expect(describeRuntimeConfig().agentRuntime).toBe('mock');
+    });
+
+    it('is included in the aggregate status payload', async () => {
+      setTemporalClientForTesting(unreachableTemporalClient());
+      const status = await describeRuntimeStatus();
+      expect(status.runtimeConfig).toBeDefined();
+      expect(status.runtimeConfig.agentRuntime).toBe('mock');
+    }, 15_000);
   });
 
   it('reports temporal+worker unhealthy when Temporal is unreachable', async () => {

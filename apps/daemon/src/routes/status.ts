@@ -1,8 +1,25 @@
 import type { FastifyInstance } from 'fastify';
+import { describeRuntimeShape, type RuntimeShapeConfig } from '@awb/config';
 import { getTemporalClient } from '../temporal-client.js';
 import { taskQueueName } from '../temporal-worker-constants.js';
 
 export type ServiceState = 'ready' | 'unhealthy' | 'unknown';
+
+/**
+ * The runtime-shaping env the stack booted with (TASK-70). The daemon and worker are spawned by `up`
+ * with the same inherited `process.env`, so the daemon's own env is a faithful readback of what the
+ * worker is executing under — the value a driver needs to confirm a warm stack matches its intended
+ * env (e.g. `claude` vs a silent `mock`) BEFORE creating a task.
+ *
+ * Aliases {@link RuntimeShapeConfig} from `@awb/config`, which owns the single "unset/unknown → mock"
+ * defaulting rule — the CLI's `up` mismatch check derives "requested" through the SAME function, so the
+ * two sides cannot drift.
+ */
+export type RuntimeConfigStatus = RuntimeShapeConfig;
+
+export function describeRuntimeConfig(): RuntimeConfigStatus {
+  return describeRuntimeShape(process.env);
+}
 
 export interface RuntimeStatus {
   ok: boolean;
@@ -12,6 +29,7 @@ export interface RuntimeStatus {
     worker: ServiceState;
     daemon: ServiceState;
   };
+  runtimeConfig: RuntimeConfigStatus;
 }
 
 const PROBE_TIMEOUT_MS = 2_000;
@@ -58,7 +76,7 @@ export async function describeRuntimeStatus(): Promise<RuntimeStatus> {
   const runtime: ServiceState =
     temporal === 'ready' && worker === 'ready' && services.daemon === 'ready' ? 'ready' : 'unhealthy';
 
-  return { ok: runtime === 'ready', runtime, services };
+  return { ok: runtime === 'ready', runtime, services, runtimeConfig: describeRuntimeConfig() };
 }
 
 export function registerStatusRoute(app: FastifyInstance): void {

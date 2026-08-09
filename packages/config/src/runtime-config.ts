@@ -67,6 +67,49 @@ export function resolveRuntimeConfig(): RuntimeConfig {
 }
 
 /**
+ * The runtime-SHAPING env a stack booted with (as opposed to the network identity above): which agent
+ * runtime executes, whether/how QA runs, and the slice-diff velocity cap. Both the daemon (reporting
+ * what a warm stack is actually running under) and the CLI (computing what THIS `up` would request)
+ * derive it from here, so the "unset/unknown → mock" defaulting rule lives in exactly one place and
+ * the two sides can never drift.
+ */
+export interface RuntimeShapeConfig {
+  agentRuntime: string;
+  qaMode: string | null;
+  sliceDiffCap: {
+    disabled: boolean;
+    lineCap: number | null;
+    fileCap: number | null;
+  };
+}
+
+export const KNOWN_AGENT_RUNTIMES = ['claude', 'codex', 'pi', 'opencode', 'mock'] as const;
+
+/**
+ * Normalizes the runtime-shaping env into a {@link RuntimeShapeConfig}. An unset or unrecognized
+ * `AWB_AGENT_RUNTIME` degrades to `mock` (mirrors the worker's own default), so a stack booted under a
+ * typo'd runtime reports `mock` — the same thing it actually runs as. Takes an explicit env map so the
+ * CLI can normalize `process.env` through the SAME rule the daemon applies to its own env, and so it
+ * is testable without mutating globals.
+ */
+export function describeRuntimeShape(env: NodeJS.ProcessEnv = process.env): RuntimeShapeConfig {
+  const rawRuntime = env.AWB_AGENT_RUNTIME?.trim();
+  const known = new Set<string>(KNOWN_AGENT_RUNTIMES);
+  const agentRuntime = rawRuntime && known.has(rawRuntime) ? rawRuntime : 'mock';
+  const lineRaw = env.AWB_SLICE_DIFF_LINE_CAP;
+  const fileRaw = env.AWB_SLICE_DIFF_FILE_CAP;
+  return {
+    agentRuntime,
+    qaMode: env.AWB_QA_MODE ?? null,
+    sliceDiffCap: {
+      disabled: env.AWB_SLICE_DIFF_CAP === '0',
+      lineCap: lineRaw ? Number.parseInt(lineRaw, 10) : null,
+      fileCap: fileRaw ? Number.parseInt(fileRaw, 10) : null,
+    },
+  };
+}
+
+/**
  * A short, stable, filesystem/DNS-safe tag derived from a checkout's identity (its workspace root
  * path). Deterministic per root and distinct across roots, so two worktrees derive different tags
  * without coordination.
