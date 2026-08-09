@@ -1,5 +1,4 @@
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { runCommand } from '@awb/execution';
 import { createReadOnlyDatabase } from '@awb/database';
@@ -10,8 +9,8 @@ import {
   runGit,
   getChangedPaths,
   discoverCommands,
-  readPackageJson,
-  findPythonManifests,
+  resolveRunCommand,
+  type RunCommandSource,
 } from '@awb/repository';
 import type { ValidatedCommand, CommandPurpose } from '@awb/domain';
 
@@ -135,27 +134,34 @@ export async function resolveStartCommand(repositoryId: string): Promise<string 
   }
 }
 
-export interface ResolvedStartCommand {
-  command: string;
-  /** The URL the app is expected to serve once started, so browser QA drives the right host/port. */
-  baseUrl: string;
-  source: 'repository-commands' | 'worktree-discovery' | 'framework-inference';
-}
+/**
+ * A resolved start command for the browser-QA path. `serves: true` carries the `baseUrl` a browser
+ * loads; `serves: false` is a one-shot run / CLI / compiled binary (captured for a future non-browser
+ * QA consumer, never driven by `waitForServer`). Mirrors `@awb/repository`'s `ResolvedRunCommand`, with
+ * the extra `repository-commands` / `worktree-discovery` sources for the persisted/discovered tiers.
+ */
+export type ResolvedStartCommand =
+  | { command: string; serves: true; baseUrl: string; source: RunCommandSource | 'repository-commands' | 'worktree-discovery' }
+  | { command: string; serves: false; source: RunCommandSource | 'repository-commands' | 'worktree-discovery' };
 
 /**
- * Resolves a dev-server start command for a task worktree, for the browser-QA path (TASK-65).
+ * Resolves a run command for a task worktree, for the browser-QA path (TASK-65).
  *
  * A greenfield task starts against an EMPTY repo, so `repository_commands` (populated by `repo
  * refresh` from the registered snapshot) has no `start` row — the runnable form of the app only exists
- * *after* implement, in the worktree. This resolves against the worktree in three tiers so `exercise`
- * has a real target without a human hand-inserting a `start` row into SQLite:
+ * *after* implement, in the worktree. This resolves against the worktree in tiers so `exercise` has a
+ * real target without a human hand-inserting a `start` row into SQLite:
  *   1. the persisted `repository_commands` `start` (a pre-existing repo that already ships a dev server);
  *   2. fresh discovery over the worktree (`discoverCommands` maps a package.json `start`/`dev` script
  *      to purpose `start`), for an app that produced its own scripts;
- *   3. framework inference from the produced project shape (a FastAPI app → `uvicorn`, a Vite/Node app
- *      with no start script → the package-manager `dev` runner), for the common greenfield MVP.
+ *   3. comprehensive, cross-ecosystem inference (`@awb/repository`'s `resolveRunCommand`): explicit run
+ *      declarations first (Procfile / docker-compose / Make-Task-just / Pipfile / pyproject scripts),
+ *      then framework/convention inference (Django/FastAPI/Flask, Next/Vite/CRA, Spring Boot, Go http),
+ *      then a bare language default — each tagged `serves` (a web server vs a CLI/binary).
  *
- * Returns undefined only when no tier yields a runnable target; the caller then keeps its CLI fallback.
+ * Returns undefined only when no tier recognizes the project at all; the caller then keeps its CLI
+ * fallback. Tiers 1-2 are assumed to be servers (a discovered `start`/`dev` script is a dev server);
+ * tier 3 carries its own `serves` tag.
  */
 export async function resolveStartCommandForWorktree(input: {
   repositoryId: string;
@@ -163,100 +169,19 @@ export async function resolveStartCommandForWorktree(input: {
   /** The browser baseUrl the caller intends to use (env/default); inference matches its port when set. */
   requestedBaseUrl?: string;
 }): Promise<ResolvedStartCommand | undefined> {
+  const baseUrl = input.requestedBaseUrl ?? 'http://localhost:5173';
+
   const persisted = await resolveStartCommand(input.repositoryId);
   if (persisted) {
-    return { command: persisted, baseUrl: input.requestedBaseUrl ?? 'http://localhost:5173', source: 'repository-commands' };
+    return { command: persisted, serves: true, baseUrl, source: 'repository-commands' };
   }
 
   const discovered = (await discoverCommands(input.worktreePath)).find((c) => c.purpose === 'start');
   if (discovered) {
-    return {
-      command: discovered.command,
-      baseUrl: input.requestedBaseUrl ?? 'http://localhost:5173',
-      source: 'worktree-discovery',
-    };
+    return { command: discovered.command, serves: true, baseUrl, source: 'worktree-discovery' };
   }
 
-  return inferStartCommandFromWorktree(input.worktreePath, input.requestedBaseUrl);
-}
-
-function portFromUrl(url: string | undefined, fallback: number): number {
-  if (!url) return fallback;
-  try {
-    const parsed = new URL(url);
-    if (parsed.port) return Number.parseInt(parsed.port, 10);
-    return parsed.protocol === 'https:' ? 443 : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-/**
- * Infers a start command from a produced project's shape when neither the DB nor package.json scripts
- * carry one. Recognizes a FastAPI ASGI app (a `FastAPI(` at a conventional module path → `uvicorn`)
- * and a Vite/Node app (a `package.json` + `index.html`, or a `vite` dependency → the package-manager
- * dev runner). Returns undefined for an unrecognized shape.
- */
-export async function inferStartCommandFromWorktree(
-  worktreePath: string,
-  requestedBaseUrl?: string,
-): Promise<ResolvedStartCommand | undefined> {
-  const fastApi = await inferFastApiModulePath(worktreePath);
-  if (fastApi) {
-    const port = portFromUrl(requestedBaseUrl, 8000);
-    return {
-      command: `python -m uvicorn ${fastApi}:app --host 127.0.0.1 --port ${port}`,
-      baseUrl: `http://127.0.0.1:${port}`,
-      source: 'framework-inference',
-    };
-  }
-
-  const pkg = await readPackageJson(worktreePath);
-  if (pkg) {
-    const isVite =
-      existsSync(join(worktreePath, 'index.html')) ||
-      Boolean(pkg.dependencies?.vite) ||
-      Boolean(pkg.devDependencies?.vite);
-    if (isVite) {
-      const packageManager = pkg.packageManager?.split('@')[0] ?? 'npm';
-      const runner = packageManager === 'yarn' ? 'yarn' : packageManager === 'pnpm' ? 'pnpm' : 'npm run';
-      const port = portFromUrl(requestedBaseUrl, 5173);
-      return {
-        command: `${runner} dev -- --host 127.0.0.1 --port ${port}`,
-        baseUrl: `http://127.0.0.1:${port}`,
-        source: 'framework-inference',
-      };
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * Finds the module path of a FastAPI app instance (`app = FastAPI(...)`) at a conventional location,
- * returned in `uvicorn` dotted-module form (e.g. `app.main` for `app/main.py`). Undefined when no
- * FastAPI app is found — the repo is not a FastAPI service.
- */
-async function inferFastApiModulePath(worktreePath: string): Promise<string | undefined> {
-  const manifests = await findPythonManifests(worktreePath);
-  if (manifests.length === 0) return undefined;
-  const candidates = [
-    { file: 'app/main.py', module: 'app.main' },
-    { file: 'main.py', module: 'main' },
-    { file: 'src/main.py', module: 'src.main' },
-    { file: 'app/app.py', module: 'app.app' },
-  ];
-  for (const { file, module } of candidates) {
-    const path = join(worktreePath, file);
-    if (!existsSync(path)) continue;
-    try {
-      const raw = await readFile(path, 'utf8');
-      if (/\bFastAPI\s*\(/.test(raw) && /\bapp\s*=/.test(raw)) return module;
-    } catch {
-      continue;
-    }
-  }
-  return undefined;
+  return resolveRunCommand(input.worktreePath, { requestedBaseUrl: input.requestedBaseUrl });
 }
 
 /**

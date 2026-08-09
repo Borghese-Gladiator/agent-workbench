@@ -1066,7 +1066,10 @@ const exerciseHandler: PhaseHandler = {
           })
         : undefined;
 
-    if (resolvedStart && runState.worktreePath) {
+    // Only a server (`serves: true`) can be browser-QA'd — it carries a baseUrl to point Chromium at.
+    // A `serves: false` result (a CLI / compiled binary / one-shot run) has no URL, so we skip browser
+    // QA rather than hand `waitForServer` a port nothing binds (which would hang until timeout).
+    if (resolvedStart?.serves === true && runState.worktreePath) {
       ranBrowserQa = true;
       // A caller-supplied AWB_QA_BASE_URL still wins; otherwise use the resolver's baseUrl (which the
       // framework-inference tier matches to the port its start command binds to).

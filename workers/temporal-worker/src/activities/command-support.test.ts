@@ -2,9 +2,12 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { inferStartCommandFromWorktree } from './command-support.js';
+import { resolveRunCommand } from '@awb/repository';
 
-describe('inferStartCommandFromWorktree (TASK-65)', () => {
+// The comprehensive cross-ecosystem matrix lives in @awb/repository's run-command.test.ts. This file
+// covers the worker's contract with it: tier-3 delegation returns a `serves`-tagged result that the
+// exercise phase can gate on. (Tiers 1-2 hit SQLite and are covered by the DB integration path.)
+describe('resolveRunCommand (worktree tier-3 inference, TASK-65)', () => {
   let dir: string;
 
   beforeEach(async () => {
@@ -15,7 +18,7 @@ describe('inferStartCommandFromWorktree (TASK-65)', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('infers a uvicorn command for a produced FastAPI app at app/main.py', async () => {
+  it('infers a serving uvicorn command for a produced FastAPI app at app/main.py', async () => {
     await writeFile(join(dir, 'pyproject.toml'), '[project]\nname = "lunch"\n');
     await mkdir(join(dir, 'app'), { recursive: true });
     await writeFile(
@@ -23,55 +26,21 @@ describe('inferStartCommandFromWorktree (TASK-65)', () => {
       'from fastapi import FastAPI\n\napp = FastAPI()\n\n@app.get("/")\ndef root():\n    return {"ok": True}\n',
     );
 
-    const resolved = await inferStartCommandFromWorktree(dir, 'http://localhost:8000');
-    expect(resolved?.source).toBe('framework-inference');
+    const resolved = await resolveRunCommand(dir, { requestedBaseUrl: 'http://localhost:8000' });
+    expect(resolved?.serves).toBe(true);
     expect(resolved?.command).toContain('uvicorn app.main:app');
     expect(resolved?.command).toContain('--port 8000');
-    expect(resolved?.baseUrl).toBe('http://127.0.0.1:8000');
-  });
-
-  it('matches the port from the requested base URL for a FastAPI app', async () => {
-    await writeFile(join(dir, 'requirements.txt'), 'fastapi\nuvicorn\n');
-    await writeFile(join(dir, 'main.py'), 'from fastapi import FastAPI\napp = FastAPI()\n');
-
-    const resolved = await inferStartCommandFromWorktree(dir, 'http://localhost:9100');
-    expect(resolved?.command).toContain('uvicorn main:app');
-    expect(resolved?.command).toContain('--port 9100');
-    expect(resolved?.baseUrl).toBe('http://127.0.0.1:9100');
-  });
-
-  it('infers a vite dev command for a produced Vite app (index.html + package.json)', async () => {
-    await writeFile(
-      join(dir, 'package.json'),
-      JSON.stringify({ name: 'ui', devDependencies: { vite: '^5' } }),
-    );
-    await writeFile(join(dir, 'index.html'), '<!doctype html><div id="root"></div>');
-
-    const resolved = await inferStartCommandFromWorktree(dir, 'http://localhost:5173');
-    expect(resolved?.source).toBe('framework-inference');
-    expect(resolved?.command).toContain('dev');
-    expect(resolved?.command).toContain('--port 5173');
-    expect(resolved?.baseUrl).toBe('http://127.0.0.1:5173');
-  });
-
-  it('honors the package manager for the vite dev runner', async () => {
-    await writeFile(
-      join(dir, 'package.json'),
-      JSON.stringify({ name: 'ui', packageManager: 'pnpm@9.0.0', dependencies: { vite: '^5' } }),
-    );
-
-    const resolved = await inferStartCommandFromWorktree(dir);
-    expect(resolved?.command.startsWith('pnpm dev')).toBe(true);
+    expect(resolved && resolved.serves ? resolved.baseUrl : undefined).toBe('http://127.0.0.1:8000');
   });
 
   it('returns undefined for an unrecognized project shape', async () => {
     await writeFile(join(dir, 'README.md'), '# just docs');
-    expect(await inferStartCommandFromWorktree(dir)).toBeUndefined();
+    expect(await resolveRunCommand(dir)).toBeUndefined();
   });
 
-  it('does not infer FastAPI when the FastAPI app instance is absent', async () => {
-    await writeFile(join(dir, 'pyproject.toml'), '[project]\nname = "cli"\n');
-    await writeFile(join(dir, 'main.py'), 'def main():\n    print("hi")\n');
-    expect(await inferStartCommandFromWorktree(dir)).toBeUndefined();
+  it('tags a compiled C project serves:false (no browser-QA target)', async () => {
+    await writeFile(join(dir, 'main.c'), 'int main(void){return 0;}\n');
+    const resolved = await resolveRunCommand(dir);
+    expect(resolved?.serves).toBe(false);
   });
 });
