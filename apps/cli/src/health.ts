@@ -14,9 +14,22 @@ export interface ServiceHealth {
   uptimeMs?: number;
 }
 
+/**
+ * The runtime-shaping env the running stack booted with, as reported by the daemon's /api/status
+ * (TASK-70). Lets `up`/`status` show whether a warm stack is actually running `claude` vs a silent
+ * `mock`, and with what QA mode / slice caps — the visibility a driver needs before creating a task.
+ * Undefined when the daemon is unreachable or is an older build without the field.
+ */
+export interface RuntimeConfigHealth {
+  agentRuntime: string;
+  qaMode: string | null;
+  sliceDiffCap: { disabled: boolean; lineCap: number | null; fileCap: number | null };
+}
+
 export interface RuntimeHealth {
   runtime: ServiceState;
   services: Record<ServiceKey, ServiceHealth>;
+  runtimeConfig?: RuntimeConfigHealth;
 }
 
 const daemonStatusUrl = (): string => `${resolveRuntimeConfig().daemonUrl}/api/status`;
@@ -24,6 +37,7 @@ const daemonStatusUrl = (): string => `${resolveRuntimeConfig().daemonUrl}/api/s
 interface DaemonStatusResponse {
   runtime: string;
   services: { temporal: string; worker: string; daemon: string };
+  runtimeConfig?: RuntimeConfigHealth;
 }
 
 function isAlive(pid: number): boolean {
@@ -72,7 +86,7 @@ async function fetchDaemonStatus(): Promise<DaemonStatusResponse | undefined> {
     if (!body || typeof body.services !== 'object' || body.services === null) return undefined;
     const { temporal, worker, daemon } = body.services;
     if (typeof temporal !== 'string' || typeof worker !== 'string' || typeof daemon !== 'string') return undefined;
-    return { runtime: body.runtime ?? 'unknown', services: { temporal, worker, daemon } };
+    return { runtime: body.runtime ?? 'unknown', services: { temporal, worker, daemon }, runtimeConfig: body.runtimeConfig };
   } catch {
     return undefined;
   }
@@ -173,5 +187,5 @@ export async function probeHealth(): Promise<RuntimeHealth> {
         ? 'starting'
         : 'unhealthy';
 
-  return { runtime, services: { temporal, worker, daemon, ui, otel } };
+  return { runtime, services: { temporal, worker, daemon, ui, otel }, runtimeConfig: status?.runtimeConfig };
 }

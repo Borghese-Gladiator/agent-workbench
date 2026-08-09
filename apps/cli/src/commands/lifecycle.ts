@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { Command } from 'commander';
 import { ensureDataDir, resolveDataDir, isolatedOverrides, resolveRuntimeConfig } from '@awb/config';
-import { probeHealth, type RuntimeHealth, type ServiceHealth } from '../health.js';
+import { probeHealth, type RuntimeHealth, type ServiceHealth, type RuntimeConfigHealth } from '../health.js';
 import { RUNTIME_SERVICES, logPathFor, repoRoot, type ServiceKey } from '../services.js';
 import { startService, stopService, waitForDaemonHealth, streamServiceLogs } from '../process-control.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
@@ -26,11 +26,19 @@ function formatUptime(ms?: number): string {
 }
 
 /** Starts the three runtime services (idempotent) and waits for the daemon to answer health. */
-async function ensureRuntime(opts: { verbose?: boolean } = {}): Promise<{ ready: boolean; alreadyReady: boolean; elapsedMs: number }> {
+async function ensureRuntime(opts: { verbose?: boolean } = {}): Promise<{
+  ready: boolean;
+  alreadyReady: boolean;
+  elapsedMs: number;
+  runtimeConfig?: RuntimeConfigHealth;
+}> {
   const start = Date.now();
   const before = await probeHealth();
   if (before.runtime === 'ready') {
-    return { ready: true, alreadyReady: true, elapsedMs: Date.now() - start };
+    // A warm stack from a prior session may have booted with a DIFFERENT env (e.g. mock vs claude).
+    // Return its actual runtime config so `up` can report what is really live rather than a bare
+    // "already ready" (TASK-70).
+    return { ready: true, alreadyReady: true, elapsedMs: Date.now() - start, runtimeConfig: before.runtimeConfig };
   }
   // Provision the data dir BEFORE starting Temporal. Temporal's `start-dev --db-filename
   // <dataDir>/temporal/temporal.sqlite` crashes ("failed checking dir for database file") if the
@@ -45,10 +53,43 @@ async function ensureRuntime(opts: { verbose?: boolean } = {}): Promise<{ ready:
   const stream = opts.verbose ? streamServiceLogs(['temporal', 'worker', 'daemon']) : undefined;
   try {
     const ready = await waitForDaemonHealth();
-    return { ready, alreadyReady: false, elapsedMs: Date.now() - start };
+    const after = ready ? await probeHealth() : undefined;
+    return { ready, alreadyReady: false, elapsedMs: Date.now() - start, runtimeConfig: after?.runtimeConfig };
   } finally {
     stream?.stop();
   }
+}
+
+/** One-line human summary of the active runtime env (TASK-70). */
+function formatRuntimeConfig(cfg: RuntimeConfigHealth): string {
+  const parts = [`runtime=${cfg.agentRuntime}`, `qa=${cfg.qaMode ?? 'off'}`];
+  if (cfg.sliceDiffCap.disabled) parts.push('slice-cap=off');
+  else if (cfg.sliceDiffCap.lineCap || cfg.sliceDiffCap.fileCap) {
+    parts.push(`slice-cap=${cfg.sliceDiffCap.lineCap ?? 'default'}L/${cfg.sliceDiffCap.fileCap ?? 'default'}F`);
+  }
+  return parts.join(' ');
+}
+
+/**
+ * Whether the running stack's env differs from what THIS invocation of `up` would boot with. When a
+ * warm stack is reused, the env is frozen from a prior session; if the caller now exports a different
+ * AWB_AGENT_RUNTIME / AWB_QA_MODE, the no-op `up` would silently run under the OLD env. This detects
+ * that mismatch so `up` can warn loudly instead (TASK-70).
+ */
+function runtimeConfigMismatch(live: RuntimeConfigHealth): string[] {
+  const requestedRuntime =
+    process.env.AWB_AGENT_RUNTIME && process.env.AWB_AGENT_RUNTIME.trim() !== ''
+      ? process.env.AWB_AGENT_RUNTIME
+      : 'mock';
+  const requestedQa = process.env.AWB_QA_MODE ?? null;
+  const diffs: string[] = [];
+  if (requestedRuntime !== live.agentRuntime) {
+    diffs.push(`runtime: running=${live.agentRuntime}, requested=${requestedRuntime}`);
+  }
+  if (requestedQa !== live.qaMode) {
+    diffs.push(`qa mode: running=${live.qaMode ?? 'off'}, requested=${requestedQa ?? 'off'}`);
+  }
+  return diffs;
 }
 
 /**
@@ -82,15 +123,24 @@ export function registerLifecycleCommands(program: Command): void {
       if (opts.isolated === true) applyIsolation();
       const cfg = resolveRuntimeConfig();
       const verbose = opts.verbose === true || outputOptions().verbose;
-      const { ready, alreadyReady, elapsedMs } = await ensureRuntime({ verbose });
+      const { ready, alreadyReady, elapsedMs, runtimeConfig } = await ensureRuntime({ verbose });
       const stack = {
         daemonUrl: cfg.daemonUrl,
         temporalAddress: cfg.temporalAddress,
         taskQueue: cfg.taskQueue,
         dataDir: resolveDataDir(),
       };
+      const mismatch = alreadyReady && runtimeConfig ? runtimeConfigMismatch(runtimeConfig) : [];
       if (outputOptions().json) {
-        emitJson({ ok: ready, runtime: ready ? 'ready' : 'unhealthy', alreadyReady, isolated: opts.isolated === true, stack });
+        emitJson({
+          ok: ready,
+          runtime: ready ? 'ready' : 'unhealthy',
+          alreadyReady,
+          isolated: opts.isolated === true,
+          stack,
+          runtimeConfig: runtimeConfig ?? null,
+          envMismatch: mismatch,
+        });
         if (!ready) process.exitCode = 1;
         return;
       }
@@ -105,9 +155,18 @@ export function registerLifecycleCommands(program: Command): void {
         printInfo(`data dir: ${stack.dataDir}`);
       }
       if (alreadyReady) {
-        printInfo('runtime already ready');
+        // Report the env the WARM stack is actually running under, not a bare "already ready" — a
+        // prior session may have booted it with a different runtime/QA mode (TASK-70).
+        const suffix = runtimeConfig ? ` [${formatRuntimeConfig(runtimeConfig)}]` : '';
+        printInfo(`runtime already ready${suffix}`);
+        if (mismatch.length > 0) {
+          printError('warning: the running stack booted with a different env than requested:');
+          for (const d of mismatch) printError(`  - ${d}`);
+          printError('  env is read at spawn — run `awb restart` to boot with the current env before creating a task.');
+        }
       } else {
-        printInfo(`runtime ready (temporal, worker, daemon) [${(elapsedMs / 1000).toFixed(1)}s]`);
+        const suffix = runtimeConfig ? ` [${formatRuntimeConfig(runtimeConfig)}]` : '';
+        printInfo(`runtime ready (temporal, worker, daemon) [${(elapsedMs / 1000).toFixed(1)}s]${suffix}`);
       }
     });
 
@@ -192,6 +251,7 @@ export function registerLifecycleCommands(program: Command): void {
       } else {
         const parts = [`runtime=${health.runtime}`, ...ALL_SERVICES.map((k) => `${k}=${health.services[k].state}`)];
         printResult(parts.join(' '));
+        if (health.runtimeConfig) printResult(formatRuntimeConfig(health.runtimeConfig));
       }
       // Exit nonzero when the required runtime is unhealthy so `status` doubles as a health check.
       if (runtimeUnhealthy) process.exitCode = 1;
@@ -234,6 +294,7 @@ function toJson(health: RuntimeHealth, only: ServiceKey | undefined): unknown {
     runtime: health.runtime,
     services: only ? services : Object.fromEntries(ALL_SERVICES.map((k) => [k, health.services[k].state])),
     ...(only ? { detail: services } : {}),
+    ...(health.runtimeConfig ? { runtimeConfig: health.runtimeConfig } : {}),
   };
 }
 

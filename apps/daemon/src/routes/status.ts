@@ -4,6 +4,41 @@ import { taskQueueName } from '../temporal-worker-constants.js';
 
 export type ServiceState = 'ready' | 'unhealthy' | 'unknown';
 
+/**
+ * The runtime-shaping env the stack booted with (TASK-70). The daemon and worker are spawned by `up`
+ * with the same inherited `process.env`, so the daemon's own env is a faithful readback of what the
+ * worker is executing under — the value a driver needs to confirm a warm stack matches its intended
+ * env (e.g. `claude` vs a silent `mock`) BEFORE creating a task. Mirrors the worker's own defaults:
+ * an unset/unknown `AWB_AGENT_RUNTIME` degrades to `mock`.
+ */
+export interface RuntimeConfigStatus {
+  agentRuntime: string;
+  qaMode: string | null;
+  sliceDiffCap: {
+    disabled: boolean;
+    lineCap: number | null;
+    fileCap: number | null;
+  };
+}
+
+const KNOWN_RUNTIMES = new Set(['claude', 'codex', 'pi', 'opencode', 'mock']);
+
+export function describeRuntimeConfig(): RuntimeConfigStatus {
+  const rawRuntime = process.env.AWB_AGENT_RUNTIME;
+  const agentRuntime = rawRuntime && KNOWN_RUNTIMES.has(rawRuntime) ? rawRuntime : 'mock';
+  const lineRaw = process.env.AWB_SLICE_DIFF_LINE_CAP;
+  const fileRaw = process.env.AWB_SLICE_DIFF_FILE_CAP;
+  return {
+    agentRuntime,
+    qaMode: process.env.AWB_QA_MODE ?? null,
+    sliceDiffCap: {
+      disabled: process.env.AWB_SLICE_DIFF_CAP === '0',
+      lineCap: lineRaw ? Number.parseInt(lineRaw, 10) : null,
+      fileCap: fileRaw ? Number.parseInt(fileRaw, 10) : null,
+    },
+  };
+}
+
 export interface RuntimeStatus {
   ok: boolean;
   runtime: ServiceState;
@@ -12,6 +47,7 @@ export interface RuntimeStatus {
     worker: ServiceState;
     daemon: ServiceState;
   };
+  runtimeConfig: RuntimeConfigStatus;
 }
 
 const PROBE_TIMEOUT_MS = 2_000;
@@ -58,7 +94,7 @@ export async function describeRuntimeStatus(): Promise<RuntimeStatus> {
   const runtime: ServiceState =
     temporal === 'ready' && worker === 'ready' && services.daemon === 'ready' ? 'ready' : 'unhealthy';
 
-  return { ok: runtime === 'ready', runtime, services };
+  return { ok: runtime === 'ready', runtime, services, runtimeConfig: describeRuntimeConfig() };
 }
 
 export function registerStatusRoute(app: FastifyInstance): void {
