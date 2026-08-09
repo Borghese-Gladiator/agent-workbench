@@ -48,16 +48,34 @@ export function startService(key: ServiceKey): { started: boolean; pid?: number 
   return { started: true, pid: child.pid };
 }
 
-/** Sends SIGTERM to a managed service and clears its pid file. Returns whether anything was stopped. */
+/**
+ * Sends SIGTERM to a managed service and clears its pid file. Returns whether anything was stopped.
+ *
+ * Kills the whole PROCESS GROUP, not just the recorded pid. `startService` spawns detached, which
+ * makes the child a group leader (PGID == its pid), so `process.kill(-pid, …)` signals the child and
+ * every descendant it spawned. This matters for services launched via a `pnpm --filter … dev`
+ * wrapper (ui, and worker/daemon in --dev mode): the recorded pid is pnpm's, and pnpm's real work —
+ * the `vite`/`tsx` child — runs in the same group but does NOT reliably die when only pnpm is
+ * signaled. Killing pnpm alone orphaned vite, which kept holding the UI port and produced the
+ * `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL` / `Exit status 143` restart loop on the next start. Falls back
+ * to a single-pid kill if the group is already gone.
+ */
 export function stopService(key: ServiceKey): boolean {
   const pid = readServicePid(key);
   if (pid === undefined) return false;
   let stopped = false;
   try {
-    process.kill(pid, 'SIGTERM');
+    // Negative pid = the process group led by `pid` (see the detached spawn in startService).
+    process.kill(-pid, 'SIGTERM');
     stopped = true;
   } catch {
-    // process already gone
+    // The group is already gone, or the pid was never a group leader — try the bare pid.
+    try {
+      process.kill(pid, 'SIGTERM');
+      stopped = true;
+    } catch {
+      // process already gone
+    }
   } finally {
     const path = pidPathFor(key);
     if (existsSync(path)) unlinkSync(path);
@@ -83,7 +101,11 @@ export async function waitForDaemonHealth(timeoutMs = 30_000): Promise<boolean> 
 
 function portOpen(port: number, timeoutMs = 500): Promise<boolean> {
   return new Promise((resolve) => {
-    const socket = createConnection({ host: '127.0.0.1', port });
+    // Connect to `localhost`, NOT a hardcoded `127.0.0.1`: Vite binds `localhost` which on this
+    // platform resolves to IPv6 `::1` only, so an IPv4-only probe never connects even though the dev
+    // server is up — which made `waitForUi` time out (30s silent wait) and the UI report unhealthy.
+    // Node resolves `localhost` and tries the returned address families, matching however Vite bound.
+    const socket = createConnection({ host: 'localhost', port });
     const done = (open: boolean) => {
       socket.destroy();
       resolve(open);
@@ -103,4 +125,51 @@ export async function waitForUi(timeoutMs = 30_000): Promise<boolean> {
     await new Promise((r) => setTimeout(r, 500));
   }
   return false;
+}
+
+/**
+ * Streams new lines appended to one or more services' log files to stdout, prefixed with the service
+ * key, until `stop()` is called. Used by `--verbose` so the user sees live startup output (vite /
+ * daemon / worker) instead of a silent wait on a detached process whose output goes only to a log
+ * file. Best-effort: a missing log file is simply skipped until it appears.
+ */
+export function streamServiceLogs(keys: ServiceKey[]): { stop: () => void } {
+  const positions = new Map<ServiceKey, number>();
+  for (const key of keys) {
+    // Start from the current end so we show only output produced from now on, not the whole history.
+    try {
+      positions.set(key, existsSync(logPathFor(key)) ? readFileSync(logPathFor(key)).length : 0);
+    } catch {
+      positions.set(key, 0);
+    }
+  }
+  const label = keys.length > 1;
+  const pump = () => {
+    for (const key of keys) {
+      const path = logPathFor(key);
+      if (!existsSync(path)) continue;
+      let buf: Buffer;
+      try {
+        buf = readFileSync(path);
+      } catch {
+        continue;
+      }
+      const from = positions.get(key) ?? 0;
+      if (buf.length > from) {
+        const chunk = buf.subarray(from).toString('utf8');
+        const text = label ? chunk.replace(/^(?=.)/gm, `[${key}] `) : chunk;
+        process.stdout.write(text);
+        positions.set(key, buf.length);
+      } else if (buf.length < from) {
+        positions.set(key, buf.length); // truncated/rotated
+      }
+    }
+  };
+  const interval = setInterval(pump, 200);
+  return {
+    stop: () => {
+      pump(); // flush any final lines
+      clearInterval(interval);
+    },
+  };
 }
