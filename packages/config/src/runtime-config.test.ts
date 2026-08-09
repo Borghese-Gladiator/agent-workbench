@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   resolveRuntimeConfig,
+  describeRuntimeShape,
   deriveIsolationTag,
   isolatedOverrides,
   DEFAULT_DAEMON_PORT,
@@ -163,5 +164,37 @@ describe('isolatedOverrides', () => {
     expect(o).not.toHaveProperty('AWB_DAEMON_PORT');
     // The others are still derived.
     expect(o).toHaveProperty('AWB_TASK_QUEUE');
+  });
+});
+
+describe('describeRuntimeShape', () => {
+  it('reads a fully-set env verbatim', () => {
+    const shape = describeRuntimeShape({
+      AWB_AGENT_RUNTIME: 'claude',
+      AWB_QA_MODE: 'browser',
+      AWB_SLICE_DIFF_CAP: '0',
+      AWB_SLICE_DIFF_LINE_CAP: '400',
+      AWB_SLICE_DIFF_FILE_CAP: '12',
+    } as NodeJS.ProcessEnv);
+    expect(shape).toEqual({
+      agentRuntime: 'claude',
+      qaMode: 'browser',
+      sliceDiffCap: { disabled: true, lineCap: 400, fileCap: 12 },
+    });
+  });
+
+  it('degrades an unset runtime to mock with qa off and no caps', () => {
+    const shape = describeRuntimeShape({} as NodeJS.ProcessEnv);
+    expect(shape.agentRuntime).toBe('mock');
+    expect(shape.qaMode).toBeNull();
+    expect(shape.sliceDiffCap).toEqual({ disabled: false, lineCap: null, fileCap: null });
+  });
+
+  it('degrades a typo/unknown runtime to mock (matches what the stack actually runs)', () => {
+    expect(describeRuntimeShape({ AWB_AGENT_RUNTIME: 'cluade' } as NodeJS.ProcessEnv).agentRuntime).toBe('mock');
+  });
+
+  it('treats a whitespace-only runtime as unset', () => {
+    expect(describeRuntimeShape({ AWB_AGENT_RUNTIME: '   ' } as NodeJS.ProcessEnv).agentRuntime).toBe('mock');
   });
 });

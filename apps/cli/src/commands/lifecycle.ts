@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { Command } from 'commander';
-import { ensureDataDir, resolveDataDir, isolatedOverrides, resolveRuntimeConfig } from '@awb/config';
+import { ensureDataDir, resolveDataDir, isolatedOverrides, resolveRuntimeConfig, describeRuntimeShape } from '@awb/config';
 import { probeHealth, type RuntimeHealth, type ServiceHealth, type RuntimeConfigHealth } from '../health.js';
 import { RUNTIME_SERVICES, logPathFor, repoRoot, type ServiceKey } from '../services.js';
 import { startService, stopService, waitForDaemonHealth, streamServiceLogs } from '../process-control.js';
@@ -75,19 +75,19 @@ function formatRuntimeConfig(cfg: RuntimeConfigHealth): string {
  * warm stack is reused, the env is frozen from a prior session; if the caller now exports a different
  * AWB_AGENT_RUNTIME / AWB_QA_MODE, the no-op `up` would silently run under the OLD env. This detects
  * that mismatch so `up` can warn loudly instead (TASK-70).
+ *
+ * "Requested" is normalized through `describeRuntimeShape` — the SAME rule the daemon applied to the
+ * env it booted under — so the two sides are compared on equal terms (a typo'd runtime normalizes to
+ * `mock` on both, matching what actually runs) and this can never drift from the daemon's defaulting.
  */
 function runtimeConfigMismatch(live: RuntimeConfigHealth): string[] {
-  const requestedRuntime =
-    process.env.AWB_AGENT_RUNTIME && process.env.AWB_AGENT_RUNTIME.trim() !== ''
-      ? process.env.AWB_AGENT_RUNTIME
-      : 'mock';
-  const requestedQa = process.env.AWB_QA_MODE ?? null;
+  const requested = describeRuntimeShape(process.env);
   const diffs: string[] = [];
-  if (requestedRuntime !== live.agentRuntime) {
-    diffs.push(`runtime: running=${live.agentRuntime}, requested=${requestedRuntime}`);
+  if (requested.agentRuntime !== live.agentRuntime) {
+    diffs.push(`runtime: running=${live.agentRuntime}, requested=${requested.agentRuntime}`);
   }
-  if (requestedQa !== live.qaMode) {
-    diffs.push(`qa mode: running=${live.qaMode ?? 'off'}, requested=${requestedQa ?? 'off'}`);
+  if (requested.qaMode !== live.qaMode) {
+    diffs.push(`qa mode: running=${live.qaMode ?? 'off'}, requested=${requested.qaMode ?? 'off'}`);
   }
   return diffs;
 }
