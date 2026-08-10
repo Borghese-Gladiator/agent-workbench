@@ -8,17 +8,20 @@ import {
   pathExists,
   readWorkspaceGlobs,
   expandWorkspaceGlobs,
+  type PackageJson,
 } from './manifests.js';
 
 const MONOREPO_CONTAINER_DIRS = ['apps', 'packages', 'services', 'workers'];
 
-async function classifyUnit(dir: string): Promise<{
+async function classifyUnit(
+  dir: string,
+  pkg: PackageJson | undefined,
+): Promise<{
   language: RepositoryUnitLanguage;
   kind: RepositoryUnitKind;
   framework?: string;
   packageManager?: string;
 } | undefined> {
-  const pkg = await readPackageJson(dir);
   const pythonManifests = await findPythonManifests(dir);
   const hasTs = pkg !== undefined;
   const hasPy = pythonManifests.length > 0;
@@ -74,7 +77,7 @@ async function classifyUnit(dir: string): Promise<{
  */
 export async function discoverUnits(rootDir: string): Promise<RepositoryUnit[]> {
   const units: RepositoryUnit[] = [];
-  const rootClassification = await classifyUnit(rootDir);
+  const rootClassification = await classifyUnit(rootDir, await readPackageJson(rootDir));
 
   const candidateSet = new Set<string>();
   for (const container of MONOREPO_CONTAINER_DIRS) {
@@ -113,14 +116,28 @@ export async function discoverUnits(rootDir: string): Promise<RepositoryUnit[]> 
     return units;
   }
 
-  const idByRelativeRoot = new Map<string, string>();
+  // Read each candidate's package.json exactly once. The dependency-linking pass below resolves
+  // workspace deps through these cached manifests instead of re-reading every other package's
+  // package.json per dependency — on a large monorepo (~600 packages) the old O(n^2) re-read did
+  // hundreds of thousands of disk reads on the event loop and blocked discovery past the worker's
+  // callback timeout.
+  const pkgByDir = new Map<string, PackageJson | undefined>(
+    await Promise.all(
+      candidateDirs.map(async (dir) => [dir, await readPackageJson(dir)] as const),
+    ),
+  );
+
+  // Maps a workspace package's declared name to the unit id representing it, so a dependency edge is
+  // a single map lookup rather than a scan-and-read over every other candidate.
+  const idByPackageName = new Map<string, string>();
+  const unitByDir = new Map<string, RepositoryUnit>();
   for (const dir of candidateDirs) {
-    const classification = await classifyUnit(dir);
+    const pkg = pkgByDir.get(dir);
+    const classification = await classifyUnit(dir, pkg);
     if (!classification) continue;
     const relativeRoot = dir.slice(rootDir.length + 1);
     const id = randomUUID();
-    idByRelativeRoot.set(relativeRoot, id);
-    units.push({
+    const unit: RepositoryUnit = {
       id,
       root: relativeRoot,
       language: classification.language,
@@ -128,23 +145,20 @@ export async function discoverUnits(rootDir: string): Promise<RepositoryUnit[]> 
       framework: classification.framework,
       packageManager: classification.packageManager,
       dependsOn: [],
-    });
+    };
+    unitByDir.set(dir, unit);
+    if (pkg?.name) idByPackageName.set(pkg.name, id);
+    units.push(unit);
   }
 
   for (const dir of candidateDirs) {
-    const relativeRoot = dir.slice(rootDir.length + 1);
-    const unit = units.find((u) => u.root === relativeRoot);
+    const unit = unitByDir.get(dir);
     if (!unit) continue;
-    const pkg = await readPackageJson(dir);
+    const pkg = pkgByDir.get(dir);
     const deps = { ...pkg?.dependencies, ...pkg?.devDependencies };
     for (const depName of Object.keys(deps)) {
-      for (const [otherRoot, otherId] of idByRelativeRoot) {
-        if (otherId === unit.id) continue;
-        const otherPkg = await readPackageJson(join(rootDir, otherRoot));
-        if (otherPkg?.name === depName) {
-          unit.dependsOn.push(otherId);
-        }
-      }
+      const depId = idByPackageName.get(depName);
+      if (depId && depId !== unit.id) unit.dependsOn.push(depId);
     }
   }
 
