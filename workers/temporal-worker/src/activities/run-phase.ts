@@ -1019,6 +1019,36 @@ const verifyHandler: PhaseHandler = {
 // exercise (genuinely real: real CLI QA executor)
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * TASK-75: map a blocked `exercise` decision to the right loop outcome. A real observed failure
+ * (`classifyExerciseBlock === 'code-fixable'`) routes `repair → implement` — the builder can fix it
+ * by re-coding. A pure evidence deficiency routes to an `await-human` gate with reason
+ * `qa-inconclusive`, because re-running implement/verify can never manufacture a missing
+ * recording/trace or author a QA assertion; looping there only grinds to the 3-strike
+ * `repeated-failure-no-progress` park a human can't resolve by retrying. Exported so the mapping is
+ * unit-testable in isolation from the QA execution the handler wraps.
+ */
+export function mapExerciseBlock(
+  exercise: NonNullable<CompletionContext['exercise']>,
+  missing: string[],
+  taskId: string,
+): PhaseAttemptResult {
+  if (classifyExerciseBlock(exercise) === 'code-fixable') {
+    return { outcome: 'repair', target: 'implement', findings: [] };
+  }
+  return {
+    outcome: 'await-human',
+    gate: {
+      id: `${taskId}-exercise-qa-inconclusive`,
+      taskId,
+      phase: 'exercise',
+      reason: 'qa-inconclusive',
+      summary: `QA evidence is incomplete and re-coding cannot supply it: ${missing.join('; ')}`,
+      createdAt: new Date().toISOString(),
+    },
+  };
+}
+
 const exerciseHandler: PhaseHandler = {
   phase: 'exercise',
   async run(ctx): Promise<PhaseOutcome> {
@@ -1194,26 +1224,9 @@ const exerciseHandler: PhaseHandler = {
       evidenceIds: [qaResult.evidence.id],
       openFindingIds: [],
       candidateOverrides: { baseSha: context.baseSha, candidateSha: context.candidateSha },
-      // A real observed failure (a policy-blocking error, or a structured assertion that ran and
-      // failed) is fixable by re-coding, so it routes `repair → implement`. A pure evidence
-      // deficiency (missing recording/trace, a claim with no authored strong assertion, evidence
-      // not tied to the candidate SHA) is something looping implement/verify can never satisfy —
-      // escalate to a human `qa-inconclusive` gate instead of grinding to
-      // `repeated-failure-no-progress`. See classifyExerciseBlock for the discriminator.
-      onBlocked: (missing) =>
-        classifyExerciseBlock(exercise) === 'code-fixable'
-          ? { outcome: 'repair', target: 'implement', findings: [] }
-          : {
-              outcome: 'await-human',
-              gate: {
-                id: `${state.taskId}-exercise-qa-inconclusive`,
-                taskId: state.taskId,
-                phase: 'exercise',
-                reason: 'qa-inconclusive',
-                summary: `QA evidence is incomplete and re-coding cannot supply it: ${missing.join('; ')}`,
-                createdAt: new Date().toISOString(),
-              },
-            },
+      // See mapExerciseBlock: a real observed failure routes `repair → implement`; a pure evidence
+      // deficiency escalates to a human `qa-inconclusive` gate instead of looping into implement.
+      onBlocked: (missing) => mapExerciseBlock(exercise, missing, state.taskId),
     };
   },
 };
