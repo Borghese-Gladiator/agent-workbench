@@ -148,7 +148,7 @@ reaches pr-readiness instead of dead-ending.
 
 ## Group K — Scaling on large monorepos
 
-### [ ] TASK-74: Repo discovery can't complete on large monorepos (fender, ~620 packages) — scan times out / retry-loops
+### [x] TASK-74: Repo discovery can't complete on large monorepos (fender, ~620 packages) — scan times out / retry-loops
 
 **What's wrong.** Repo-discovery cannot complete on fender (~620 workspace
 packages): the scan times out and retry-loops, blocking *all* tasks before any code
