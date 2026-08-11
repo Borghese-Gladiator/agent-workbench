@@ -307,7 +307,14 @@ workbench, with a short writeup of what was awkward.
 
 ## Group N — Worktree DX
 
-### [ ] TASK-78: Worktree *directory* path is a bare UUID (`<repoId>/<taskId>`) — illegible in `git worktree list`
+### [x] TASK-78: Worktree *directory* path is a bare UUID (`<repoId>/<taskId>`) — illegible in `git worktree list`
+
+> **Done.** `worktreeDir()` now takes a `dirName` leaf; `createWorktree` derives it
+> via new `resolveWorktreeDirName(taskId, slugSource)` (`packages/workspace/src/branch.ts`),
+> which mirrors the branch's `<slug>-<shortId>` minus the `awb/` prefix. Worktree leaf
+> is now e.g. `add-login-flow-task1` instead of a bare UUID. Covered by
+> `branch.test.ts` (slug/short-id + distinctness) and the `worktree.test.ts`
+> integration test asserting the slug-based path.
 
 **What's wrong.** The worktree directory is built as
 `worktrees/<repositoryId>/<taskId>` by `worktreeDir()`

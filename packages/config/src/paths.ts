@@ -60,6 +60,6 @@ export function repositoryMemoryDir(layout: DataDirLayout, repositoryId: string)
   return join(layout.repositoriesDir, repositoryId, 'memory');
 }
 
-export function worktreeDir(layout: DataDirLayout, repositoryId: string, taskId: string): string {
-  return join(layout.worktreesDir, repositoryId, taskId);
+export function worktreeDir(layout: DataDirLayout, repositoryId: string, dirName: string): string {
+  return join(layout.worktreesDir, repositoryId, dirName);
 }

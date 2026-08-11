@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveTaskBranchName } from './branch.js';
+import { resolveTaskBranchName, resolveWorktreeDirName } from './branch.js';
 
 describe('resolveTaskBranchName', () => {
   it('puts the human-readable slug first, then a short task-id suffix', () => {
@@ -43,6 +43,28 @@ describe('resolveTaskBranchName', () => {
   it('produces distinct branch names for distinct task ids given the same slug source', () => {
     const a = resolveTaskBranchName('task-a', 'same prompt');
     const b = resolveTaskBranchName('task-b', 'same prompt');
+    expect(a).not.toBe(b);
+  });
+});
+
+describe('resolveWorktreeDirName', () => {
+  it('mirrors the branch slug/short-id without the `awb/` prefix so the dir is a valid path segment', () => {
+    const dirName = resolveWorktreeDirName('task-123', 'Add OAuth Login Flow!');
+    expect(dirName).toBe('add-oauth-login-flow-task123');
+    expect(dirName).not.toContain('/');
+    expect(resolveTaskBranchName('task-123', 'Add OAuth Login Flow!')).toBe(`awb/${dirName}`);
+  });
+
+  it('does not dump a full UUID into the directory name', () => {
+    const uuid = 'ecabb015-d40d-409a-82c3-82fce7bee7b9';
+    const dirName = resolveWorktreeDirName(uuid, 'In the portal header, show the number of available games');
+    expect(dirName).toBe('show-the-number-of-available-games-ecabb015');
+    expect(dirName).not.toContain(uuid);
+  });
+
+  it('produces distinct directory names for distinct task ids given the same slug source', () => {
+    const a = resolveWorktreeDirName('task-a', 'same prompt');
+    const b = resolveWorktreeDirName('task-b', 'same prompt');
     expect(a).not.toBe(b);
   });
 });

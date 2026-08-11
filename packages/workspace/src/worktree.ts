@@ -5,7 +5,7 @@ import { worktreeDir } from '@awb/config';
 import { runGit } from '@awb/repository';
 import type { ExecutionProfile, WorkspaceLease } from '@awb/domain';
 import { resolveBaseSha } from './base-sha.js';
-import { resolveTaskBranchName } from './branch.js';
+import { resolveTaskBranchName, resolveWorktreeDirName } from './branch.js';
 import { PortAllocator } from './ports.js';
 import { createTaskTempDir, removeTaskTempDir } from './task-dir.js';
 
@@ -27,8 +27,8 @@ export interface WorktreeHandle {
 }
 
 /**
- * Resolves the base ref to an immutable SHA, creates a unique `awb/<taskId>-<slug>` branch,
- * materializes a linked git worktree rooted at `worktreeDir()`, allocates any requested task
+ * Resolves the base ref to an immutable SHA, creates a unique `awb/<slug>-<shortId>` branch,
+ * materializes a linked git worktree rooted at a slug-named `worktreeDir()`, allocates any requested task
  * ports, and creates a task scratch directory. Returns the resulting `WorkspaceLease` (in the
  * `ready` state) plus the task temp dir path. Persisting the lease is the caller's job.
  */
@@ -52,7 +52,7 @@ export async function createWorktree(options: CreateWorktreeOptions): Promise<Wo
     baseRef,
     baseSha: '',
     branchName: resolveTaskBranchName(taskId, slugSource),
-    worktreePath: worktreeDir(layout, repositoryId, taskId),
+    worktreePath: worktreeDir(layout, repositoryId, resolveWorktreeDirName(taskId, slugSource)),
     executionProfile,
     allocatedPorts: {},
     state: 'requested',
