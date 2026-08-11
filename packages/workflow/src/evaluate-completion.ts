@@ -134,6 +134,11 @@ function evaluateExercise(ctx: CompletionContext['exercise']): CompletionDecisio
       `${ctx.behavioralClaimsMissingStrongAssertion.length} behavioral claim(s) lack a passing state-transition/value assertion`,
     );
   }
+  if (ctx.behavioralClaimsWithUntouchedTarget && ctx.behavioralClaimsWithUntouchedTarget.length > 0) {
+    missing.push(
+      `${ctx.behavioralClaimsWithUntouchedTarget.length} behavioral claim(s) have a committed diff that touches none of their target paths`,
+    );
+  }
   if (!ctx.structuredAssertionsPass) missing.push('structured assertions do not pass');
   if (!ctx.requiredRecordingExists) missing.push('required video or terminal recording does not exist');
   if (!ctx.browserScenariosHaveTraces) missing.push('a browser scenario is missing a Playwright trace');

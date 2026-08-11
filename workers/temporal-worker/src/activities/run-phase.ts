@@ -61,6 +61,7 @@ import {
   runHttpApiQa,
   runLibraryQa,
   evaluateBehavioralClaimCoverage,
+  behavioralClaimsWithUntouchedTarget,
   type QaEvidenceContext,
 } from '@awb/qa';
 import {
@@ -1206,10 +1207,37 @@ const exerciseHandler: PhaseHandler = {
       },
     });
 
+    // A behavioral claim's committed diff must touch at least one path the plan associated with it.
+    // The plan links claims to files via each slice's claimIds + likelyPaths; a claim's target paths
+    // are the union of likelyPaths across every slice covering it. Only computed on the real path
+    // (mock has no worktree/diff), and only when a candidate commit exists.
+    let untouchedTargetClaims: string[] = [];
+    if (ctx.profile.usesRealAgent && runState.worktreePath && runState.candidateSha) {
+      const claimTargetPaths = new Map<string, string[]>();
+      for (const slice of runState.plan?.slices ?? []) {
+        for (const claimId of slice.claimIds) {
+          const paths = claimTargetPaths.get(claimId) ?? [];
+          paths.push(...slice.likelyPaths);
+          claimTargetPaths.set(claimId, paths);
+        }
+      }
+      const { changedPaths } = await resolveReviewDiff({
+        worktreePath: runState.worktreePath,
+        baseSha: resolveBaseSha(runState),
+        candidateSha: resolveCandidateSha(runState),
+      });
+      untouchedTargetClaims = behavioralClaimsWithUntouchedTarget({
+        behavioralClaimIds,
+        claimTargetPaths,
+        changedPaths,
+      });
+    }
+
     const exercise = {
       everyRequiredScenarioHasResult: true,
       everyBehavioralClaimCovered: coverage.everyBehavioralClaimCovered,
       behavioralClaimsMissingStrongAssertion: coverage.missing,
+      behavioralClaimsWithUntouchedTarget: untouchedTargetClaims,
       structuredAssertionsPass,
       requiredRecordingExists: qaResult.artifacts.length > 0,
       // A browser run must have produced a real trace artifact; a CLI run has no browser scenarios.
