@@ -189,7 +189,23 @@ full-source read for unrelated packages.
 
 ## Group L — QA gate false-positives
 
-### [ ] TASK-75: `exercise` QA-evidence gate parks a finished, verified change at `repeated-failure-no-progress` (repairs `implement`, which can't fix an evidence deficiency)
+### [x] TASK-75: `exercise` QA-evidence gate parks a finished, verified change at `repeated-failure-no-progress` (repairs `implement`, which can't fix an evidence deficiency)
+
+**Done.** The exercise handler's `onBlocked` no longer maps every blocked decision to
+`repair → implement`. It now calls `classifyExerciseBlock` (new pure export in
+`packages/workflow/src/evaluate-completion.ts`) to split the block: a *real observed
+failure* — `policyBlockingErrorsPresent`, or `structuredAssertionsPass === false` (an
+assertion that ran and failed) — is `code-fixable` and keeps routing `repair → implement`;
+every other blocked signal (missing recording/trace, a claim with no *authored* strong
+assertion, a scenario with no result, evidence not tied to the candidate SHA) is an
+`evidence-deficiency` that re-coding cannot satisfy, so the handler now returns
+`await-human` with reason `qa-inconclusive` (already in the `HumanGateReason` enum) instead
+of grinding to the 3-strike `repeated-failure-no-progress` gate. A candidate that genuinely
+satisfies its claim and passes tests/e2e still clears the gate unchanged. *Tests:*
+`classifyExerciseBlock` unit table (code-fixable vs evidence-deficiency, precedence) +
+routing assertion added to the real-chromium `qa-gate-proof.test.ts`; full workflow + worker
+suites green (241 tests).
+
 
 **What's wrong.** A task whose code compiles and whose unit + e2e commands pass
 clears `verify` (`evaluate-completion.ts:110-123`) and then hits the `exercise`

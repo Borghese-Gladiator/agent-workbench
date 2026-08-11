@@ -10,7 +10,7 @@ import type {
   Finding,
 } from '@awb/domain';
 import type { TaskWorkflowState } from '@awb/workflow';
-import { evaluatePhaseCompletion, routeLoop, type CompletionContext } from '@awb/workflow';
+import { classifyExerciseBlock, evaluatePhaseCompletion, routeLoop, type CompletionContext } from '@awb/workflow';
 import {
   createAgentAdapter,
   scriptMockTurns,
@@ -1176,25 +1176,44 @@ const exerciseHandler: PhaseHandler = {
       },
     });
 
+    const exercise = {
+      everyRequiredScenarioHasResult: true,
+      everyBehavioralClaimCovered: coverage.everyBehavioralClaimCovered,
+      behavioralClaimsMissingStrongAssertion: coverage.missing,
+      structuredAssertionsPass,
+      requiredRecordingExists: qaResult.artifacts.length > 0,
+      // A browser run must have produced a real trace artifact; a CLI run has no browser scenarios.
+      browserScenariosHaveTraces: ranBrowserQa ? hasTraceArtifact : true,
+      evidenceTiedToCandidateSha: qaResult.evidence.candidateSha === context.candidateSha,
+      policyBlockingErrorsPresent,
+    };
+
     return {
       kind: 'evaluate',
-      completion: {
-        exercise: {
-          everyRequiredScenarioHasResult: true,
-          everyBehavioralClaimCovered: coverage.everyBehavioralClaimCovered,
-          behavioralClaimsMissingStrongAssertion: coverage.missing,
-          structuredAssertionsPass,
-          requiredRecordingExists: qaResult.artifacts.length > 0,
-          // A browser run must have produced a real trace artifact; a CLI run has no browser scenarios.
-          browserScenariosHaveTraces: ranBrowserQa ? hasTraceArtifact : true,
-          evidenceTiedToCandidateSha: qaResult.evidence.candidateSha === context.candidateSha,
-          policyBlockingErrorsPresent,
-        },
-      },
+      completion: { exercise },
       evidenceIds: [qaResult.evidence.id],
       openFindingIds: [],
       candidateOverrides: { baseSha: context.baseSha, candidateSha: context.candidateSha },
-      onBlocked: () => ({ outcome: 'repair', target: 'implement', findings: [] }),
+      // A real observed failure (a policy-blocking error, or a structured assertion that ran and
+      // failed) is fixable by re-coding, so it routes `repair → implement`. A pure evidence
+      // deficiency (missing recording/trace, a claim with no authored strong assertion, evidence
+      // not tied to the candidate SHA) is something looping implement/verify can never satisfy —
+      // escalate to a human `qa-inconclusive` gate instead of grinding to
+      // `repeated-failure-no-progress`. See classifyExerciseBlock for the discriminator.
+      onBlocked: (missing) =>
+        classifyExerciseBlock(exercise) === 'code-fixable'
+          ? { outcome: 'repair', target: 'implement', findings: [] }
+          : {
+              outcome: 'await-human',
+              gate: {
+                id: `${state.taskId}-exercise-qa-inconclusive`,
+                taskId: state.taskId,
+                phase: 'exercise',
+                reason: 'qa-inconclusive',
+                summary: `QA evidence is incomplete and re-coding cannot supply it: ${missing.join('; ')}`,
+                createdAt: new Date().toISOString(),
+              },
+            },
     };
   },
 };

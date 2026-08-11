@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ArtifactStore, InMemoryArtifactMetadataStore } from '@awb/evidence';
 import { runBrowserQa, evaluateBehavioralClaimCoverage, type QaEvidenceContext } from '@awb/qa';
-import { evaluatePhaseCompletion } from '@awb/workflow';
+import { classifyExerciseBlock, evaluatePhaseCompletion } from '@awb/workflow';
 
 // BROKEN: clicking "Join" does NOT perform the behavioral state transition — the room panel stays
 // empty (the button's handler is broken/absent). QA validates the frontend's observable
@@ -130,6 +130,11 @@ describe('TASK-42 proof: real QA → real completion gate', () => {
     // assertion covers the behavioral claim — the gate refuses to clear.
     expect(ctx.exercise.everyBehavioralClaimCovered).toBe(false);
     expect(decision.complete).toBe(false);
+    // TASK-75: the expected-value assertion actually RAN and FAILED (structuredAssertionsPass is
+    // false) — a real behavioral defect — so this is code-fixable and routes repair→implement,
+    // not the human qa-inconclusive gate reserved for missing/insufficient evidence.
+    expect(ctx.exercise.structuredAssertionsPass).toBe(false);
+    expect(classifyExerciseBlock(ctx.exercise)).toBe('code-fixable');
   }, 30_000);
 
   it('CLEARS the same feature when it actually works', async () => {
