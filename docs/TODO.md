@@ -4,472 +4,335 @@ Prioritized List of Things to Fix
 Every task should have what is wrong / what to do, where, and how we'll know when it's done
 
 
-
-## Group A — Runtime & multi-adapter (foundational)
-
-The profile-driven refactor that unblocks every additional-runtime idea; land
-TASK-38 before TASK-44.
-
-### [ ] TASK-38: Runtime gate is hard-coded to `'claude'`, not profile-driven
-
-**What's wrong.** `run-phase.ts` branches on `ctx.strategy === 'claude'` in ~20+
-places as *the* gate for the real (non-mock) path — real contract, real planner,
-real prepare/worktree, real builder, real QA, real delivery, and even durable run
-state (`durable = strategy === 'claude'`). Any other runtime (Pi, Codex,
-OpenCode) therefore silently falls back to the MOCK path even when a real adapter
-exists. This directly contradicts the RuntimeProfile design ("daemon is
-profile-driven, no runtime string branches") — the daemon may be profile-driven,
-but the phase activity is not. This is the "hard-coded naming of Claude inside
-phases + lots of mock adapters" complaint, and it's the blocker for every
-additional-runtime idea below.
-
-**What to do.** Replace the `strategy === 'claude'` checks with a capability/profile
-predicate — e.g. `ctx.profile.usesRealAgent` (or `runtimeSupportsRealPhase(ctx)`)
-sourced from the RuntimeProfile — so "run the real path" is a property of the
-selected runtime, not a string equality on one vendor's name. Keep MOCK as the
-one explicit fallback. Grep for every `=== 'claude'` / `!== 'claude'` in the
-activities and route each through the predicate; keep the ones that are genuinely
-Claude-adapter-specific (if any) named as such.
-
-**Where.** `workers/temporal-worker/src/activities/run-phase.ts` (all
-`strategy === 'claude'` sites, lines ~91–1247), the RuntimeProfile definition,
-`agent-factory.ts`.
-
-**How we'll know it's done.** *Unit:* a phase test driven by a non-claude profile
-whose `usesRealAgent` is true takes the real branch (planner/builder/delivery),
-and a mock profile takes the mock branch — asserted without any `'claude'`
-literal in the activity. *Manual:* a Pi/Codex profile run reaches a real builder
-edit instead of a fake candidate.
-
-### [ ] TASK-44: Add runtime adapters — Codex, Pi, OpenCode (depends on TASK-38)
-
-**What's wrong.** Only `claude-adapter` and `mock-adapter` live in
-`packages/agent-gateway/src/`. Pi and Codex adapters were prototyped on worktree
-branches but never merged, and the phase gate (TASK-38) would ignore them anyway.
-OpenCode is a net-new integration with useful subagent semantics.
-
-**What to do.** After TASK-38 makes the real path profile-driven: land a
-`RuntimeProfile` + adapter per runtime (start with whichever is closest to
-merge-ready), each conforming to the existing `adapter.ts` contract. Keep external
-tooling model-agnostic per the standing learning (daemon-seeded env + recipe
-cards, no claude-gating). OpenCode's per-file agent loop (`opencode run --agent …`
-over a file list) is a strong fit for the builder's per-slice model and for
-en-masse mechanical fixes.
-
-**Where.** `packages/agent-gateway/src/*-adapter.ts`, RuntimeProfile registry,
-`agent-factory.ts`, per-project `runtimeConfig`.
-
-**How we'll know it's done.** *Unit:* each adapter passes the shared adapter
-conformance tests. *Manual:* a real (draft) PR produced under at least one
-non-claude runtime, as previously proven for Pi on `wip-browser-games`.
-
-
-## Group C — Quality gates
-
-### [ ] TASK-63: `exercise` QA gate is inconsistent — passed an EMPTY change (Pi) yet blocked a real one (OpenCode), same model
-
-**What's wrong.** Driving the *identical* trivial task ("add a one-line note to
-README.md stating how many games are available") on `wip-browser-games` under two
-runtimes, both on the same local model `ollama/qwen3-coder:30b`, produced opposite
-QA outcomes that were both wrong:
-
-- **Pi run (`878058b7`, 2026-08-07):** the builder committed **only
-  `package-lock.json` — no README change at all** (`git diff base..HEAD -- README.md`
-  empty). `exercise` nonetheless **cleared on attempt 1**, the run reached `release`,
-  and opened draft PR `browser-games__ai#13`. QA green on a **no-op**.
-- **OpenCode run (`082de7e9`, 2026-08-08):** the builder made a **real (off-target)
-  README edit** and `exercise` **looped `implement→verify→exercise` 3× → parked at
-  `repeated-failure-no-progress`**, never reaching a PR.
-
-Same gate passed the empty candidate and blocked the non-empty one. Both runs
-produced `terminal-recording | passed` evidence, so the divergence is in
-`evaluateExercise`'s other conditions and/or the plan/contract each planner emitted
-— NOT in the QA recording. This is TASK-42's rubber-stamp thesis reproduced: the gate
-doesn't verify the behavioral claim's *content* (Pi's empty change passed), and what
-does trip it isn't tied to artifact correctness (OpenCode's real change blocked). It
-also invalidates the earlier "Pi live-proven end-to-end" claim — PR #13 was empty.
-
-**Two candidate contributors (confirm, don't assume).** (1) Rubber-stamp:
-`evaluateExercise` clears without asserting the contract's behavioral claim is
-satisfied by the candidate diff, so an empty/no-op candidate passes. (2) Gate skew:
-TASK-42's QA-strength hardening landed on `main` *between* the Pi and OpenCode runs,
-so the two may have been judged by different gate code. Either way an empty candidate
-should never pass.
-
-**What to do.** Instrument `evaluateExercise` to log the exact `missing[]` per attempt,
-re-run one OpenCode task, capture the failing condition. Then make the gate reject a
-candidate whose committed diff doesn't touch the artifact the behavioral claim is
-about, and confirm the CLI-QA path (not just browser QA) enforces the TASK-42
-strong-assertion requirement. Runtime-independent — a workbench QA-gate bug, not an
-adapter defect; the OpenCode/Pi adapters have full feature parity (both drive the same
-`runBuilderSession` git-candidate path).
-
-**Where.** `packages/workflow/src/evaluate-completion.ts` (`evaluateExercise` + temp
-`missing[]` logging), `packages/workflow/src/completion-context.ts` (`exercise` fields),
-`packages/qa/` (CLI-QA assertion strength), plan→contract claim wiring. Relates to
-TASK-42 and the `qa-static-checks-miss-runtime-bugs` / `qa-cold-reentry-nonconvergence`
-learnings.
-
-**How we'll know it's done.** *Unit:* an `evaluateExercise` test where the committed
-diff does NOT touch the claim's target artifact leaves `missing` non-empty (a no-op
-candidate like Pi's fails). *Manual:* re-drive the README task under OpenCode and
-confirm it either produces a real note that passes QA, or is blocked with a *correct*
-reason (missing note) — never the current split where empty passes and real-but-wrong
-loops forever.
-
-
-## Group G — Legibility, DX & dogfooding
-
-Lower-risk, mostly-docs/skills work + the honest self-dogfood.
-
-### [x] TASK-45: Repo-structure legibility — per-directory AGENT(S).md + one global map
-
-**What's wrong.** A recurring agent-legibility gap (see the 2026-07-20 audit):
-`workers/` has no README convention and `run-phase.ts` is an 806-line hub. The
-idea list asks for "every directory explains itself" + "global understanding in
-one file" + "business logic separated from framework glue".
-
-**What to do.** Adopt a light convention: a top-level map (extend `AGENTS.md` or a
-new `docs/map.md`) that names each package's job in one line, and a short
-`AGENTS.md` (or `README.md`) in the directories that lack one, starting with
-`workers/temporal-worker/src/activities/`. Don't over-engineer — one paragraph per
-directory, not a doc framework.
-
-**Where.** `AGENTS.md`, `workers/**`, package dirs missing a readme.
-
-**How we'll know it's done.** Every top-level package + the activities dir has a
-one-line self-description reachable from a single map file.
-
-### [x] TASK-48: "Implement a feature" skill
-
-**What's wrong.** There's no repo skill that captures the house workflow for
-implementing a feature through the workbench (plan-first, slice sizing, gate
-answers, verify). We have `run-workbench-task` (drives the pipeline) but not an
-authoring/planning skill for feature work.
-
-**What to do.** Add a `.claude/skills/` skill that encodes the feature-implementation
-workflow (plan.md first per the global CLAUDE.md, converge the contract, keep
-slices few, verify). Keep it thin and point at existing skills rather than
-duplicating them.
-
-**Where.** `.claude/skills/`.
-
-**How we'll know it's done.** The skill exists and, invoked on a small feature,
-produces a plan + drives it without re-deriving the workflow each time.
-
-### [x] TASK-59: `awb up` can't run two stacks at once — hard-coded ports + worktree-broken `repoRoot()`
-
-**What's wrong.** Trying to drive a live task from a git worktree while other
-worktree sessions were running (the normal state when several groups are in flight)
-surfaced a cluster of related defects that make a second, isolated stack effectively
-un-runnable — found live while doing the TASK-46 dogfood:
-
-1. **All service ports are hard-coded single-instance constants** — `DAEMON_PORT =
-   4417`, `TEMPORAL_PORT = 7233`, the OTel collector's `4318`/`3000`, and the
-   fixed container name `awb-otel-lgtm` (`apps/cli/src/services.ts`), plus the
-   task queue name `awb-task-queue` (duplicated in
-   `workers/temporal-worker/src/index.ts` and
-   `apps/daemon/src/temporal-worker-constants.ts`). Two checkouts' `awb up` therefore
-   collide on every port, share one Temporal server, and — worst — share one task
-   queue, so a workflow task can be executed by *another worktree's worker running
-   different code*.
-2. **`awb up`'s health check treats "port open" as "my service is healthy."** When a
-   peer already holds 4417/7233, `up` reports `runtime ready` against the *foreign*
-   daemon while this checkout's own daemon has actually crashed on `EADDRINUSE` — a
-   false green that then fails confusingly at `task create` (Internal Server Error
-   against a daemon using a different DB/queue).
-3. **`repoRoot()` is wrong for nested worktrees.** It resolves a fixed
-   `../../../..` from `apps/cli/src/services.ts`
-   (`apps/cli/src/services.ts:39-41`), which climbs past the checkout root when the
-   repo is a worktree nested under `LOCAL_worktrees/<repo>/<branch>/`. Pinned mode
-   then sets the worker/daemon `cwd` to a directory that doesn't exist → `spawn …
-   ENOENT`; dev mode's `pnpm --filter` resolves `@awb/daemon` to a *sibling
-   worktree's* package and boots the wrong code (observed: a group-E `up` importing
-   `group-a-opencode/apps/daemon`).
-4. **Pinned mode spawns bare `node`.** `command: 'node'` (not `process.execPath`) in
-   the pinned service defs `ENOENT`s when the detached spawn's PATH lacks the active
-   node (e.g. fnm), and — if PATH is forced — can pick up a *different* node whose
-   ABI mismatches the compiled `better-sqlite3` (`NODE_MODULE_VERSION` error).
-5. **A fresh `AWB_DATA_DIR` isn't fully provisioned before Temporal starts.** Temporal
-   `start-dev --db-filename <dataDir>/temporal/temporal.sqlite` crashes with
-   "failed checking dir for database file … no such file or directory" because the
-   `temporal/` subdir isn't pre-created — yet `up` still reports `runtime ready`
-   (health check doesn't catch it), so the daemon later 500s with "Failed to connect
-   before the deadline" on the first `task create`. `initDataDir`/`up` should
-   `mkdir -p` every service's data subdir first.
-
-Net effect: a clean isolated worktree run needs an isolated `AWB_DATA_DIR` **and**
-non-default ports **and** a unique task queue **and** its own Temporal — none of
-which are configurable today. The TASK-46 dogfood only completed after local
-throwaway edits (env-driven ports/queue/temporal-address, a `repoRoot()` walk-up to
-the nearest `pnpm-workspace.yaml`, and `process.execPath` for the spawn); those were
-reverted as out-of-scope, and this ticket captures the real fix.
-
-**What to do.** Make a stack fully parameterizable and self-isolating so N worktrees
-can run concurrently:
-- Env-drive every port + the OTel container name + the task queue, with the current
-  values as defaults (single source of truth; the daemon/worker/CLI/vite/worker
-  daemon-URL all read the same resolved values). An `awb up` with no overrides
-  behaves exactly as today.
-- Fix `repoRoot()` to find the checkout root robustly (walk up to the nearest
-  `pnpm-workspace.yaml`/`.git`), so pinned cwd and dev `--filter` both target *this*
-  worktree. Use `process.execPath` for the pinned `node` spawn.
-- Make the health check verify it's *our* service (e.g. a pid/identity check or a
-  data-dir-scoped health URL), not merely that the port is occupied — so a foreign
-  daemon on the port fails loudly instead of a false "ready".
-- Consider an `awb up --isolated` (or deriving a deterministic port block + queue +
-  data dir from the branch name) so the multi-worktree case is one flag, not five
-  env vars.
-
-**Where.** `apps/cli/src/services.ts` (ports, container name, `repoRoot`,
-`process.execPath`), `apps/cli/src/process-control.ts` + `apps/cli/src/health.ts`
-(identity-aware health), `apps/cli/src/daemon-client.ts` + `apps/web/vite.config.ts`
-+ `workers/temporal-worker/src/daemon-client.ts` (daemon URL), the two `TASK_QUEUE`
-definitions, `apps/daemon/src/temporal-client.ts` + `workers/temporal-worker/src/index.ts`
-(Temporal address). Relates to TASK-43 (dogfooding this repo is what surfaced it).
-
-**How we'll know it's done.** Two `awb up` stacks from two different worktrees run
-simultaneously without collision (distinct ports, queues, Temporal, data dirs), each
-drives a task end to end against its own code, and a foreign process on a default
-port makes `up` fail with a clear message instead of a false "ready".
-
-### [x] TASK-64: Web UI renders unstyled — layout/semantic CSS classes are used but never defined
-
-**What's wrong.** `apps/web` renders with no layout — the nav collapses to a run of
-concatenated text (`RepositoriesTasksApprovalsEvidenceSettings`), repository rows
-stack as raw text, no shell/sidebar. The page is *not* entirely style-less: the
-`:root`/`.dark` design tokens from `styles.css` apply (dark background, light
-foreground), which is what makes this deceptive. The cause is that the app's
-structural classes are **referenced in JSX but defined nowhere**:
-
-- `App.tsx` uses `className="app-shell"`, `app-nav`, `app-main`
-  (`apps/web/src/App.tsx:13,14,23`) — grep for a definition returns **zero** matches;
-  `styles.css` is 120 lines of Tailwind imports + theme tokens only, with no
-  component/layout rules.
-- The pages/components mix Tailwind utilities (`flex`, `text-sm`,
-  `text-muted-foreground`, `gap-2`, `rounded-md`, …) with a second set of **orphaned
-  semantic classes** that are likewise undefined: `error`, `note`, `actions`,
-  `repository-path`, `task-facts`, `align-top`, etc. The utilities style themselves;
-  the semantic classes render as nothing.
-
-This reads as a **half-finished migration**: styling was moved to Tailwind utilities
-but a stylesheet's worth of hand-authored layout/semantic classes (an old
-`App.css`/`index.css` or component CSS) was removed or never committed, while the JSX
-still references those class names. Restarting vite, clearing caches, reinstalling
-`@tailwindcss/vite`, and adding `@source` do **not** fix it — those address Tailwind
-utility generation, which is a different subsystem from the missing named classes.
-
-**Open thread to resolve first (don't skip).** There is an unexplained
-served-vs-applied contradiction: the dev server *serves* a `styles.css` module that
-contains utility rules (`.flex`, `.gap-2` present when fetched directly and in the
-injected `<style>` per a headless browser), yet the real Chrome tab renders as if no
-utilities apply either. Confirm in the *actual* browser (devtools → Elements →
-Computed on `.app-nav`, and Sources for the `styles.css` module) whether utilities are
-truly absent there too, so the fix targets the real gap and not a headless-vs-real
-discrepancy. Do not declare this fixed from a scripted `document.styleSheets` check —
-that undercounts modern `@layer`/`@property` CSS and gave false readings here.
-
-**What to do.** (1) Decide the intended styling system for the shell and the orphaned
-semantic classes — either author the missing CSS (a real `app-shell`/`app-nav`/
-`app-main` layout + the semantic classes) or migrate those JSX references to Tailwind
-utilities/components so there are no used-but-undefined class names. (2) Add a guard
-so this can't silently regress: a lint/test that fails when a `className` token is
-neither a known Tailwind utility nor a defined project class. (3) Resolve the
-served-vs-applied thread above before closing.
-
-**Where.** `apps/web/src/App.tsx` (`app-shell`/`app-nav`/`app-main`),
-`apps/web/src/styles.css` (missing layout + semantic rules), `apps/web/src/pages/**`
-and `apps/web/src/components/**` (orphaned `error`/`note`/`actions`/`repository-path`/
-`task-facts`/`align-top`), `apps/web/vite.config.ts` (Tailwind plugin).
-
-**How we'll know it's done.** In a real browser hard-load of `localhost:5317`, the app
-has its shell/nav layout (nav is a laid-out bar, not concatenated text) and the
-repository list renders as styled rows. *Test:* a check that every `className` token
-used in `src/**` resolves to either a Tailwind utility or a defined project class
-fails on an undefined name and passes once the shell classes exist.
-
-
-## Group H — Greenfield / full-MVP friction (surfaced live on the Lunch Money task)
-
-A single large greenfield task (empty repo → full FastAPI+DuckDB+UI MVP) blocked
-four separate times, each on workbench machinery rather than bad agent output. The
-implementation was complete and passed `implement` + `verify`; the gates around it
-were the problem. These four items are those blockers.
-
-### [x] TASK-65: No QA command exists from the initial task write — `exercise` can't self-bootstrap
-
-**What's wrong.** When a task is created against a repo, there is no QA/start
-command associated with it, so the `exercise` (browser QA) phase has nothing to
-launch. `resolveStartCommand` reads `repository_commands` for a `purpose = 'start'`
-row, but that table is populated by `repo refresh` from the repo's *current*
-contents — for a greenfield task the repo was empty at registration, so the table is
-empty, `resolveStartCommand` returns `undefined`, and browser QA silently falls back
-to a trivial CLI `echo` check. That check covers no behavioral claim, so
-`everyBehavioralClaimCovered` stays false and `exercise` loops to
-`repeated-failure-no-progress`. On the Lunch Money run I had to hand-insert a
-`start` row (`.venv/bin/python -m uvicorn app.main:app …`) into the DB for browser QA
-to run at all. There is no first-class way to say "here is how you run this app"
-when the task itself is what creates the app.
-
-**What to do.** Give a task a way to declare (or the workbench a way to derive) its
-QA/start command as part of task creation or as an early phase, so `exercise` has a
-real target for a repo whose runnable form only exists *after* implement. Options:
-(1) let the task prompt / contract carry an optional `startCommand` + `baseUrl`;
-(2) re-discover commands from the *worktree* (post-implement) rather than only from
-the registered-repo snapshot; (3) infer a start command from the produced project
-(e.g. a FastAPI app → `uvicorn app.main:app`, a Vite app → `vite`). Whatever the
-source, `exercise` must be able to find it without a human editing SQLite.
-
-**Where.** `workers/temporal-worker/src/activities/command-support.ts`
-(`resolveStartCommand`), `run-phase.ts` (`exerciseHandler`, ~1056–1074), the
-task-create path / contract schema, `packages/repository/src/command-discovery.ts`.
-
-**How we'll know it's done.** A greenfield task that produces a runnable app reaches
-real browser QA against that app with **no** manual `repository_commands` insert.
-*Test:* a task fixture with an empty starting repo and a produced FastAPI/Vite app
-resolves a start command and `exercise` launches it.
-
-### [x] TASK-66: UI dev servers are too brittle to start — add a verbose flag AND make startup robust
-
-**What's wrong.** (Added by the user — the UI keeps failing to start.) Browser QA
-starts a dev server and waits for it to serve; when the server doesn't come up in
-time the phase just throws "dev server did not become ready … within the timeout"
-with no server logs surfaced, so there's nothing to debug from. Startup is also
-brittle: `stdio: 'ignore'` on the spawned server (`browser-qa-support.ts:61`) throws
-away stdout/stderr, the readiness check is a bare fetch loop, and a slow/failed
-`install` or a wrong port reads identically as "not ready." A Vite app should never
-fail to start — a failed UI boot should be rare and, when it happens, legible.
-
-**What to do.** (1) Add a verbose flag/mode that captures and surfaces the dev
-server's stdout/stderr (don't `stdio: 'ignore'`) into the phase logs / an artifact,
-so a failed start shows *why*. (2) Make startup robust: ensure deps are installed
-before launch, give the server a generous+configurable readiness window, probe a
-real readiness signal, and prefer a preview/served build over a cold dev server
-where possible so "start" is deterministic. Goal: starting always works for a
-well-formed Vite/uvicorn app, and when it genuinely can't, the failure is explained.
-
-**Where.** `workers/temporal-worker/src/activities/browser-qa-support.ts`
-(`runBrowserQaViaServer` spawn/`stdio`/`waitForServer`, ~25–82), `exerciseHandler`
-readiness timeout + `AWB_QA_BASE_URL` handling.
-
-**How we'll know it's done.** *Unit:* a start-failure case yields captured server
-output in the phase evidence, not just a bare timeout string. *Manual:* a standard
-Vite app starts reliably across repeated runs; an intentionally broken start prints
-the underlying error.
-
-### [x] TASK-67: `program-design` bodyless-signature check false-positives on valid TS type shapes
-
-**What's wrong.** `signatureIsBodyless()` in
-`workers/temporal-worker/src/activities/program-design-support.ts` decides whether a
-design signature is "structure" vs. a leaked "implementation body." It repeatedly
-mis-flagged **valid TypeScript type declarations** as bodies, failing
-`allSignaturesBodyless` → the `program-design` completion gate → a repair loop →
-`repeated-failure-no-progress`, on a design that was correct. Two distinct
-false-positives seen live on the Lunch Money task: (1) the original regex flagged
-*any* `;` inside `{ }`, so a UI interface like
-`interface Provenance { dateRange: [string,string]; filters: … }` tripped it (3 of 25
-type sigs); (2) after a first fix that split members on `;`/`,`, an inline object
-return type with generics —
-`Promise<{columns: ColumnMeta[]; rows: Record<string, unknown>[]; total: number}>` —
-split on the comma *inside* `Record<string, unknown>` and mis-read a fragment as a
-body (1 of 84 sigs). Either way one bad signature blocks the whole phase.
-
-**What to do.** Make the check flag only *unambiguous* statement markers (an explicit
-`return`, control flow `if/for/while/switch (…)`, `await`, a `const|let|var`
-declaration, or a `=>` with a following statement) and treat everything else inside
-braces as a type/interface/class shape. Do **not** parse "members" with a regex —
-nested generics and unions defeat naive splitting. Reconsider whether this check
-should hard-block at all, vs. warn: a slightly-too-fleshed-out design is low harm
-compared to blocking a correct one. (A hardened regex-based version was applied live
-but was still uncommitted; fold in and test it or replace it.)
-
-**Where.** `workers/temporal-worker/src/activities/program-design-support.ts`
-(`signatureIsBodyless`), its test file, `packages/workflow/src/evaluate-completion.ts`
-(`evaluateProgramDesign`).
-
-**How we'll know it's done.** *Unit:* interfaces/type literals/class shapes with
-`;`/`,` separators, optional members, unions, and generic return types all read as
-bodyless; only real statements read as a body — covering both live false-positive
-cases above. *Manual:* an L greenfield task walks `program-design` in one attempt
-with a design that carries realistic TS UI contracts.
-
-### [x] TASK-68: `slice-diff-exceeds-cap` is an arbitrary line/file cap that dead-ends large legitimate work
-
-**What's wrong.** The velocity guardrail (`slice-guardrail.ts`, default 400 lines /
-20 files) fires a `slice-diff-exceeds-cap` human gate on any real-agent implement
-diff over the cap. For a legitimately large change (a full greenfield MVP is
-thousands of lines) it fires every implement pass, and there is **no CLI command and
-no "already acknowledged" state** to clear it — approving via the reused
-`approve-plan` update just returns to the same check on the next pass, so the run
-can't converge. The only escape is `AWB_SLICE_DIFF_CAP=0` in the worker env, which
-requires a restart (and thus a fresh task). The cap value itself is arbitrary and
-the gate as built is a dead-end, not a checkpoint.
-
-**What to do.** Simplest option per the user: **remove the cap**, or at minimum make
-it a soft, acknowledgeable checkpoint — a one-time human ack that is recorded on run
-state so the next implement pass doesn't re-raise it, and/or a per-task override
-(large greenfield tasks legitimately exceed any per-slice cap). If kept, it needs a
-first-class resolve path in the CLI/daemon, not the reused `approve-plan` update.
-
-**Where.** `workers/temporal-worker/src/activities/slice-guardrail.ts`,
-`run-phase.ts` (`implementHandler` cap check, ~891–919), the gate-resolution path in
-`packages/workflow/src/task-workflow.ts` + the CLI.
-
-**How we'll know it's done.** A large greenfield implement either isn't gated on
-diff size, or is gated exactly once with an ack that persists so the run proceeds on
-the next pass — verified by an implement diff over the cap reaching `verify` without
-`AWB_SLICE_DIFF_CAP=0` and without looping.
-
-### [x] TASK-69: A stale `@awb/*` dist silently breaks the CLI mid-run (not just the daemon)
-
-**What's wrong.** The daemon/worker run via `tsx` (source), but the **CLI resolves
-`@awb/*` packages from their built `dist/`**. When a package's source gains an export
-that its `dist/` doesn't have yet (stale build), the CLI crashes on import — seen
-live: `SyntaxError: The requested module '@awb/config' does not provide an export
-named 'resolveRuntimeConfig'`. This is insidious during a run: the task keeps
-advancing (daemon+worker are fine on source), but `task show` starts returning
-**empty/no output**, so the driver loses all visibility and can misread a healthy run
-as stalled. The existing "stale dist" knowledge was scoped to the daemon; it applies
-to the CLI too, and the failure mode (blank `task show`, not an obvious error) is
-worse because it looks like a hang.
-
-**What to do.** (1) Make the CLI resilient: catch the import/`ERR_*` failure and
-print an actionable message (`@awb/<pkg> dist is stale — run \`pnpm build\``) instead
-of a raw stack, so a blank `task show` is never mistaken for a stalled task.
-(2) Consider running the CLI from source (tsx) like the daemon/worker, or ensure a
-build runs before CLI invocation, so source/dist can't drift. (3) Document that
-direct SQLite reads (`phase_attempts`, `program_designs`, `repository_commands`,
-`semantic_events`) are the ground-truth fallback when the CLI is down.
-
-**Where.** `apps/cli/src/services.ts` (the `@awb/config` import site),
-`apps/cli/src/index.ts` / command entrypoints, the `cli` script, build ordering.
-
-**How we'll know it's done.** With a deliberately stale `@awb/config` dist, `task
-show` prints a clear "stale dist — run pnpm build" message (not a blank line or a raw
-`SyntaxError`), and the recovery is one documented command.
-
-### [x] TASK-70: `up` no-ops on a warm stack, hiding which runtime/env is actually live
-
-**What's wrong.** `up` prints "runtime already ready" when a stack from a *prior*
-session is still running — but that warm stack may have booted with a **different
-env** (MOCK instead of `AWB_AGENT_RUNTIME=claude`, or without `AWB_QA_MODE=browser` /
-`AWB_SLICE_DIFF_CAP`). Re-running `up` with new env flags does **not** change the
-running worker (env is read at spawn). There is no way to see the active runtime/env
-from the CLI (`/api/health` only reports `{status:"ok"}`; there is no
-`/api/runtime-config`), so a "live" run can silently execute as MOCK. The only safe
-workaround is a full `down`+`up` before creating a task — which is easy to forget.
-
-**What to do.** (1) Surface the active runtime + QA mode + relevant caps in a health
-/ status field (e.g. extend `/api/health` or add `awb status`), so the driver can
-confirm the stack matches its intended env before creating a task. (2) Make `up`
-detect when passed env flags differ from the running stack's and either refuse to
-no-op (prompt for `--restart`) or warn loudly. (3) Document "restart before a task if
-you need specific env; never restart mid-task."
-
-**Where.** `apps/cli` (`up` command + a `status` view), `apps/daemon/src/routes`
-(health/runtime-config route), wherever the worker reads its runtime env at spawn.
-
-**How we'll know it's done.** After `up` on a warm stack booted with different env,
-the CLI reports the *actual* active runtime/QA mode (not a bare "ready"), and either
-refuses the no-op or clearly warns that the running env differs from the requested
-one.
+## Group I — Delivery & stacked PRs
+
+The two ways a finished change fails to *land*: no origin to open a PR against,
+and no way to stack one task's branch on the previous task's branch.
+
+### [ ] TASK-71: No `origin` → task can't deliver; should branch + merge to local `master` instead
+
+**What's wrong.** When a repo has no `origin` remote, a task that is fully
+implemented and verified has nowhere to go. The delivery/PR-readiness path assumes
+a remote to push to and a PR to open, so a done change strands in the worktree. In
+one live case both games were fully implemented, committed, and verified in the
+worktree (307 unit tests + both Playwright e2e specs passing), yet the run could
+never "deliver" — compounded by the run being stuck in a QA-evidence gate loop
+(`repeated-failure-no-progress`) that re-raises forever, so it never reaches its own
+pr-readiness gate. The code was done and there was no delivery mechanism for it.
+
+**What to do.** When there is no `origin`, deliver locally: create the feature
+branch, then merge it into the local default branch (`master`/`main`) as a new
+commit (or fast-forward), rather than attempting a push/PR. Detect the
+no-remote case explicitly and route delivery to a local-merge strategy. Two seams
+already make this tractable (verified): (1) the release handler already
+runtime-swaps the delivery mechanism — the mock path injects `FakeGitHubClient` /
+`FakeGitPushRunner` at `run-phase.ts:1461-1464`, so a "no-origin → local merge"
+runner can be injected the same way; (2) resolving the local target branch is
+already solved by `getDefaultBranch` (`packages/repository/src/git.ts:49-71`,
+origin/HEAD → current branch → main/master fallback) — only the delivery *action*
+is missing. This is the mirror of the `close-worktree` Mode-B / no-remote handling.
+(The QA-evidence false-positive loop that kept this particular run from reaching
+pr-readiness is a separate defect; see TASK-75.)
+
+**Where.** Verified on main: push is hardcoded to `origin`
+(`packages/github/src/push.ts:12-14`, `git push origin`); the repo ref resolves only
+from a GitHub-parseable remote (`delivery-support.ts:29-34` `resolveRepoRef`); when
+that returns undefined the release handler terminally blocks
+(`run-phase.ts:1455-1458`, "could not resolve a GitHub owner/repo…"); delivery always
+opens a PR via Octokit (`packages/github/src/delivery.ts:50,72-79` →
+`real-github-client.ts:18-22`). A grep found **zero** existing local-merge fallback.
+Relates to the `close-worktree-detect-merged-mode` learning.
+
+**How we'll know it's done.** *Unit:* a delivery test on a repo with no `origin`
+produces a feature branch merged into local `master` with a new commit, and does
+NOT attempt a push. *Manual:* drive a small task on a local-only repo end to end and
+confirm the change lands as a commit on local `master` with no remote configured.
+
+### [ ] TASK-72: Stacked-PR DAG — tasks whose branches stack on one another with distinct bases
+
+**What's wrong.** There is no first-class way to build a *chain* of stacked PRs,
+where each task's branch is based on the previous task's delivered branch (not
+`master`), and each PR's base = the previous PR's branch. Today this only works by
+manually threading `repository.defaultBranch` between runs:
+
+1. Set `repository.defaultBranch` = previous task's delivered branch (for PR#0,
+   leave it `master`).
+2. Create the task with a tightly-scoped prompt pointing at the exact files.
+3. Approve the contract gate; drive to pr-readiness, answering gates.
+4. Once the PR is opened, record its branch → becomes the base for the next task.
+5. After all deliver, use `gh` to confirm each PR's base = the previous PR's branch.
+
+That is a manual DAG walked by hand. It should be a declared dependency graph the
+workbench executes.
+
+**What to do.** Reference the "V4" DAG design for how to declare a task graph and
+let each node's branch stack on its parent. Model an explicit task dependency edge
+(parent task → child task) that sets the child's base branch to the parent's
+delivered branch, and carries that base through both worktree creation and PR
+creation (so the opened PR's base = parent's branch, not `master`). PR#0's base
+stays `master`/`main`. This subsumes the manual `defaultBranch`-threading recipe
+above into declared edges. The plumbing is ~90% present (verified): the base string
+already flows lease `baseRef` → `baseBranch` → `octokit.pulls.create({ base })`
+(`run-phase.ts:1467,1515` → `real-github-client.ts:22`), so an arbitrary base is
+*accepted* — what's missing is a per-task base **override** and a task-dependency
+field to source it from. Minimal change: thread a base override into
+`materializeWorktree` (`worktree-support.ts:13-35`) and add the edge/base field to
+`TaskSchema` (`packages/domain/src/tasks.ts:4-13`).
+
+**Where.** Verified gaps on main: the lease `baseRef` is set **only** from
+`repository.defaultBranch` (`worktree-support.ts:32`); `materializeWorktree` takes no
+base param and its caller passes none (`run-phase.ts:697-702`); the worktree/branch
+is created FROM that baseRef (`packages/workspace/src/worktree.ts:64-65`);
+`repository.defaultBranch` is per-repo, set once at registration
+(`schema/repository.ts:18`, `persist.ts:42`); `TaskSchema` has **no**
+base/parent/dependency field (`tasks.ts:4-13`). The existing `dependsOn` in the code
+is unrelated (repository *unit* graph + evidence supersession), and stacked-PR hits
+exist only under superseded `archive/`. Relates to the `flex-dashboards-stacked-prs`
+and `parallel-fanout-rebase-conflict` learnings.
+
+**How we'll know it's done.** *Unit:* a two-node DAG resolves the child's base
+branch to the parent's delivered branch, and PR-creation is called with that base.
+*Manual:* drive a 3-task stacked chain and confirm via `gh` that each PR's base =
+the previous PR's branch (PR#0 base=`master`), with no manual `defaultBranch` edits.
+
+
+## Group J — QA without a start command
+
+### [ ] TASK-73: `exercise` hard-fails (`exit 1`) when nothing resolves to a serving command — no non-browser / serve-as-is QA fallback
+
+**What's wrong.** When `AWB_QA_MODE=browser` and no resolved command has
+`serves: true` — a truly static frontend with no recognized app server, or nothing
+resolvable — the `exercise` handler falls through every branch to a deliberate
+hard-fail (`sh -c 'echo …; exit 1'`), so the run dead-ends despite the code being
+complete and verified. Two structural gaps: (1) QA mode is chosen **purely** by the
+`AWB_QA_MODE` env var and is never inferred from repo shape or from a `serves:false`
+result — nothing routes a `serves:false`/static-frontend repo into the existing
+`http-api` or `library` QA branches, or into a "serve the app and drive it" path;
+(2) `serves:false` commands are captured but their non-browser QA consumer was never
+wired (`run-command.ts:26-28`, `command-support.ts:143-145` explicitly say "for a
+future consumer"). A missing dev server therefore means "can't QA."
+
+> **Note — half of the original ticket is already done.** The "re-resolve the start
+> command post-implement instead of only from the initial empty snapshot" fix
+> exists on main: `resolveStartCommandForWorktree`
+> (`command-support.ts:166-185`, tiered persisted-row → `discoverCommands` →
+> `resolveRunCommand`) is called against the live worktree at
+> `run-phase.ts:1060-1067`. A repo that *gains* a start script after implement is
+> already found, and a detected FastAPI/Django/Flask entry resolves to a
+> `serves:true` command (`run-command.ts:153-171`) that already drives browser QA
+> against the app-served frontend. The remaining dead-end is narrow: only when
+> **nothing** resolves to `serves:true`.
+
+**What to do.** Wire the non-browser / serve-as-is fallback. When browser QA is
+requested but no `serves:true` command resolves: either (a) auto-select a suitable
+non-browser QA mode (`http-api`/`library`) from repo shape / the `serves:false`
+result instead of requiring the operator to set `AWB_QA_MODE`, or (b) launch the
+app's own server and drive it, or (c) degrade to a defined non-browser QA — anything
+other than the `exit 1` hard-fail. Route `serves:false` results to the captured-but-
+unconsumed consumer the code comments already anticipate.
+
+**Where.** `workers/temporal-worker/src/activities/run-phase.ts` — the QA-mode
+selection at `:1056`, the browser branch gated on `serves===true` at `:1069-1072`,
+the `http-api`/`library` branches at `:1090`/`:1102`, and the hard-fail at
+`:1113-1132`; the captured-`serves:false` note at
+`packages/repository/src/run-command.ts:26-28` and
+`workers/temporal-worker/src/activities/command-support.ts:143-145`. Relates to
+TASK-65/66 (done) and the `qa-cold-reentry-nonconvergence` learning.
+
+**How we'll know it's done.** *Unit:* the QA-mode selector, given a `serves:false`
+resolution (or no serving command) under `AWB_QA_MODE=browser`, selects a
+non-browser fallback instead of the `exit 1` path. *Manual:* re-drive a truly static
+frontend (no recognized app server) and confirm `exercise` QAs it some way and
+reaches pr-readiness instead of dead-ending.
+
+
+## Group K — Scaling on large monorepos
+
+### [ ] TASK-74: Repo discovery can't complete on large monorepos (fender, ~620 packages) — scan times out / retry-loops
+
+**What's wrong.** Repo-discovery cannot complete on fender (~620 workspace
+packages): the scan times out and retry-loops, blocking *all* tasks before any code
+runs. Root cause (verified on current main): `discoverUnits`
+(`packages/repository/src/units.ts:75`) does O(n²) dependency-linking — the nested
+loop at `units.ts:134-143` re-reads every other package's `package.json` inside the
+innermost loop (`const otherPkg = await readPackageJson(...)` at `units.ts:143`),
+i.e. O(candidates × deps × candidates) awaited disk reads (~380k on ~620 packages).
+The daemon fetch in `workers/temporal-worker/src/daemon-client.ts:20` also carries
+no `AbortSignal`, so a wedged discovery drops opaquely instead of timing out.
+Beyond discovery hanging, the broader concern is that a task reads far more code
+than the change needs — we should not be scanning/reading every package unrelated
+to the target change and burning tokens on them.
+
+**What to do.** Land a discovery-scaling fix: read each `package.json` **once**
+(into a `pkgByDir` map via `Promise.all`), build an `idByPackageName` map so a
+dependency edge is one map lookup instead of a nested scan-and-read, pass the
+already-read pkg into `classifyUnit` instead of re-reading, and replace the linear
+`units.find(...)` with a `unitByDir` map lookup; add `signal:
+AbortSignal.timeout(...)` on the daemon fetch. A prototype of exactly this exists
+on branch `timothyshee/fix-discovery-scaling` (commit `89a4202`, +38/−18 across
+`units.ts` + `daemon-client.ts`) — **verified NOT on main** (`git merge-base
+--is-ancestor 89a4202 main` → 1); real fender discovered 622 units in ~225ms after
+it. Merge it (or reimplement on current main) and, separately, ensure the *task*
+scopes what it reads to the change's blast radius rather than the whole workspace.
+
+**Where.** The discovery worker's `discoverUnits` (dependency-linking loop + worker
+fetch), and the task-scoping / context-retrieval path that decides how much code a
+task ingests. See branch `timothyshee/fix-discovery-scaling` @ `89a4202`. Relates to
+the `fender-discovery-scaling-block` learning.
+
+**How we'll know it's done.** *Unit:* `discoverUnits` on a synthetic ~600-package
+workspace reads each `package.json` once (assert read count ≈ package count, not
+n²) and completes within a bounded time. *Manual:* register real fender and confirm
+discovery completes (~620 units, sub-second) so tasks can run — with no per-package
+full-source read for unrelated packages.
+
+
+## Group L — QA gate false-positives
+
+### [ ] TASK-75: `exercise` QA-evidence gate parks a finished, verified change at `repeated-failure-no-progress` (repairs `implement`, which can't fix an evidence deficiency)
+
+**What's wrong.** A task whose code compiles and whose unit + e2e commands pass
+clears `verify` (`evaluate-completion.ts:110-123`) and then hits the `exercise`
+gate, `evaluateExercise` (`evaluate-completion.ts:125-147`). That gate checks
+QA-*evidence* signals that are independent of the code being correct —
+`everyBehavioralClaimCovered`, `behavioralClaimsMissingStrongAssertion`,
+`structuredAssertionsPass`, `requiredRecordingExists`, `browserScenariosHaveTraces`,
+`evidenceTiedToCandidateSha`, `policyBlockingErrorsPresent` (`:130-141`). When any
+fails, the exercise handler maps the result to `outcome: 'repair', target:
+'implement'` (`run-phase.ts:1197`), so the workflow loops
+`exercise→implement→verify→exercise`. Re-running `implement`/`verify` **cannot**
+satisfy an evidence deficiency (a missing recording/trace, a claim with no strong
+assertion), so the loop makes no real progress — a complete, passing change never
+reaches pr-readiness on its own.
+
+**Correction to the original report:** the loop is **not** unbounded. A per-phase
+`failureStreak` hits `NO_PROGRESS_THRESHOLD = 3` (`task-workflow.ts:70,251-259`) and
+parks the task `awaiting-human` behind a `repeated-failure-no-progress` gate
+(`task-workflow.ts:104,258`; halts at `:194-197`). So the trap is real ("can't reach
+pr-readiness without a human") but it is a bounded 3-strike human gate, not an
+infinite re-raise. Note also the streak counter is a plain per-phase count — the
+richer `isNoProgress` fingerprint machinery in
+`packages/workflow/src/failure-fingerprint.ts:44-60` is **not** wired into the
+exercise repair path at all.
+
+**What to do.** Two independent problems to separate: (1) an evidence deficiency
+should not `repair`-target `implement` — re-coding can't produce a missing
+recording/trace; route it to the QA/evidence-capture step (or block with a
+QA-specific reason) instead. (2) A candidate that genuinely satisfies its claim and
+passes tests/e2e must be able to exit the gate; tie the exit to actual evidence
+rather than looping into `implement`. Confirm against TASK-63 first: that gap
+(exercise gate ignores whether the diff touches the claim's target files) is
+**adjacent but distinct** — the TASK-63 branch (`timothyshee/task63-exercise-diff-claim`,
+commit `d9fcb01`) adds `behavioralClaimsWithUntouchedTarget` to `evaluateExercise`
+but does **not** touch this no-progress/repair-routing guard (verified: that field
+does not exist on main).
+
+**Where.** `packages/workflow/src/evaluate-completion.ts:125-147` (`evaluateExercise`
+signals), `workers/temporal-worker/src/activities/run-phase.ts:1179-1198` (exercise
+completion context + `onBlocked → repair/implement`),
+`packages/workflow/src/task-workflow.ts:70,251-265` (streak + human escalation),
+`packages/workflow/src/loop-routing.ts:68-75` (`shouldEscalateToHuman`), and the
+unwired `failure-fingerprint.ts`. Relates to TASK-63 and the
+`qa-static-checks-miss-runtime-bugs` / `qa-cold-reentry-nonconvergence` learnings.
+
+**How we'll know it's done.** *Unit:* a completion test where the candidate
+satisfies its claim and tests/e2e pass reaches pr-readiness (does not accumulate
+`repeated-failure-no-progress`); and an exercise result that fails only on an
+evidence signal routes to QA/evidence capture, not `implement`. *Manual:* re-drive
+the stuck task and confirm it reaches pr-readiness instead of parking at the
+3-strike human gate.
+
+> **Confirmed already fixed on main — original overlaps were stale, do NOT re-file:**
+> - **Program-design bodyless-check (was flagged as TASK-67):** genuinely fixed.
+>   `signatureIsBodyless()` at
+>   `workers/temporal-worker/src/activities/program-design-support.ts:56-64` no
+>   longer flags `;` inside `{ }` — it detects statement markers only
+>   (`return|if(|for(|while(|switch(|await|const/let/var`), and the exact
+>   `interface Provenance { …; …; … }` from the report is an asserted-`true` test
+>   case (`program-design-support.test.ts:49-50`).
+> - **Concurrent sessions / port 4417 (was flagged as TASK-59):** genuinely fixed.
+>   Port is env-driven (`AWB_DAEMON_PORT`, `runtime-config.ts:26,34-42`) and `awb up
+>   --isolated` (`apps/cli/src/commands/lifecycle.ts:104,117-123`) applies
+>   `isolatedOverrides` (`runtime-config.ts:129-155`) — per-checkout port offsets +
+>   a separate `AWB_DATA_DIR` DB (`paths.ts:4-5`), so a second stack no longer
+>   collides on 4417 or shares `~/.agentic-workbench`.
+
+
+## Group M — Local-model driving & dogfooding
+
+### [ ] TASK-76: A prompt/skill that lets even a weak local model *drive* a task (not code it)
+
+**What's wrong.** Driving a task through the workbench (boot stack, register repo,
+create task, approve the contract gate, answer gates, drive to pr-readiness,
+triage) currently assumes a capable model. There is no artifact that makes it
+*very easy* for even a small/weak local model to drive a task. Such a model may not
+do the in-depth coding, but it should be able to at least steer the loop —
+answering gates and advancing phases — while a stronger model (or the workbench's
+own real path) does the implementation.
+
+**What to do.** Author a tightly-scripted prompt or skill (a "driver" companion to
+`run-workbench-task`) that reduces driving to a small, deterministic decision list:
+which gate is open → the one correct action, with copy-paste-ready `awb` commands
+and the known auto-resolutions (contract→approve, slice-cap→`AWB_SLICE_DIFF_CAP=0`,
+no-progress→diagnose/park). Keep it model-agnostic per the standing
+`external-tools-model-agnostic` learning. The goal is that the driving surface is
+mechanical enough for a stupid model to follow without judgment.
+
+**Where.** A new skill under `.claude/skills/` (or the plugin's skills), sibling to
+`run-workbench-task`; recipe cards / seed env per the model-agnostic learning.
+Relates to `flex-dash-run-autonomy` (the known auto-resolvable gates) and
+`skill-delivery-prompt-injection`.
+
+**How we'll know it's done.** *Manual:* a small local model, given only the driver
+skill, drives a real task from registration to pr-readiness — answering each gate
+correctly — without the operator hand-holding it. Captured as a short transcript.
+
+### [ ] TASK-77: Dogfood the workbench on *this* repo (agent-workbench itself)
+
+**What's wrong.** We dogfood on `browser-games` / `fender` / `app` but have never
+driven a task against *this* repo — the most honest test of whether the tool is
+pleasant to use on a real TS monorepo.
+
+**What to do.** Register `agent-workbench` as a repo and drive one small, real,
+self-contained task (e.g. one of the smaller fixes above) end to end,
+interactively, stopping at the pr-readiness gate. Capture friction as new TODO
+items here.
+
+**Where.** Operational — uses the `run-workbench-task` skill; no code target.
+Relates to `implement-feature` (self-modification flow).
+
+**How we'll know it's done.** A branch + draft PR on this repo produced by the
+workbench, with a short writeup of what was awkward.
+
+
+## Group N — Worktree DX
+
+### [ ] TASK-78: Worktree *directory* path is a bare UUID (`<repoId>/<taskId>`) — illegible in `git worktree list`
+
+**What's wrong.** The worktree directory is built as
+`worktrees/<repositoryId>/<taskId>` by `worktreeDir()`
+(`packages/config/src/paths.ts:63-64`) — both segments are raw UUIDs, so the
+directory column of `git worktree list` carries no human-readable hint when several
+worktrees are active.
+
+> **Correction to the original report:** the *branch* half of the complaint is
+> stale. `resolveTaskBranchName()` (`packages/workspace/src/branch.ts:30-33`)
+> already produces a **slug-first** name with only an 8-char short id suffix — e.g.
+> `awb/portal-header-subtitle-game-count-ecabb015` — **not** the `…-for-<full-uuid>`
+> shown in the original example. The branch is fine; only the directory is opaque.
+
+**What to do.** Give the worktree *directory* a human-readable name derived from the
+task slug (with a short unique suffix only for disambiguation). The slug is already
+available — `resolveTaskBranchName` takes a `slugSource`, so the same slug used for
+the branch can name the directory. Minimum change: incorporate the slug (or the
+resolved branch name) into `worktreeDir()` rather than using the bare `taskId`.
+
+**Where.** `packages/config/src/paths.ts:63-64` (`worktreeDir`), wired at
+`packages/workspace/src/worktree.ts:54-55` (`branchName`/`worktreePath`), consumed by
+`git worktree add ... -b <branch>` (`worktree.ts:65`). The slug source is
+`packages/workspace/src/branch.ts:30-33`. Relates to the `create-worktree` skill
+conventions.
+
+**How we'll know it's done.** *Manual:* `git worktree list` after two `drive-task`
+runs shows slug-based, distinguishable directory names instead of bare-UUID leaf
+directories.
