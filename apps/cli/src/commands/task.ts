@@ -70,10 +70,12 @@ export function registerTaskCommands(program: Command): void {
     .option('--prompt <prompt>', 'Task prompt (alternative to the positional argument)')
     .option('--prompt-file <path>', 'Read the prompt from a file, or "-" for stdin')
     .option('--size <size>', 'Task size hint: S, M, or L (the classifier still decides; overridable at the gate)')
+    .option('--parent-task <id>', 'Stack this task on a parent task: base its branch + PR on the parent\'s delivered branch (TASK-72)')
+    .option('--base-branch <ref>', 'Explicit base branch to branch from and open the PR against (overrides --parent-task resolution)')
     .action(
       async (
         promptArg: string | undefined,
-        opts: { repo?: string; prompt?: string; promptFile?: string; size?: string },
+        opts: { repo?: string; prompt?: string; promptFile?: string; size?: string; parentTask?: string; baseBranch?: string },
       ) => {
         try {
           const repoId = await resolveRepo(opts.repo, undefined);
@@ -83,6 +85,8 @@ export function registerTaskCommands(program: Command): void {
             repositoryId: repoId,
             prompt,
             ...(size ? { size } : {}),
+            ...(opts.parentTask ? { parentTaskId: opts.parentTask } : {}),
+            ...(opts.baseBranch ? { baseBranch: opts.baseBranch } : {}),
           });
           rememberTaskId(result.taskId);
           if (outputOptions().json) emitJson(result);

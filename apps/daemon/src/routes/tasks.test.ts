@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Client } from '@temporalio/client';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { createDatabase, type WorkbenchDatabase } from '@awb/database';
+import { createDatabase, upsertTask, getTask, repositories, workspaceLeases, type WorkbenchDatabase } from '@awb/database';
 import { registerTaskRoutes } from './tasks.js';
 import { setTemporalClientForTesting, workflowIdFor } from '../temporal-client.js';
 
@@ -14,9 +14,12 @@ interface RecordedSignal {
   args: unknown[];
 }
 
-function makeStubClient(recorded: RecordedSignal[], opts: { failWith?: Error } = {}): Client {
+function makeStubClient(recorded: RecordedSignal[], opts: { failWith?: Error; starts?: unknown[][] } = {}): Client {
   return {
     workflow: {
+      async start(_wf: unknown, options: { args: unknown[] }) {
+        opts.starts?.push(options.args);
+      },
       getHandle(workflowId: string) {
         return {
           async signal(signalDef: { name: string }, ...args: unknown[]) {
@@ -40,6 +43,11 @@ describe('task PR-lifecycle signal routes', () => {
     setTemporalClientForTesting(makeStubClient(recorded));
     dbDir = await mkdtemp(join(tmpdir(), 'awb-tasks-route-db-'));
     database = createDatabase(join(dbDir, 'workbench.sqlite'));
+    const iso = new Date().toISOString();
+    database.db
+      .insert(repositories)
+      .values({ id: 'repo-1', canonicalPath: '/tmp/repo', name: 'repo', remoteUrl: null, defaultBranch: 'main', trusted: true, createdAt: iso, updatedAt: iso })
+      .run();
     app = Fastify({ logger: false });
     registerTaskRoutes(app, database);
     await app.ready();
@@ -100,6 +108,63 @@ describe('task PR-lifecycle signal routes', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ category: 'question', action: 'human-gate' });
     expect(recorded).toHaveLength(0); // gated — no auto-loop signal fired
+  });
+
+  it('POST /api/tasks stacks a child on its parent: base = parent delivered branch, in start args + row', async () => {
+    const starts: unknown[][] = [];
+    setTemporalClientForTesting(makeStubClient(recorded, { starts }));
+    // A parent task that already delivered a branch (its workspace lease's branchName).
+    upsertTask(database.db, { id: 'task-parent', repositoryId: 'repo-1', prompt: 'parent' });
+    database.db
+      .insert(workspaceLeases)
+      .values({
+        id: 'task-parent-lease', repositoryId: 'repo-1', taskId: 'task-parent', baseRef: 'main', baseSha: 'sha',
+        branchName: 'awb/task-parent-slug', worktreePath: '/tmp/wt', executionProfile: 'native-trusted',
+        allocatedPortsJson: '[]', state: 'active', createdAt: new Date().toISOString(),
+      })
+      .run();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { repositoryId: 'repo-1', prompt: 'child', parentTaskId: 'task-parent' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().baseBranch).toBe('awb/task-parent-slug');
+
+    // The workflow was started with the resolved base branch...
+    expect(starts[0]?.[0]).toMatchObject({ baseBranch: 'awb/task-parent-slug' });
+    // ...and the child task row carries the stacking edge.
+    const child = res.json().taskId as string;
+    expect(getTask(database.db, child)).toMatchObject({
+      parentTaskId: 'task-parent',
+      baseBranch: 'awb/task-parent-slug',
+    });
+  });
+
+  it('POST /api/tasks 409s when the parent has no delivered branch yet', async () => {
+    setTemporalClientForTesting(makeStubClient(recorded, { starts: [] }));
+    upsertTask(database.db, { id: 'task-parent', repositoryId: 'repo-1', prompt: 'parent' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { repositoryId: 'repo-1', prompt: 'child', parentTaskId: 'task-parent' },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toContain('no delivered branch');
+  });
+
+  it('POST /api/tasks with no parent starts a root task (no baseBranch in args)', async () => {
+    const starts: unknown[][] = [];
+    setTemporalClientForTesting(makeStubClient(recorded, { starts }));
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { repositoryId: 'repo-1', prompt: 'root' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().baseBranch).toBeUndefined();
+    expect((starts[0]?.[0] as { baseBranch?: string })?.baseBranch).toBeUndefined();
   });
 
   it('returns 404 when the target workflow signal fails', async () => {

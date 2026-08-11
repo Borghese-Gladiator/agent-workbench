@@ -8,6 +8,12 @@ export const TaskSchema = z.object({
   phase: TaskPhaseSchema,
   condition: RunConditionSchema,
   deliveryState: DeliveryStateSchema,
+  /** Stacked-PR edge (TASK-72): the parent task this one stacks on. Its delivered branch becomes
+   *  this task's base. Undefined for a root task (PR#0), whose base stays the repo default branch. */
+  parentTaskId: z.string().optional(),
+  /** The base branch this task's worktree/branch is created from and its PR opens against. When set
+   *  (typically the parent's delivered branch), it overrides the repository default branch. */
+  baseBranch: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

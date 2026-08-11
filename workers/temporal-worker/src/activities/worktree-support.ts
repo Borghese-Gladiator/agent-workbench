@@ -16,6 +16,9 @@ export async function materializeWorktree(input: {
   /** Human-readable source (the task prompt/objective) for the branch slug — NOT the taskId, which
    *  would make the branch `awb/<uuid>-<uuid>`. Falls back to the taskId when absent. */
   slugSource?: string;
+  /** Base branch override (TASK-72 stacked PRs): create the branch from this ref instead of the
+   *  repository default branch (e.g. a parent task's delivered branch). */
+  baseOverride?: string;
 }): Promise<WorkspaceLease> {
   const { layout } = initDataDir();
   const database = createReadOnlyDatabase(layout.workbenchSqlite);
@@ -29,7 +32,7 @@ export async function materializeWorktree(input: {
       repositoryId: input.repositoryId,
       repositoryPath: repository.canonicalPath,
       taskId: input.taskId,
-      baseRef: repository.defaultBranch,
+      baseRef: input.baseOverride ?? repository.defaultBranch,
       slugSource: input.slugSource ?? input.taskId,
       executionProfile: 'native-trusted',
     });

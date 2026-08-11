@@ -19,6 +19,7 @@ import {
   upsertTask,
   listTasksWithRepository,
   deleteTask,
+  getTaskDeliveredBranch,
   getTokenBreakdown,
   getRuntimeAttribution,
   listFindingsByTask,
@@ -44,25 +45,46 @@ export interface CreatedTaskRecord {
 }
 
 export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchDatabase): void {
-  app.post<{ Body: { repositoryId: string; prompt: string; size?: TaskSize } }>('/api/tasks', async (request, reply) => {
+  app.post<{
+    Body: { repositoryId: string; prompt: string; size?: TaskSize; parentTaskId?: string; baseBranch?: string };
+  }>('/api/tasks', async (request, reply) => {
     const client = await getTemporalClient();
     const taskId = randomUUID();
-    const { repositoryId, prompt, size } = request.body;
-    const workflowId = workflowIdFor(repositoryId, taskId);
+    const { repositoryId, prompt, size, parentTaskId } = request.body;
 
+    // Stacked PRs (TASK-72): a child task branches off — and its PR opens against — its parent's
+    // delivered branch. An explicit baseBranch wins; otherwise resolve it from the parent task's
+    // lease. A root task (neither) uses the repository default branch downstream.
+    let baseBranch = request.body.baseBranch;
+    if (!baseBranch && parentTaskId) {
+      baseBranch = getTaskDeliveredBranch(database.db, parentTaskId);
+      if (!baseBranch) {
+        reply.code(409);
+        return { error: `parent task ${parentTaskId} has no delivered branch yet (worktree not materialized)` };
+      }
+    }
+
+    const workflowId = workflowIdFor(repositoryId, taskId);
     await client.workflow.start(TaskWorkflow, {
       taskQueue: taskQueueName(),
       workflowId,
       // An optional intake size hint (CLI --size) seeds the classifier; it still decides.
-      args: [{ taskId, repositoryId, prompt, ...(size ? { size } : {}) }],
+      args: [{ taskId, repositoryId, prompt, ...(size ? { size } : {}), ...(baseBranch ? { baseBranch } : {}) }],
     });
 
     // Persist the task row so it survives a daemon restart and `task show` reads lifecycle state
     // from SQLite, replacing the previous session-scoped in-memory array.
-    upsertTask(database.db, { id: taskId, repositoryId, prompt, ...(size ? { size } : {}) });
+    upsertTask(database.db, {
+      id: taskId,
+      repositoryId,
+      prompt,
+      ...(size ? { size } : {}),
+      ...(parentTaskId ? { parentTaskId } : {}),
+      ...(baseBranch ? { baseBranch } : {}),
+    });
 
     reply.code(201);
-    return { taskId, repositoryId, workflowId };
+    return { taskId, repositoryId, workflowId, ...(baseBranch ? { baseBranch } : {}) };
   });
 
   app.get('/api/tasks', async () => {

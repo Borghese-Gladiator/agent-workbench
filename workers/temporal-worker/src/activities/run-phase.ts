@@ -36,7 +36,7 @@ import { runBrowserQaViaServer } from './browser-qa-support.js';
 import { draftContractInputFromPrompt, formatContractGateSummary } from './contract-support.js';
 import { classifyTaskSize, SIZE_CLASSIFIER_MODEL } from './classifier-support.js';
 import { programDesignInstruction, parseProgramDesignOutput } from './program-design-support.js';
-import { resolveRepoRef, createRealDelivery } from './delivery-support.js';
+import { resolveRepoRef, resolveDeliveryTarget, resolveRepositoryRoot, createRealDelivery } from './delivery-support.js';
 import { createPhaseEventSink } from './durable-event-sink.js';
 import { createCapabilityBroker } from '@awb/capability-broker';
 import { capabilitiesToSdkTools, disallowedSdkTools } from '@awb/agent-gateway';
@@ -72,7 +72,7 @@ import {
   reviewerExaminedAllRequiredInputs,
   type ReviewInputs,
 } from '@awb/review';
-import { deliverToGitHub, commitQaMediaToBranch } from '@awb/github';
+import { deliverToGitHub, deliverToLocalMerge, commitQaMediaToBranch } from '@awb/github';
 import { postQaMediaBriefs, qaMediaFileName } from './qa-media-support.js';
 import { FakeGitHubClient, FakeGitPushRunner } from '@awb/github/test-fakes';
 import {
@@ -699,6 +699,8 @@ const prepareHandler: PhaseHandler = {
         taskId: state.taskId,
         // Slug the branch from the human request (contract objective / prompt), not the taskId.
         slugSource: runState.contract?.objective ?? state.prompt ?? state.taskId,
+        // Stacked PRs (TASK-72): branch off the parent's delivered branch when set, else default.
+        baseOverride: state.baseBranch,
       });
       runState.lease = lease;
       runState.baseSha = lease.baseSha;
@@ -1443,10 +1445,47 @@ const releaseHandler: PhaseHandler = {
     const candidateSha = resolveCandidateSha(runState);
     const worktreePath = requireWorktreeCwd(ctx.profile, runState.worktreePath, 'release', state.taskId);
 
+    // Delivery is real only on a real-agent runtime; the mock runtime keeps in-memory fakes and a
+    // synthetic ref below, so every deterministic test is unchanged.
+    const realDelivery = ctx.profile.usesRealAgent;
+    const branchName = runState.lease?.branchName ?? `awb/${state.taskId}`;
+    const baseBranch = runState.lease?.baseRef ?? 'main';
+
+    // No-origin delivery (TASK-71): when the repo has no GitHub-parseable remote, a done change has
+    // nowhere to push. Land it locally instead — merge the feature branch into the local default
+    // branch — and complete release without a PR. This mirrors close-worktree's no-remote path.
+    if (realDelivery) {
+      const target = await resolveDeliveryTarget(worktreePath);
+      if (target.kind === 'local-merge') {
+        const repositoryPath = await resolveRepositoryRoot(worktreePath);
+        const merge = await ctx.observability.time('githubOperationMs', () =>
+          deliverToLocalMerge({
+            repositoryPath,
+            branchName,
+            defaultBranch: target.defaultBranch,
+            objective: runState.contract?.objective ?? state.prompt ?? state.taskId,
+          }),
+        );
+        return {
+          kind: 'early',
+          result: {
+            outcome: 'await-human',
+            gate: {
+              id: `${state.taskId}-release-gate`,
+              taskId: state.taskId,
+              phase: 'release',
+              reason: 'pr-readiness',
+              summary: `Task ${state.taskId} landed locally: ${branchName} merged into ${merge.defaultBranch} (${merge.commitSha.slice(0, 8)}); no remote to open a PR against.`,
+              createdAt: new Date().toISOString(),
+            },
+          },
+        };
+      }
+    }
+
     // Real delivery: on a real-agent runtime, open a real draft PR on the repo's actual remote
     // via the Octokit client (authed with the ambient `gh` token) + git-CLI push. The mock runtime
     // keeps the in-memory fakes and a synthetic ref, so every deterministic test is unchanged.
-    const realDelivery = ctx.profile.usesRealAgent;
     let ref = { owner: 'awb-mvp', repo: state.repositoryId };
     let client;
     let pushRunner;
@@ -1462,9 +1501,6 @@ const releaseHandler: PhaseHandler = {
       client = new FakeGitHubClient();
       pushRunner = new FakeGitPushRunner();
     }
-
-    const branchName = runState.lease?.branchName ?? `awb/${state.taskId}`;
-    const baseBranch = runState.lease?.baseRef ?? 'main';
 
     // The changed paths give the PR body's Changes section (and a title fallback). Recompute from the
     // worktree diff; empty on the mock path or any git error, which the renderers tolerate.

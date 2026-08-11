@@ -59,6 +59,9 @@ export interface UpsertTaskInput {
   deliveryState?: DeliveryState;
   /** Task size class; set at intake as a hint or once the classifier decides. */
   size?: TaskSize;
+  /** Stacked-PR edge (TASK-72): set once at creation, never cleared by a later sync. */
+  parentTaskId?: string;
+  baseBranch?: string;
 }
 
 export function upsertTask(db: DrizzleDb, input: UpsertTaskInput): void {
@@ -73,6 +76,8 @@ export function upsertTask(db: DrizzleDb, input: UpsertTaskInput): void {
     condition: input.condition ?? existing?.condition ?? 'running',
     deliveryState: input.deliveryState ?? existing?.deliveryState ?? 'not-started',
     size: input.size ?? existing?.size ?? null,
+    parentTaskId: input.parentTaskId ?? existing?.parentTaskId ?? null,
+    baseBranch: input.baseBranch ?? existing?.baseBranch ?? null,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -87,6 +92,9 @@ export function upsertTask(db: DrizzleDb, input: UpsertTaskInput): void {
         deliveryState: row.deliveryState,
         // Only advance size, never clear it — a later sync without a size must not wipe the classifier's decision.
         ...(input.size ? { size: input.size } : {}),
+        // The stacking edge is set once at creation; a later phase/state sync must not wipe it.
+        ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}),
+        ...(input.baseBranch ? { baseBranch: input.baseBranch } : {}),
         updatedAt: row.updatedAt,
       },
     })
@@ -95,6 +103,18 @@ export function upsertTask(db: DrizzleDb, input: UpsertTaskInput): void {
 
 export function getTask(db: DrizzleDb, taskId: string): TaskRow | undefined {
   return db.select().from(tasks).where(eq(tasks.id, taskId)).all()[0];
+}
+
+/**
+ * The branch a task delivered on (its workspace lease's branch name) — the base a child task stacks
+ * on (TASK-72). Undefined when the parent has no lease yet (worktree not materialized).
+ */
+export function getTaskDeliveredBranch(db: DrizzleDb, taskId: string): string | undefined {
+  return db
+    .select({ branchName: workspaceLeases.branchName })
+    .from(workspaceLeases)
+    .where(eq(workspaceLeases.taskId, taskId))
+    .all()[0]?.branchName;
 }
 
 export function listTasks(db: DrizzleDb): TaskRow[] {

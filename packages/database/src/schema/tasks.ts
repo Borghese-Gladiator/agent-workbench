@@ -13,6 +13,9 @@ export const tasks = sqliteTable('tasks', {
   deliveryState: text('delivery_state').notNull().$type<DeliveryState>(),
   /** Task size class; nullable until the specify classifier sets it. */
   size: text('size').$type<TaskSize>(),
+  /** Stacked-PR edge (TASK-72): parent task + base branch override; both null for a root task. */
+  parentTaskId: text('parent_task_id'),
+  baseBranch: text('base_branch'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });

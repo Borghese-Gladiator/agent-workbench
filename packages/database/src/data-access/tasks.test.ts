@@ -29,7 +29,7 @@ import {
   workspaceLeases,
   type WorkbenchDatabase,
 } from '../index.js';
-import { upsertTask, ensureRun, ensurePhaseAttempt, deleteTask, listTasksWithRepository } from './tasks.js';
+import { upsertTask, getTask, getTaskDeliveredBranch, ensureRun, ensurePhaseAttempt, deleteTask, listTasksWithRepository } from './tasks.js';
 
 const REPO_ID = 'repo-1';
 const now = '2026-07-28T00:00:00.000Z';
@@ -201,5 +201,57 @@ describe('listTasksWithRepository', () => {
     });
     expect(rows[0]?.createdAt).toBeTruthy();
     expect(rows[0]?.updatedAt).toBeTruthy();
+  });
+});
+
+describe('stacked-PR edge (TASK-72)', () => {
+  let dir: string;
+  let db: WorkbenchDatabase;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'awb-stack-'));
+    db = createDatabase(join(dir, 'wb.sqlite'));
+    db.db
+      .insert(repositories)
+      .values({ id: REPO_ID, canonicalPath: '/tmp/repo', name: 'repo', remoteUrl: null, defaultBranch: 'main', trusted: true, createdAt: now, updatedAt: now })
+      .run();
+  });
+
+  afterEach(async () => {
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('round-trips parentTaskId + baseBranch and never clears them on a later phase-only sync', () => {
+    upsertTask(db.db, {
+      id: 'task-child',
+      repositoryId: REPO_ID,
+      prompt: 'p',
+      parentTaskId: 'task-parent',
+      baseBranch: 'awb/task-parent-slug',
+    });
+    expect(getTask(db.db, 'task-child')).toMatchObject({
+      parentTaskId: 'task-parent',
+      baseBranch: 'awb/task-parent-slug',
+    });
+
+    // A later lifecycle sync (phase/condition only) must not wipe the stacking edge.
+    upsertTask(db.db, { id: 'task-child', repositoryId: REPO_ID, prompt: '', phase: 'plan' });
+    expect(getTask(db.db, 'task-child')).toMatchObject({
+      phase: 'plan',
+      parentTaskId: 'task-parent',
+      baseBranch: 'awb/task-parent-slug',
+    });
+  });
+
+  it('resolves a task delivered branch from its workspace lease', () => {
+    upsertTask(db.db, { id: 'task-parent', repositoryId: REPO_ID, prompt: 'p' });
+    expect(getTaskDeliveredBranch(db.db, 'task-parent')).toBeUndefined();
+
+    db.db
+      .insert(workspaceLeases)
+      .values({ id: 'task-parent-lease', repositoryId: REPO_ID, taskId: 'task-parent', baseRef: 'main', baseSha: 'sha', branchName: 'awb/task-parent-slug', worktreePath: '/tmp/wt', executionProfile: 'native-trusted', allocatedPortsJson: '[]', state: 'active', createdAt: now })
+      .run();
+    expect(getTaskDeliveredBranch(db.db, 'task-parent')).toBe('awb/task-parent-slug');
   });
 });
