@@ -428,7 +428,21 @@ the stuck task and confirm it reaches pr-readiness instead of parking at the
 
 ## Group M — Local-model driving & dogfooding
 
-### [ ] TASK-76: A prompt/skill that lets even a weak local model *drive* a task (not code it)
+### [x] TASK-76: A prompt/skill that lets even a weak local model *drive* a task (not code it)
+
+> **Done.** New skill `.claude/skills/drive-task/SKILL.md` — a judgment-free
+> driving loop sibling to `run-workbench-task`. It reduces driving to one poll
+> (`task show`), two fields (`state.condition`, `pendingHumanGate.reason`), and a
+> lookup table of `open gate → one copy-paste command`. Every command was verified
+> against the real CLI surface (`apps/cli/src/commands/task.ts`): notably there is
+> **no `reject-contract`** command, so the skill tells the driver to STOP on a
+> wrong contract rather than invent one. The known auto-resolutions
+> (`slice-diff-exceeds-cap` → `AWB_SLICE_DIFF_CAP=0` restart,
+> `repeated-failure-no-progress` → diagnose/park) are written as operator recipes,
+> not driver actions, because they require a stack restart that would otherwise
+> block the task. Model-agnostic per `external-tools-model-agnostic`. Manual
+> acceptance (a weak local model driving a real task end-to-end) remains to be run
+> live under TASK-77.
 
 **What's wrong.** Driving a task through the workbench (boot stack, register repo,
 create task, approve the contract gate, answer gates, drive to pr-readiness,
