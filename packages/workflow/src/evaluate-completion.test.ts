@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluatePhaseCompletion } from './evaluate-completion.js';
+import { classifyExerciseBlock, evaluatePhaseCompletion } from './evaluate-completion.js';
 import type { CompletionContext } from './completion-context.js';
 import type { CompletionCandidate } from '@awb/domain';
 
@@ -314,6 +314,54 @@ describe('evaluatePhaseCompletion — exercise', () => {
       exercise: { ...completeContext.exercise!, behavioralClaimsMissingStrongAssertion: [] },
     };
     expect(evaluatePhaseCompletion(candidateFor('exercise'), ctx).complete).toBe(true);
+  });
+});
+
+// TASK-75: a blocked exercise gate must route by whether re-coding can fix it. Only a real
+// runtime error (policyBlockingErrorsPresent) is code-fixable; every other deficiency is an
+// evidence/QA-authoring gap that looping implement/verify can never satisfy.
+describe('classifyExerciseBlock (TASK-75)', () => {
+  const base: NonNullable<CompletionContext['exercise']> = {
+    everyRequiredScenarioHasResult: true,
+    everyBehavioralClaimCovered: true,
+    structuredAssertionsPass: true,
+    requiredRecordingExists: true,
+    browserScenariosHaveTraces: true,
+    evidenceTiedToCandidateSha: true,
+    policyBlockingErrorsPresent: false,
+  };
+
+  // A real observed failure — a policy-blocking error, or a structured assertion that ran and
+  // failed — is a defect the builder can fix by re-coding.
+  it.each([
+    ['a policy-blocking runtime error', { policyBlockingErrorsPresent: true }],
+    ['a structured assertion that ran and failed', { structuredAssertionsPass: false }],
+  ])('classifies %s as code-fixable', (_label, override) => {
+    expect(classifyExerciseBlock({ ...base, ...override })).toBe('code-fixable');
+  });
+
+  // Missing/insufficient evidence with no observed failure — re-running implement/verify cannot
+  // manufacture a recording/trace or author a QA assertion, so it must escalate to a human.
+  it.each([
+    ['missing recording', { requiredRecordingExists: false }],
+    ['missing browser trace', { browserScenariosHaveTraces: false }],
+    ['a required scenario has no result', { everyRequiredScenarioHasResult: false }],
+    ['a behavioral claim is uncovered', { everyBehavioralClaimCovered: false }],
+    ['a claim lacks an authored strong assertion', { behavioralClaimsMissingStrongAssertion: ['claim-1'] }],
+    ['evidence not tied to candidate SHA', { evidenceTiedToCandidateSha: false }],
+  ])('classifies %s as an evidence-deficiency (re-coding cannot fix it)', (_label, override) => {
+    expect(classifyExerciseBlock({ ...base, ...override })).toBe('evidence-deficiency');
+  });
+
+  it('treats a real failing assertion as code-fixable even when evidence gaps also exist', () => {
+    expect(
+      classifyExerciseBlock({
+        ...base,
+        structuredAssertionsPass: false,
+        requiredRecordingExists: false,
+        behavioralClaimsMissingStrongAssertion: ['claim-1'],
+      }),
+    ).toBe('code-fixable');
   });
 });
 

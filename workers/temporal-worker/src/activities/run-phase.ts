@@ -10,7 +10,7 @@ import type {
   Finding,
 } from '@awb/domain';
 import type { TaskWorkflowState } from '@awb/workflow';
-import { evaluatePhaseCompletion, routeLoop, type CompletionContext } from '@awb/workflow';
+import { classifyExerciseBlock, evaluatePhaseCompletion, routeLoop, type CompletionContext } from '@awb/workflow';
 import {
   createAgentAdapter,
   scriptMockTurns,
@@ -1019,6 +1019,36 @@ const verifyHandler: PhaseHandler = {
 // exercise (genuinely real: real CLI QA executor)
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * TASK-75: map a blocked `exercise` decision to the right loop outcome. A real observed failure
+ * (`classifyExerciseBlock === 'code-fixable'`) routes `repair → implement` — the builder can fix it
+ * by re-coding. A pure evidence deficiency routes to an `await-human` gate with reason
+ * `qa-inconclusive`, because re-running implement/verify can never manufacture a missing
+ * recording/trace or author a QA assertion; looping there only grinds to the 3-strike
+ * `repeated-failure-no-progress` park a human can't resolve by retrying. Exported so the mapping is
+ * unit-testable in isolation from the QA execution the handler wraps.
+ */
+export function mapExerciseBlock(
+  exercise: NonNullable<CompletionContext['exercise']>,
+  missing: string[],
+  taskId: string,
+): PhaseAttemptResult {
+  if (classifyExerciseBlock(exercise) === 'code-fixable') {
+    return { outcome: 'repair', target: 'implement', findings: [] };
+  }
+  return {
+    outcome: 'await-human',
+    gate: {
+      id: `${taskId}-exercise-qa-inconclusive`,
+      taskId,
+      phase: 'exercise',
+      reason: 'qa-inconclusive',
+      summary: `QA evidence is incomplete and re-coding cannot supply it: ${missing.join('; ')}`,
+      createdAt: new Date().toISOString(),
+    },
+  };
+}
+
 const exerciseHandler: PhaseHandler = {
   phase: 'exercise',
   async run(ctx): Promise<PhaseOutcome> {
@@ -1176,25 +1206,27 @@ const exerciseHandler: PhaseHandler = {
       },
     });
 
+    const exercise = {
+      everyRequiredScenarioHasResult: true,
+      everyBehavioralClaimCovered: coverage.everyBehavioralClaimCovered,
+      behavioralClaimsMissingStrongAssertion: coverage.missing,
+      structuredAssertionsPass,
+      requiredRecordingExists: qaResult.artifacts.length > 0,
+      // A browser run must have produced a real trace artifact; a CLI run has no browser scenarios.
+      browserScenariosHaveTraces: ranBrowserQa ? hasTraceArtifact : true,
+      evidenceTiedToCandidateSha: qaResult.evidence.candidateSha === context.candidateSha,
+      policyBlockingErrorsPresent,
+    };
+
     return {
       kind: 'evaluate',
-      completion: {
-        exercise: {
-          everyRequiredScenarioHasResult: true,
-          everyBehavioralClaimCovered: coverage.everyBehavioralClaimCovered,
-          behavioralClaimsMissingStrongAssertion: coverage.missing,
-          structuredAssertionsPass,
-          requiredRecordingExists: qaResult.artifacts.length > 0,
-          // A browser run must have produced a real trace artifact; a CLI run has no browser scenarios.
-          browserScenariosHaveTraces: ranBrowserQa ? hasTraceArtifact : true,
-          evidenceTiedToCandidateSha: qaResult.evidence.candidateSha === context.candidateSha,
-          policyBlockingErrorsPresent,
-        },
-      },
+      completion: { exercise },
       evidenceIds: [qaResult.evidence.id],
       openFindingIds: [],
       candidateOverrides: { baseSha: context.baseSha, candidateSha: context.candidateSha },
-      onBlocked: () => ({ outcome: 'repair', target: 'implement', findings: [] }),
+      // See mapExerciseBlock: a real observed failure routes `repair → implement`; a pure evidence
+      // deficiency escalates to a human `qa-inconclusive` gate instead of looping into implement.
+      onBlocked: (missing) => mapExerciseBlock(exercise, missing, state.taskId),
     };
   },
 };
