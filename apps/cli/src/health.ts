@@ -17,13 +17,12 @@ export interface ServiceHealth {
 /**
  * The runtime-shaping env the running stack booted with, as reported by the daemon's /api/status
  * (TASK-70). Lets `up`/`status` show whether a warm stack is actually running `claude` vs a silent
- * `mock`, and with what QA mode / slice caps — the visibility a driver needs before creating a task.
+ * `mock`, and with what QA mode — the visibility a driver needs before creating a task.
  * Undefined when the daemon is unreachable or is an older build without the field.
  */
 export interface RuntimeConfigHealth {
   agentRuntime: string;
   qaMode: string | null;
-  sliceDiffCap: { disabled: boolean; lineCap: number | null; fileCap: number | null };
 }
 
 export interface RuntimeHealth {

@@ -26,12 +26,10 @@ import { loadProjectMemoryForContext } from './memory-support.js';
 import {
   resolveVerificationCommands,
   resolveReviewDiff,
-  resolveDiffNumstat,
   resolveStartCommandForWorktree,
   resolveRepositoryPath,
   installWorktreeDependencies,
 } from './command-support.js';
-import { resolveSliceDiffCap, sliceDiffExceedsCap } from './slice-guardrail.js';
 import { runBrowserQaViaServer } from './browser-qa-support.js';
 import { draftContractInputFromPrompt, formatContractGateSummary } from './contract-support.js';
 import { classifyTaskSize, SIZE_CLASSIFIER_MODEL } from './classifier-support.js';
@@ -889,36 +887,6 @@ const implementHandler: PhaseHandler = {
 
     runState.baseSha = runState.baseSha ?? '0'.repeat(40);
     runState.candidateSha = candidateSha;
-
-    // Velocity guardrail: if the run's committed diff exceeds the configurable cap, force a
-    // human checkpoint before continuing rather than dumping a large unreviewed diff downstream. Off on
-    // the mock path; on for the real path. Only meaningful once a real commit exists.
-    const cap = resolveSliceDiffCap({ realPath: ctx.profile.usesRealAgent, size: runState.contract?.size });
-    if (cap.enabled && realBuilder && runState.worktreePath && candidateSha !== runState.baseSha) {
-      const stat = await resolveDiffNumstat({
-        worktreePath: runState.worktreePath,
-        baseSha: runState.baseSha,
-        headSha: candidateSha,
-      });
-      if (sliceDiffExceedsCap(cap, stat)) {
-        return {
-          kind: 'early',
-          result: {
-            outcome: 'await-human',
-            gate: {
-              id: `${state.taskId}-implement-diff-cap-gate`,
-              taskId: state.taskId,
-              phase: 'implement',
-              reason: 'slice-diff-exceeds-cap',
-              summary:
-                `Implement diff is ${stat.changedLines} line(s) across ${stat.changedFiles} file(s), ` +
-                `over the cap (${cap.lineCap} lines / ${cap.fileCap} files). Review before continuing.`,
-              createdAt: new Date().toISOString(),
-            },
-          },
-        };
-      }
-    }
 
     // On the real path, a candidate commit exists when the builder advanced HEAD past the base SHA;
     // targeted checks passing is exactly what the per-slice builder loop already gated `success` on

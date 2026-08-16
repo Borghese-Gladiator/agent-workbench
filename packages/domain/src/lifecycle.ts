@@ -81,7 +81,6 @@ export const HumanGateReasonSchema = z.enum([
   'qa-inconclusive',
   'reviewer-product-decision',
   'waiver-request',
-  'slice-diff-exceeds-cap',
 ]);
 export type HumanGateReason = z.infer<typeof HumanGateReasonSchema>;
 
