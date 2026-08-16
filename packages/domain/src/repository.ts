@@ -12,7 +12,7 @@ export const RepositorySchema = z.object({
 });
 export type Repository = z.infer<typeof RepositorySchema>;
 
-export const RepositoryUnitLanguageSchema = z.enum(['python', 'typescript', 'mixed']);
+export const RepositoryUnitLanguageSchema = z.enum(['python', 'typescript', 'mixed', 'go', 'jvm']);
 export type RepositoryUnitLanguage = z.infer<typeof RepositoryUnitLanguageSchema>;
 
 export const RepositoryUnitKindSchema = z.enum([

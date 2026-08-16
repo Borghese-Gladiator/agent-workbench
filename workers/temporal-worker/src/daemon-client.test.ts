@@ -57,6 +57,18 @@ describe('daemon client', () => {
     expect(calls[0]?.body).toEqual(event);
   });
 
+  it('POSTs a validated start command to the repository commands route', async () => {
+    await createDaemonClient().persistStartCommand({
+      repositoryId: 'repo-1',
+      command: 'npm run dev',
+      cwd: '/w/tree',
+      validatedAtSha: 'abc123',
+    });
+    expect(calls[0]?.method).toBe('POST');
+    expect(calls[0]?.url).toBe('http://127.0.0.1:9999/internal/repositories/repo-1/commands');
+    expect(calls[0]?.body).toEqual({ command: 'npm run dev', cwd: '/w/tree', validatedAtSha: 'abc123' });
+  });
+
   it('throws on a non-2xx response', async () => {
     status = 500;
     await expect(

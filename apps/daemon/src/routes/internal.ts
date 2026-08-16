@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WorkbenchDatabase } from '@awb/database';
 import { upsertTask, persistRunStateSnapshot, insertSemanticEvent, persistPhaseObservability } from '@awb/database';
 import { RunStateSnapshotSchema, SemanticEventSchema, PhaseObservabilitySchema } from '@awb/domain';
-import { getRepository, refreshRepositorySnapshot } from '@awb/repository';
+import { getRepository, refreshRepositorySnapshot, persistValidatedStartCommand } from '@awb/repository';
 import type { SemanticEventBus } from '../event-bus.js';
 
 /**
@@ -79,6 +79,35 @@ export function registerInternalRoutes(
       return { error: err instanceof Error ? err.message : String(err) };
     }
   });
+
+  // Persist a `start` command that was inferred/discovered over a task worktree and then proven to
+  // boot under browser QA, so the next exercise run reuses it (Tier-1) instead of re-inferring. Write
+  // stays daemon-side (single writer); the worker calls this only after a successful dev-server boot.
+  app.post<{ Params: { id: string }; Body: { command: string; cwd: string; validatedAtSha?: string } }>(
+    '/internal/repositories/:id/commands',
+    async (request, reply) => {
+      const repository = await getRepository(database.db, request.params.id);
+      if (!repository) {
+        reply.code(404);
+        return { error: `No repository with id ${request.params.id}` };
+      }
+      if (!request.body?.command || !request.body?.cwd) {
+        reply.code(400);
+        return { error: 'command and cwd are required' };
+      }
+      try {
+        await persistValidatedStartCommand(database.db, request.params.id, {
+          command: request.body.command,
+          cwd: request.body.cwd,
+          validatedAtSha: request.body.validatedAtSha,
+        });
+        return { ok: true };
+      } catch (err) {
+        reply.code(500);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
 
   app.post<{ Body: unknown }>('/internal/observability', async (request, reply) => {
     const parsed = PhaseObservabilitySchema.safeParse(request.body);

@@ -23,6 +23,41 @@ describe('resolveRunCommand', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  describe('layer 0 — known-repo overrides win first', () => {
+    it('fender (root package.json named "fender" + dev script) resolves to `yarn dev`, serving', async () => {
+      await scaffold(dir, {
+        'package.json': JSON.stringify({
+          name: 'fender',
+          scripts: { dev: 'NODE_OPTIONS=--max-old-space-size=8192 yarn workspace @klaviyo/scripts run yarn-dev-prompt' },
+        }),
+      });
+      const r = await resolveRunCommand(dir);
+      expect(r?.source).toBe('known-repo');
+      expect(r?.command).toBe('yarn dev');
+      expect(r?.serves).toBe(true);
+    });
+
+    it('app (Makefile run-server → bin/django runserver) resolves to `make run-server` on :8080', async () => {
+      await scaffold(dir, {
+        // app has a root package.json with no `name`; the override must key on the Makefile markers.
+        'package.json': JSON.stringify({ private: true }),
+        Makefile: 'run-server: PORT ?= 8080\nrun-server:\n\tbin/django runserver 0.0.0.0:${PORT} --skip-checks\n',
+      });
+      const r = await resolveRunCommand(dir);
+      expect(r?.source).toBe('known-repo');
+      expect(r?.command).toBe('make run-server');
+      expect(r && r.serves ? r.baseUrl : undefined).toBe('http://127.0.0.1:8080');
+    });
+
+    it('does NOT misclassify an unrelated run-server Make target as app', async () => {
+      await scaffold(dir, {
+        Makefile: 'run-server:\n\t./my-custom-daemon --port 9999\n',
+      });
+      const r = await resolveRunCommand(dir);
+      expect(r?.source).not.toBe('known-repo');
+    });
+  });
+
   describe('layer 1 — explicit run declarations win first', () => {
     it('Procfile web: process is a serving command', async () => {
       await scaffold(dir, {

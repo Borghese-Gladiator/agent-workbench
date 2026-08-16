@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { inArray } from 'drizzle-orm';
 import {
   repositories,
@@ -282,6 +282,36 @@ export async function getLatestSnapshot(
  * snapshotId column, and a freshly-registered repo is refreshed once, so this returns that repo's
  * discovered command set. Returns [] when nothing was discovered.
  */
+/**
+ * Persists a `start` command that was resolved by inference/discovery over a task worktree and then
+ * proven to boot (the browser-QA dev server became ready). Writing it back to the profile turns the
+ * next exercise run into a Tier-1 persisted-command hit instead of re-inferring. Replaces any prior
+ * `start` rows for the repo (the table has no unique constraint and reads take the first `start`
+ * match), so a single validated row wins. Recorded as `source: 'inferred'`, `status: 'validated'`
+ * with the candidate sha it was validated at.
+ */
+export async function persistValidatedStartCommand(
+  db: DrizzleDb,
+  repositoryId: string,
+  input: { command: string; cwd: string; validatedAtSha?: string },
+): Promise<void> {
+  await db
+    .delete(repositoryCommands)
+    .where(and(eq(repositoryCommands.repositoryId, repositoryId), eq(repositoryCommands.purpose, 'start')));
+  await db.insert(repositoryCommands).values({
+    id: randomUUID(),
+    repositoryId,
+    unitId: null,
+    purpose: 'start',
+    command: input.command,
+    cwd: input.cwd,
+    source: 'inferred',
+    status: 'validated',
+    validatedAtSha: input.validatedAtSha ?? null,
+    lastExitCode: 0,
+  });
+}
+
 export async function getRepositoryCommands(db: DrizzleDb, repositoryId: string): Promise<ValidatedCommand[]> {
   const rows = await db
     .select()

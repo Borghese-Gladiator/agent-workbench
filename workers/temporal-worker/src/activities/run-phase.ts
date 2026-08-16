@@ -1117,6 +1117,22 @@ const exerciseHandler: PhaseHandler = {
           artifactStore: runState.artifactStore,
         }),
       );
+      // The dev server booted (runBrowserQaViaServer throws otherwise). If this command came from
+      // inference/worktree-discovery rather than the already-persisted profile row, write it back so
+      // the next exercise run is a Tier-1 hit instead of re-inferring. Best-effort — QA already
+      // passed, so a persist failure must not fail the phase. Mock/non-durable path has no daemon.
+      if (ctx.daemon && resolvedStart.source !== 'repository-commands') {
+        try {
+          await ctx.daemon.persistStartCommand({
+            repositoryId: state.repositoryId,
+            command: resolvedStart.command,
+            cwd: runState.worktreePath,
+            validatedAtSha: context.candidateSha,
+          });
+        } catch {
+          // non-fatal: the profile just misses the cache and re-infers next time
+        }
+      }
     } else if (qaMode === 'http-api') {
       const baseUrl = process.env.AWB_QA_BASE_URL ?? 'http://localhost:3000';
       qaResult = await ctx.observability.time('qaExecutionMs', () =>
