@@ -102,7 +102,7 @@ export async function buildRepositorySnapshot({
     commandsWithAmbiguity,
   );
 
-  const facts = await extractFacts(rootDir, repositoryId, headSha, units);
+  const facts = await extractFacts(rootDir, repositoryId, headSha, units, commandsWithAmbiguity);
 
   return {
     id: randomUUID(),
