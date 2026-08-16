@@ -38,9 +38,10 @@ export const RunStateSnapshotSchema = z.object({
    */
   builderResumeSessions: z.record(z.string(), z.string()).optional(),
   /**
-   * Human-readable reasons a code-fixable gate (exercise/QA) last blocked on, carried forward so the
-   * next implement attempt re-prompts the builder with why it failed. Cleared once consumed.
+   * Consume-once findings a code-fixable gate (challenge review or exercise/QA) last blocked on,
+   * carried forward so the next implement attempt re-prompts the builder with what to fix. Distinct
+   * from the persisted `reviewFindings` record; cleared once the builder consumes it.
    */
-  repairFeedback: z.array(z.string()).optional(),
+  repairFindings: z.array(FindingSchema).optional(),
 });
 export type RunStateSnapshot = z.infer<typeof RunStateSnapshotSchema>;

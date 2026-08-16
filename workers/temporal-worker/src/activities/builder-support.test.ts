@@ -14,7 +14,7 @@ import type {
   CreateAgentSessionInput,
 } from '@awb/agent-gateway';
 import type { PlanSlice } from '@awb/domain';
-import { runRealBuilderAttempt } from './builder-support.js';
+import { runRealBuilderAttempt, buildBuilderInstruction } from './builder-support.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -75,6 +75,42 @@ async function makeWorktree(): Promise<string> {
   await execFileAsync('git', ['commit', '-q', '-m', 'init'], { cwd: dir });
   return dir;
 }
+
+describe('buildBuilderInstruction', () => {
+  it('returns the bare objective when there are no prior findings', () => {
+    expect(buildBuilderInstruction('do the thing')).toBe('do the thing');
+    expect(buildBuilderInstruction('do the thing', [])).toBe('do the thing');
+  });
+
+  it('renders severity, description, path:line, and remediation per finding', () => {
+    const out = buildBuilderInstruction('do the thing', [
+      {
+        id: 'f-1',
+        taskId: 't',
+        severity: 'blocker',
+        category: 'correctness',
+        claimIds: [],
+        path: 'a.ts',
+        line: 9,
+        description: 'boom',
+        proposedRemediation: 'guard it',
+        status: 'open',
+      },
+    ]);
+    expect(out).toContain('do the thing');
+    expect(out).toContain('[blocker] boom (a.ts:9)');
+    expect(out).toContain('fix: guard it');
+  });
+
+  it('omits path/line and remediation when a finding lacks them', () => {
+    const out = buildBuilderInstruction('obj', [
+      { id: 'f', taskId: 't', severity: 'high', category: 'requirements', claimIds: [], description: 'no target touched', status: 'open' },
+    ]);
+    expect(out).toContain('[high] no target touched');
+    expect(out).not.toContain('(');
+    expect(out).not.toContain('fix:');
+  });
+});
 
 describe('runRealBuilderAttempt (Stage 2 real builder)', () => {
   let worktree: string;
@@ -189,9 +225,9 @@ describe('runRealBuilderAttempt (Stage 2 real builder)', () => {
     expect(result.sessionId).toBe('provider-session-99');
   });
 
-  // TASK-63 repair loop: prior QA/review feedback is appended to the builder instruction so a
-  // repair attempt re-implements knowing why the last candidate failed, not blind.
-  it('appends priorFeedback to the builder instruction on a repair attempt', async () => {
+  // TASK-63 repair loop: prior QA/review findings are rendered into the builder instruction so a
+  // repair attempt re-implements knowing exactly what to fix, not blind.
+  it('renders priorFindings (desc + path:line + remediation) into the builder instruction on repair', async () => {
     const adapter = new FakeBuilderAdapter(async (cwd) => {
       await writeFile(join(cwd, 'greeting.txt'), 'hello\n');
     });
@@ -205,16 +241,31 @@ describe('runRealBuilderAttempt (Stage 2 real builder)', () => {
       tokenBudget: 1000,
       runtimeBudgetMs: 1000,
       eventSink: () => {},
-      priorFeedback: ['1 behavioral claim(s) have a committed diff that touches none of their target paths'],
+      priorFindings: [
+        {
+          id: 'f-1',
+          taskId: 'task-1',
+          severity: 'high',
+          category: 'correctness',
+          claimIds: ['claim-1'],
+          path: 'src/rank.ts',
+          line: 42,
+          description: 'higher rank does not beat lower',
+          proposedRemediation: 'compare rank ordinals',
+          status: 'open',
+        },
+      ],
     });
 
     const instruction = adapter.lastAssignment?.instruction ?? '';
     expect(instruction).toContain(slice.objective);
     expect(instruction).toContain('A prior attempt failed QA/review');
-    expect(instruction).toContain('touches none of their target paths');
+    expect(instruction).toContain('higher rank does not beat lower');
+    expect(instruction).toContain('src/rank.ts:42');
+    expect(instruction).toContain('compare rank ordinals');
   });
 
-  it('uses the bare slice objective when no priorFeedback is supplied (first attempt)', async () => {
+  it('uses the bare slice objective when no priorFindings are supplied (first attempt)', async () => {
     const adapter = new FakeBuilderAdapter(async (cwd) => {
       await writeFile(join(cwd, 'greeting.txt'), 'hello\n');
     });

@@ -2,7 +2,7 @@ import { runGit, getHeadSha, getStatus } from '@awb/repository';
 import { runIdForTask } from '@awb/database';
 import { withSpan } from '@awb/telemetry';
 import type { CodingAgentAdapter, AgentEventSink } from '@awb/agent-gateway';
-import type { PlanSlice, ProgramDesign, ModelUsage } from '@awb/domain';
+import type { PlanSlice, ProgramDesign, ModelUsage, Finding } from '@awb/domain';
 import type { SliceAttemptOutcome } from '@awb/planning';
 
 export interface RealBuilderAttemptInput {
@@ -25,11 +25,11 @@ export interface RealBuilderAttemptInput {
    */
   resumeSessionId?: string;
   /**
-   * Human-readable reasons a prior code-fixable gate (e.g. QA/exercise) blocked on. Appended to the
-   * builder instruction so a repair attempt re-implements knowing WHY the last candidate failed,
-   * instead of re-running blind. Empty/undefined on a first attempt.
+   * Findings a prior code-fixable gate (challenge review or QA/exercise) blocked on. Rendered into
+   * the builder instruction — description, path/line, and proposed remediation — so a repair attempt
+   * re-implements knowing exactly what to fix, instead of re-running blind. Empty on a first attempt.
    */
-  priorFeedback?: string[];
+  priorFindings?: Finding[];
 }
 
 export interface RealBuilderAttemptResult {
@@ -61,6 +61,22 @@ export async function runRealBuilderAttempt(input: RealBuilderAttemptInput): Pro
   );
 }
 
+/**
+ * Render a builder instruction, appending a repair block when a prior code-fixable gate left open
+ * findings. Each finding contributes its description, its `path:line` when known, and its proposed
+ * remediation, so the builder re-implements against the specific defects rather than the bare
+ * objective. Exported for unit testing the rendering without a live session.
+ */
+export function buildBuilderInstruction(objective: string, priorFindings?: Finding[]): string {
+  if (!priorFindings || priorFindings.length === 0) return objective;
+  const lines = priorFindings.map((f) => {
+    const where = f.path ? ` (${f.path}${f.line !== undefined ? `:${f.line}` : ''})` : '';
+    const fix = f.proposedRemediation ? ` — fix: ${f.proposedRemediation}` : '';
+    return `- [${f.severity}] ${f.description}${where}${fix}`;
+  });
+  return `${objective}\n\nA prior attempt failed QA/review. Address these findings before finishing:\n${lines.join('\n')}`;
+}
+
 async function runBuilderSession(input: RealBuilderAttemptInput): Promise<RealBuilderAttemptResult> {
   const session = await input.adapter.createSession({
     role: 'builder',
@@ -76,10 +92,7 @@ async function runBuilderSession(input: RealBuilderAttemptInput): Promise<RealBu
 
   try {
     const startedAt = Date.now();
-    const instruction =
-      input.priorFeedback && input.priorFeedback.length > 0
-        ? `${input.slice.objective}\n\nA prior attempt failed QA/review. Address these before finishing:\n${input.priorFeedback.map((f) => `- ${f}`).join('\n')}`
-        : input.slice.objective;
+    const instruction = buildBuilderInstruction(input.slice.objective, input.priorFindings);
     const execution = await input.adapter.execute(
       session,
       {

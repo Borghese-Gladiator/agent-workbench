@@ -34,14 +34,16 @@ export interface TaskRunState {
   verificationEvidence: Evidence[];
   qaEvidence: Evidence[];
   reviewerSessionId?: string;
+  /** Durable RECORD of the adversarial review's findings — feeds the PR/audit trail. Accumulated. */
   reviewFindings: import('@awb/domain').Finding[];
   /**
-   * Human-readable reasons a code-fixable gate (today: exercise/QA) last blocked on, carried forward
-   * so the next implement attempt re-prompts the builder with WHY it failed instead of re-running
-   * blind. Set when a code-fixable block loops back to implement; cleared once the builder consumes
-   * it, so a later clean pass never re-surfaces stale feedback.
+   * Consume-once MESSAGE to the next implement attempt: the open findings a code-fixable gate last
+   * blocked on (challenge's real review findings, or synthesized ones from a QA/exercise block), so
+   * the builder re-implements knowing exactly what to fix — description, path/line, and proposed
+   * remediation — instead of re-running blind. Distinct from `reviewFindings` (a persisted record):
+   * this is cleared once the builder consumes it, so a later clean pass never re-surfaces it.
    */
-  repairFeedback?: string[];
+  repairFindings?: import('@awb/domain').Finding[];
   artifactStore: ArtifactStore;
   artifactsDir?: string;
   /** Whether prepare successfully installed the worktree's dependencies (real path). */
