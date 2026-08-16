@@ -268,6 +268,79 @@ export function readPythonDependencyNames(manifests: PythonManifest[]): string[]
   return [...names];
 }
 
+/** Reads a Go module's own path from `go.mod` (`module <path>`). Undefined when absent. */
+export async function readGoModule(dir: string): Promise<string | undefined> {
+  const raw = await readTextFile(dir, 'go.mod');
+  if (!raw) return undefined;
+  const match = raw.match(/^\s*module\s+(\S+)/m);
+  return match ? (match[1] as string) : undefined;
+}
+
+/**
+ * Reads the required module paths from a `go.mod` — both the single-line form (`require x/y v1`) and
+ * the block form (`require (\n  x/y v1\n  ...\n)`). Paths only (versions dropped) so an in-repo edge
+ * is a module-path match against another unit's `module` line.
+ */
+export async function readGoRequires(dir: string): Promise<string[]> {
+  const raw = await readTextFile(dir, 'go.mod');
+  if (!raw) return [];
+  const modules = new Set<string>();
+  for (const m of raw.matchAll(/^\s*require\s+(\S+)\s+\S+/gm)) modules.add(m[1] as string);
+  for (const block of raw.matchAll(/require\s*\(([\s\S]*?)\)/g)) {
+    for (const line of (block[1] as string).split('\n')) {
+      const entry = line.trim();
+      if (!entry || entry.startsWith('//')) continue;
+      const path = entry.split(/\s+/)[0];
+      if (path) modules.add(path);
+    }
+  }
+  return [...modules];
+}
+
+/**
+ * Reads a JVM module's own coordinate and the coordinates it depends on. Maven `pom.xml` gives the
+ * exact `groupId:artifactId` for the module and each `<dependency>`; Gradle `build.gradle[.kts]`
+ * gives `group` + `rootProject.name` (best-effort) and `implementation`/`api "group:artifact:ver"`
+ * coordinates. Names are `group:artifact`, so an in-repo edge is a coordinate match. Small
+ * regex-based scraper, consistent with the module's no-XML/Groovy-parser convention.
+ */
+export async function readJvmCoordinates(
+  dir: string,
+): Promise<{ name?: string; deps: string[] } | undefined> {
+  const pom = await readTextFile(dir, 'pom.xml');
+  if (pom) {
+    const deps = new Set<string>();
+    for (const dep of pom.matchAll(/<dependency>([\s\S]*?)<\/dependency>/g)) {
+      const body = dep[1] as string;
+      const group = body.match(/<groupId>\s*([^<\s]+)\s*<\/groupId>/)?.[1];
+      const artifact = body.match(/<artifactId>\s*([^<\s]+)\s*<\/artifactId>/)?.[1];
+      if (group && artifact) deps.add(`${group}:${artifact}`);
+    }
+    // The module's own coordinate is the top-level (non-<parent>) groupId/artifactId.
+    const topLevel = pom.replace(/<parent>[\s\S]*?<\/parent>/g, '');
+    const group = topLevel.match(/<groupId>\s*([^<\s]+)\s*<\/groupId>/)?.[1];
+    const artifact = topLevel.match(/<artifactId>\s*([^<\s]+)\s*<\/artifactId>/)?.[1];
+    const name = group && artifact ? `${group}:${artifact}` : undefined;
+    return { name, deps: [...deps] };
+  }
+
+  const gradle = (await readTextFile(dir, 'build.gradle')) ?? (await readTextFile(dir, 'build.gradle.kts'));
+  if (gradle) {
+    const deps = new Set<string>();
+    for (const m of gradle.matchAll(
+      /(?:implementation|api|compile|runtimeOnly|testImplementation)[\s(]+["']([\w.-]+:[\w.-]+):[\w.$-]+["']/g,
+    )) {
+      deps.add(m[1] as string);
+    }
+    const group = gradle.match(/^\s*group\s*=?\s*["']([\w.-]+)["']/m)?.[1];
+    const artifact = gradle.match(/rootProject\.name\s*=\s*["']([\w.-]+)["']/)?.[1];
+    const name = group && artifact ? `${group}:${artifact}` : undefined;
+    return { name, deps: [...deps] };
+  }
+
+  return undefined;
+}
+
 /**
  * Reads the workspace-package globs a repo declares, so discovery can recurse into workspace
  * sub-packages that don't sit under the conventional monorepo container dirs (e.g. `games/*`,

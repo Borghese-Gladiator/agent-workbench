@@ -10,11 +10,80 @@ import {
   expandWorkspaceGlobs,
   readPythonPackageName,
   readPythonDependencyNames,
+  readGoModule,
+  readGoRequires,
+  readJvmCoordinates,
   type PackageJson,
   type PythonManifest,
 } from './manifests.js';
 
 const MONOREPO_CONTAINER_DIRS = ['apps', 'packages', 'services', 'workers'];
+
+/** Files whose presence makes a directory a discoverable unit (any recognized ecosystem's manifest). */
+const UNIT_MANIFEST_FILES = ['package.json', 'pyproject.toml', 'go.mod', 'build.gradle', 'build.gradle.kts', 'pom.xml'];
+
+/** Every manifest a candidate directory declares, read exactly once so linking is a pure map pass. */
+interface CandidateManifests {
+  pkg: PackageJson | undefined;
+  py: PythonManifest[];
+  goModule?: string;
+  goRequires: string[];
+  jvm?: { name?: string; deps: string[] };
+}
+
+async function readCandidateManifests(dir: string): Promise<CandidateManifests> {
+  const [pkg, py, goModule, goRequires, jvm] = await Promise.all([
+    readPackageJson(dir),
+    findPythonManifests(dir),
+    readGoModule(dir),
+    readGoRequires(dir),
+    readJvmCoordinates(dir),
+  ]);
+  return { pkg, py, goModule, goRequires, jvm };
+}
+
+/** The names a unit declares as its own, and the names it depends on — resolved across ecosystems. */
+interface UnitIdentity {
+  names: string[];
+  deps: string[];
+}
+
+/**
+ * Per-ecosystem identity extractors. Mirrors resolveRunCommand's MATCHERS array: adding an ecosystem
+ * to the dependency graph is one entry here, reading from the shared manifests already on hand. Each
+ * extractor contributes the names a unit is known by and the dependency names it declares; edges are
+ * resolved by matching one unit's deps against every unit's names through a single shared map.
+ */
+type IdentityExtractor = (m: CandidateManifests) => UnitIdentity;
+
+const IDENTITY_EXTRACTORS: IdentityExtractor[] = [
+  // JavaScript / TypeScript — package.json name + dependencies/devDependencies.
+  ({ pkg }) => ({
+    names: pkg?.name ? [pkg.name] : [],
+    deps: Object.keys({ ...pkg?.dependencies, ...pkg?.devDependencies }),
+  }),
+  // Python — pyproject/poetry distribution name + pyproject/poetry/requirements deps.
+  ({ py }) => {
+    const name = readPythonPackageName(py);
+    return { names: name ? [name] : [], deps: readPythonDependencyNames(py) };
+  },
+  // Go — go.mod module path + require() module paths.
+  ({ goModule, goRequires }) => ({ names: goModule ? [goModule] : [], deps: goRequires }),
+  // JVM — group:artifact coordinate + declared dependency coordinates (Maven/Gradle).
+  ({ jvm }) => ({ names: jvm?.name ? [jvm.name] : [], deps: jvm?.deps ?? [] }),
+];
+
+/** Union of every ecosystem's declared identity for one candidate (names + deps, deduped). */
+function extractIdentity(manifests: CandidateManifests): UnitIdentity {
+  const names = new Set<string>();
+  const deps = new Set<string>();
+  for (const extract of IDENTITY_EXTRACTORS) {
+    const identity = extract(manifests);
+    for (const name of identity.names) names.add(name);
+    for (const dep of identity.deps) deps.add(dep);
+  }
+  return { names: [...names], deps: [...deps] };
+}
 
 async function classifyUnit(
   dir: string,
@@ -29,7 +98,16 @@ async function classifyUnit(
   const hasTs = pkg !== undefined;
   const hasPy = pythonManifests.length > 0;
 
-  if (!hasTs && !hasPy) return undefined;
+  if (!hasTs && !hasPy) {
+    // Non-JS/Python units still participate in the dependency graph (Go modules, JVM projects); they
+    // classify by manifest presence so they aren't dropped from discovery. Kind stays 'unknown' —
+    // run/serve inference for these lives in resolveRunCommand, not here.
+    if (await pathExists(join(dir, 'go.mod'))) return { language: 'go', kind: 'unknown' };
+    const isJvm = await Promise.all(
+      ['build.gradle', 'build.gradle.kts', 'pom.xml'].map((f) => pathExists(join(dir, f))),
+    );
+    return isJvm.some(Boolean) ? { language: 'jvm', kind: 'unknown' } : undefined;
+  }
 
   const language: RepositoryUnitLanguage = hasTs && hasPy ? 'mixed' : hasTs ? 'typescript' : 'python';
 
@@ -96,15 +174,11 @@ export async function discoverUnits(rootDir: string): Promise<RepositoryUnit[]> 
   }
   // Workspace-declared packages (npm/yarn `workspaces`, pnpm-workspace.yaml) may live outside the
   // conventional container dirs (e.g. `games/*`, `portal`) or be nested (`packages/engines/*`), so
-  // discovery must honor the declared globs too. Only dirs carrying a manifest (JS or Python) are kept.
+  // discovery must honor the declared globs too. Only dirs carrying a recognized manifest are kept.
   const workspaceGlobs = await readWorkspaceGlobs(rootDir);
   for (const dir of await expandWorkspaceGlobs(rootDir, workspaceGlobs)) {
-    if (
-      (await pathExists(join(dir, 'package.json'))) ||
-      (await pathExists(join(dir, 'pyproject.toml')))
-    ) {
-      candidateSet.add(dir);
-    }
+    const hasManifest = await Promise.all(UNIT_MANIFEST_FILES.map((f) => pathExists(join(dir, f))));
+    if (hasManifest.some(Boolean)) candidateSet.add(dir);
   }
   const candidateDirs = [...candidateSet].filter((dir) => dir !== rootDir);
 
@@ -133,23 +207,21 @@ export async function discoverUnits(rootDir: string): Promise<RepositoryUnit[]> 
   // manifest per dependency — on a large monorepo (~600 packages) the old O(n^2) re-read did
   // hundreds of thousands of disk reads on the event loop and blocked discovery past the worker's
   // callback timeout.
-  const manifestsByDir = new Map<string, { pkg: PackageJson | undefined; py: PythonManifest[] }>(
+  const manifestsByDir = new Map<string, CandidateManifests>(
     await Promise.all(
-      candidateDirs.map(
-        async (dir) =>
-          [dir, { pkg: await readPackageJson(dir), py: await findPythonManifests(dir) }] as const,
-      ),
+      candidateDirs.map(async (dir) => [dir, await readCandidateManifests(dir)] as const),
     ),
   );
 
-  // Cross-ecosystem dependency linking: a unit's declared package name (npm package name OR Python
-  // distribution name) maps to its unit id, so a dependency edge — from either a JS dep or a Python
-  // requirement — is a single map lookup rather than a scan-and-read over every other candidate.
+  // Cross-ecosystem dependency linking: every name a unit declares (npm name, Python distribution,
+  // Go module path, JVM coordinate) maps to its unit id, so a dependency edge — from any ecosystem's
+  // declared deps — is a single map lookup rather than a scan-and-read over every other candidate.
   const idByPackageName = new Map<string, string>();
   const unitByDir = new Map<string, RepositoryUnit>();
   for (const dir of candidateDirs) {
-    const { pkg, py } = manifestsByDir.get(dir) ?? { pkg: undefined, py: [] };
-    const classification = await classifyUnit(dir, pkg, py);
+    const manifests = manifestsByDir.get(dir);
+    if (!manifests) continue;
+    const classification = await classifyUnit(dir, manifests.pkg, manifests.py);
     if (!classification) continue;
     const relativeRoot = dir.slice(rootDir.length + 1);
     const id = randomUUID();
@@ -163,22 +235,16 @@ export async function discoverUnits(rootDir: string): Promise<RepositoryUnit[]> 
       dependsOn: [],
     };
     unitByDir.set(dir, unit);
-    if (pkg?.name) idByPackageName.set(pkg.name, id);
-    const pyName = readPythonPackageName(py);
-    if (pyName) idByPackageName.set(pyName, id);
+    for (const name of extractIdentity(manifests).names) idByPackageName.set(name, id);
     units.push(unit);
   }
 
   for (const dir of candidateDirs) {
     const unit = unitByDir.get(dir);
-    if (!unit) continue;
-    const { pkg, py } = manifestsByDir.get(dir) ?? { pkg: undefined, py: [] };
-    const declaredDeps = [
-      ...Object.keys({ ...pkg?.dependencies, ...pkg?.devDependencies }),
-      ...readPythonDependencyNames(py),
-    ];
+    const manifests = manifestsByDir.get(dir);
+    if (!unit || !manifests) continue;
     const seen = new Set<string>();
-    for (const depName of declaredDeps) {
+    for (const depName of extractIdentity(manifests).deps) {
       const depId = idByPackageName.get(depName);
       if (depId && depId !== unit.id && !seen.has(depId)) {
         seen.add(depId);

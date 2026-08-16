@@ -8,7 +8,7 @@ import { makeTempRepo, writeFileEnsuringDir } from './test-helpers.js';
 // seen through its destructured import).
 const manifestReadCounts = new Map<string, number>();
 function countManifestRead(path: string): void {
-  for (const name of ['package.json', 'pyproject.toml', 'requirements.txt']) {
+  for (const name of ['package.json', 'pyproject.toml', 'requirements.txt', 'go.mod', 'pom.xml']) {
     if (path.endsWith(name)) manifestReadCounts.set(name, (manifestReadCounts.get(name) ?? 0) + 1);
   }
 }
@@ -64,6 +64,8 @@ describe('discoverUnits scaling', () => {
     // n^2 (the old nested re-read did ~packageCount^2 reads of package.json alone).
     expect(manifestReadCounts.get('package.json') ?? 0).toBeLessThan(packageCount * 3);
     expect(manifestReadCounts.get('pyproject.toml') ?? 0).toBeLessThan(packageCount * 3);
+    expect(manifestReadCounts.get('go.mod') ?? 0).toBeLessThan(packageCount * 3);
+    expect(manifestReadCounts.get('pom.xml') ?? 0).toBeLessThan(packageCount * 3);
   });
 
   it('still resolves workspace dependency edges correctly', async () => {
@@ -179,5 +181,72 @@ describe('discoverUnits cross-ecosystem dependency linking', () => {
 
     expect(byRoot.get('packages/web')?.dependsOn).toEqual([byRoot.get('packages/ui-kit')?.id]);
     expect(byRoot.get('services/api')?.dependsOn).toEqual([byRoot.get('packages/models')?.id]);
+  });
+
+  it('links Go modules via go.mod require', async () => {
+    await writeFileEnsuringDir(dir, 'package.json', JSON.stringify({ name: 'root' }));
+    await writeFileEnsuringDir(
+      dir,
+      'services/gateway/go.mod',
+      'module github.com/acme/gateway\n\ngo 1.22\n\nrequire (\n\tgithub.com/acme/core v0.0.0\n\tgithub.com/gorilla/mux v1.8.0\n)\n',
+    );
+    await writeFileEnsuringDir(dir, 'packages/core/go.mod', 'module github.com/acme/core\n\ngo 1.22\n');
+
+    const units = await discoverUnits(dir);
+    const byRoot = new Map(units.map((u) => [u.root, u]));
+    const gateway = byRoot.get('services/gateway');
+    const core = byRoot.get('packages/core');
+
+    expect(gateway?.language).toBe('go');
+    // Edge to the in-repo core module; the external gorilla/mux require resolves to nothing.
+    expect(gateway?.dependsOn).toEqual([core?.id]);
+  });
+
+  it('links JVM modules via Maven pom.xml coordinates', async () => {
+    await writeFileEnsuringDir(dir, 'package.json', JSON.stringify({ name: 'root' }));
+    await writeFileEnsuringDir(
+      dir,
+      'services/orders/pom.xml',
+      '<project><groupId>com.acme</groupId><artifactId>orders</artifactId>' +
+        '<dependencies><dependency><groupId>com.acme</groupId><artifactId>shared</artifactId></dependency>' +
+        '<dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter</artifactId></dependency>' +
+        '</dependencies></project>',
+    );
+    await writeFileEnsuringDir(
+      dir,
+      'packages/shared/pom.xml',
+      '<project><groupId>com.acme</groupId><artifactId>shared</artifactId></project>',
+    );
+
+    const units = await discoverUnits(dir);
+    const byRoot = new Map(units.map((u) => [u.root, u]));
+    const orders = byRoot.get('services/orders');
+    const shared = byRoot.get('packages/shared');
+
+    expect(orders?.language).toBe('jvm');
+    // Edge to in-repo shared; the external spring-boot-starter coordinate resolves to nothing.
+    expect(orders?.dependsOn).toEqual([shared?.id]);
+  });
+
+  it('links JVM modules via Gradle implementation coordinates', async () => {
+    await writeFileEnsuringDir(dir, 'package.json', JSON.stringify({ name: 'root' }));
+    await writeFileEnsuringDir(
+      dir,
+      'services/app/build.gradle',
+      "group = 'com.acme'\ndependencies {\n  implementation 'com.acme:lib:1.0'\n  implementation 'com.google.guava:guava:33.0'\n}\n",
+    );
+    await writeFileEnsuringDir(
+      dir,
+      'packages/lib/build.gradle',
+      "group = 'com.acme'\nrootProject.name = 'lib'\n",
+    );
+
+    const units = await discoverUnits(dir);
+    const byRoot = new Map(units.map((u) => [u.root, u]));
+    const app = byRoot.get('services/app');
+    const lib = byRoot.get('packages/lib');
+
+    // com.acme:lib matches the in-repo lib module; the external guava coordinate resolves to nothing.
+    expect(app?.dependsOn).toEqual([lib?.id]);
   });
 });
