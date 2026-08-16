@@ -56,6 +56,16 @@ export interface DaemonClient {
   postObservability(payload: PhaseObservability): Promise<void>;
   /** Trigger repository discovery through the daemon (single writer) and return the snapshot id. */
   refreshRepository(repositoryId: string): Promise<{ snapshotId: string }>;
+  /**
+   * Persist a `start` command inferred over a task worktree and proven to boot, so a later exercise
+   * run reuses it (Tier-1) instead of re-inferring. Write funnels through the daemon (single writer).
+   */
+  persistStartCommand(input: {
+    repositoryId: string;
+    command: string;
+    cwd: string;
+    validatedAtSha?: string;
+  }): Promise<void>;
 }
 
 export function createDaemonClient(): DaemonClient {
@@ -82,6 +92,10 @@ export function createDaemonClient(): DaemonClient {
         {},
       );
       return { snapshotId: snapshot.snapshotId };
+    },
+    async persistStartCommand(input) {
+      const { repositoryId, ...body } = input;
+      await postOrPut('POST', `/internal/repositories/${encodeURIComponent(repositoryId)}/commands`, body);
     },
   };
 }
