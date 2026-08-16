@@ -213,5 +213,12 @@ describe('buildRepositorySnapshot', () => {
     expect(snapshot.services.length).toBeGreaterThanOrEqual(1);
     expect(snapshot.qaSurfaces.length).toBeGreaterThanOrEqual(1);
     expect(snapshot.facts.some((f) => f.sourcePaths.includes('CLAUDE.md'))).toBe(true);
+    // Discovered commands become facts the planner sees through project memory (the `test`/`start`
+    // scripts surface as a `testing` and a `command` fact respectively).
+    expect(snapshot.facts.some((f) => f.kind === 'testing')).toBe(true);
+    expect(snapshot.facts.some((f) => f.kind === 'command')).toBe(true);
+    // Fact source paths stay repo-relative, never absolute temp paths.
+    const cmdFact = snapshot.facts.find((f) => f.kind === 'command');
+    expect(cmdFact?.sourcePaths.every((p) => !p.startsWith('/'))).toBe(true);
   });
 });
