@@ -1,6 +1,6 @@
 ---
-name: drive-task
-description: Mechanically DRIVE (not code) a task that is already running through the Agentic Workbench — poll one command, read one field, run the one matching command. A judgment-free decision table for weak/small models. Use when a workbench task exists and you only need to answer gates and advance it to pr-readiness. To boot the stack, register a repo, and create the task first, use run-workbench-task instead.
+name: run-workbench-task-simple
+description: Mechanically DRIVE (not code) a task that is already running through the Agentic Workbench — poll one command, read one field, run the one matching command. A judgment-free decision table for weak/small models; the stripped-down companion to run-workbench-task. Use when a workbench task exists and you only need to answer gates and advance it to pr-readiness. To boot the stack, register a repo, and create the task first, use run-workbench-task instead.
 ---
 
 # Drive a workbench task (mechanical loop for a weak model)

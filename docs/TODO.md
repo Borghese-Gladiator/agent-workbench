@@ -430,8 +430,8 @@ the stuck task and confirm it reaches pr-readiness instead of parking at the
 
 ### [x] TASK-76: A prompt/skill that lets even a weak local model *drive* a task (not code it)
 
-> **Done.** New skill `.claude/skills/drive-task/SKILL.md` — a judgment-free
-> driving loop sibling to `run-workbench-task`. It reduces driving to one poll
+> **Done.** New skill `.claude/skills/run-workbench-task-simple/SKILL.md` — a
+> judgment-free driving loop sibling to `run-workbench-task`. It reduces driving to one poll
 > (`task show`), two fields (`state.condition`, `pendingHumanGate.reason`), and a
 > lookup table of `open gate → one copy-paste command`. Every command was verified
 > against the real CLI surface (`apps/cli/src/commands/task.ts`): notably there is
@@ -469,7 +469,7 @@ Relates to `flex-dash-run-autonomy` (the known auto-resolvable gates) and
 skill, drives a real task from registration to pr-readiness — answering each gate
 correctly — without the operator hand-holding it. Captured as a short transcript.
 
-### [ ] TASK-77: Dogfood the workbench on *this* repo (agent-workbench itself)
+### [~] TASK-77: Dogfood the workbench on *this* repo (agent-workbench itself)
 
 **What's wrong.** We dogfood on `browser-games` / `fender` / `app` but have never
 driven a task against *this* repo — the most honest test of whether the tool is
@@ -485,6 +485,15 @@ Relates to `implement-feature` (self-modification flow).
 
 **How we'll know it's done.** A branch + draft PR on this repo produced by the
 workbench, with a short writeup of what was awkward.
+
+> **Partial dogfood run (2026-08-15).** Registered `agent-workbench` and drove a
+> task (re-tighten TASK-78's worktree-dir tests). Discovery, contract, plan,
+> prepare, and **implement all succeeded on the real repo** — the agent correctly
+> recognized TASK-78 was already implemented on `main` and produced a genuinely
+> good test-only diff (+9 `branch.test.ts`, +24 `worktree.test.ts`, real
+> `createWorktree` slug-path assertion). Then it **stalled at `verify`** (see
+> TASK-104/105/106 below). Friction captured as new tickets. Not yet a delivered PR
+> because verify never converged — reopen once TASK-104 lands.
 
 ### [ ] TASK-88: A `dogfood` skill that ALWAYS boots an isolated stack — never prompts, never blocks an active task
 
@@ -542,6 +551,62 @@ actively RUNNING on a MAIN-checkout stack boots a second isolated stack (distinc
 port + `AWB_DATA_DIR`), drives a fresh task to pr-readiness, and tears down **only**
 the isolated stack — with the MAIN stack's running task untouched, and **without the
 skill ever asking whether to isolate**.
+
+### [ ] TASK-104: `verify` runs the ENTIRE monorepo suite (132 files, incl. self-booting e2e) → 30-min timeout retry loop
+
+**What's wrong.** On the agent-workbench dogfood, the `verify` phase's `runPhase`
+activity ran `vitest run` at the **repo root**, picking up all **132 test files**
+across every package — including e2e tests that boot real infra
+(`apps/daemon/src/routes/tasks-completion-e2e.test.ts`,
+`workers/temporal-worker/src/run-phase-e2e.test.ts`). For a 2-file, test-only
+change this is absurdly over-scoped, and it exceeds the workflow's
+`startToCloseTimeout: '30 minutes'` (`packages/workflow/src/task-workflow.ts:22`).
+Temporal then kills and retries the activity from scratch — an unbounded no-progress
+loop (observed: 3 attempts, `lastFailure: activity StartToClose timeout`, output
+tokens frozen at the `implement`-phase value the whole time). The self-booting e2e
+tests are doubly hostile because a workbench stack is *already running* during the
+dogfood, so they can collide on ports/temporal.
+
+**What to do.** Scope the `verify` test command to the changed packages (the diff
+already tells us which packages moved), not a root-level full-suite run. At minimum,
+exclude the e2e/integration tests from the verify gate (run them elsewhere). Relates
+to the velocity/slice machinery that already knows the touched files.
+
+**Where.** The verify-phase command resolution (repository-commands / run-phase
+verify step) + `packages/workflow/src/task-workflow.ts:22` (timeout).
+
+**How we'll know it's done.** A small, single-package change verifies in well under
+the timeout, running only that package's tests.
+
+### [ ] TASK-105: `startToCloseTimeout` retries re-run the phase from scratch with no memory (attempt counter resets)
+
+**What's wrong.** When a `runPhase` activity times out, Temporal retries it, but the
+workbench's own attempt counter does not advance across the retry — `semantic_events`
+showed `phase verify started (attempt 1)` **three times**, and `phase_attempts`
+recorded no outcome at all. So a phase that legitimately needs longer than the
+activity timeout (TASK-104) is indistinguishable from real no-progress, and the
+`repeated-failure-no-progress` accounting can't see it. Related to the known
+cold-restart-on-retry gap (`observability-live-proof`, TASK-32).
+
+**Where.** `run-phase` activity retry handling + attempt accounting; workflow
+`startToCloseTimeout`.
+
+**How we'll know it's done.** An activity retry either resumes or is counted as a
+distinct attempt with a recorded outcome, not a silent replay of "attempt 1".
+
+### [ ] TASK-106: Per-package `test` script (`vitest run --dir .`) finds zero tests when run from the package dir
+
+**What's wrong.** Each package's `test` script is `vitest run --dir .`, but the root
+`vitest.config.ts` `include` glob is repo-root-relative
+(`packages/**/*.test.ts`, …). Running it from inside e.g. `packages/config` matches
+nothing → `No test files found, exiting with code 1`. So a *scoped* verify (the
+TASK-104 fix) can't just shell out to the package's own `test` script as-is.
+
+**Where.** `vitest.config.ts` `include` globs vs the per-package `test` scripts
+(`packages/*/package.json`).
+
+**How we'll know it's done.** `pnpm --filter @awb/config test` runs that package's
+tests and passes.
 
 
 ## Group N — Worktree DX
