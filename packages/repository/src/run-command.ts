@@ -12,6 +12,7 @@ import {
 } from './manifests.js';
 
 export type RunCommandSource =
+  | 'known-repo'
   | 'procfile'
   | 'docker-compose'
   | 'make-target'
@@ -69,6 +70,33 @@ interface Ctx {
 }
 
 type Matcher = (ctx: Ctx) => Promise<ResolvedRunCommand | undefined>;
+
+// ─── Layer 0: known-repo overrides ───
+// A few large in-house monorepos wrap their dev server in an indirection the generic heuristics
+// can't see through (fender's `dev` script shells out to `yarn workspace … run yarn-dev-prompt`, so
+// `looksLikeServer` reads it as a non-server; app's server lives in a `make run-server` Django target
+// the generic matcher doesn't prefer). Recognize them by in-tree markers — never absolute paths, so
+// this holds inside a worktree — and return the correct serves:true command so browser QA (and the
+// post-boot start-command persistence) has a real target. First match wins.
+
+const matchKnownRepo: Matcher = async ({ dir, requestedBaseUrl }) => {
+  const pkg = await readPackageJson(dir);
+
+  // fender: the root package.json is literally named "fender" and declares a `dev` script.
+  if (pkg?.name === 'fender' && pkg.scripts?.dev) {
+    return serverResult('yarn dev', 'known-repo', portFromUrl(requestedBaseUrl, DEFAULT_PORT));
+  }
+
+  // app: a Django monorepo whose server is a `run-server` Make target running `bin/django
+  // runserver`. Keyed on both markers together so an unrelated `run-server:` target elsewhere isn't
+  // misclassified. (app has a root package.json but no `name`, so this must NOT gate on !pkg.)
+  const makefile = await readTextFile(dir, 'Makefile');
+  if (makefile && /^run-server\s*:/m.test(makefile) && /bin\/django\s+runserver/.test(makefile)) {
+    return serverResult('make run-server', 'known-repo', portFromUrl(requestedBaseUrl, 8080));
+  }
+
+  return undefined;
+};
 
 // ─── Layer 1: explicit run declarations (language-agnostic, highest confidence) ───
 
@@ -259,6 +287,7 @@ async function dirHasExt(dir: string, exts: string[]): Promise<boolean> {
 
 // Order = explicit-first globally, then per-language/framework inference. First match wins.
 const MATCHERS: Matcher[] = [
+  matchKnownRepo,
   matchProcfile,
   matchCompose,
   matchMakeLike,
@@ -272,7 +301,8 @@ const MATCHERS: Matcher[] = [
 
 /**
  * Comprehensively resolves how to run a produced project, across ecosystems, using an explicit-first
- * strategy: language-agnostic run declarations (Procfile, docker-compose, Make/just/Task targets,
+ * strategy: a few known-repo overrides (large in-house monorepos whose dev server hides behind an
+ * indirection) win first, then language-agnostic run declarations (Procfile, docker-compose, Make/just/Task targets,
  * package/Pipfile/pyproject scripts) win over framework inference (Django/FastAPI/Flask, Next/Vite/CRA,
  * Spring Boot, Go net/http), which wins over a bare language default (`go run .`, `make`). Each result
  * is tagged `serves` — a web/dev server (with a `baseUrl` for browser QA) vs a one-shot run / CLI /
