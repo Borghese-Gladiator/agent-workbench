@@ -101,6 +101,63 @@ export function registerTaskCommands(program: Command): void {
       },
     );
 
+  // Task DAG orchestration: declare a whole stacked-PR chain/DAG in one shot. Each `--node` is a
+  // task (`key='prompt'`); each `--dep child=parent` stacks the child's branch on the parent's and
+  // makes the child start only when the parent releases its draft PR.
+  task
+    .command('task-dag')
+    .command('create')
+    .description('Declare a stacked-PR task DAG: nodes + dependency edges, driven by the scheduler')
+    .option('--repo <repo>', 'Repository path or id (defaults to the last one used)')
+    .option(
+      '--node <key=prompt>',
+      'A task node as key=prompt (repeatable)',
+      (val: string, acc: string[] = []) => {
+        acc.push(val);
+        return acc;
+      },
+    )
+    .option(
+      '--dep <child=parent>',
+      'A stacking edge: child stacks on parent (repeatable)',
+      (val: string, acc: string[] = []) => {
+        acc.push(val);
+        return acc;
+      },
+    )
+    .action(async (opts: { repo?: string; node?: string[]; dep?: string[] }) => {
+      try {
+        const repoId = await resolveRepo(opts.repo, undefined);
+        const nodeSpecs = opts.node ?? [];
+        if (nodeSpecs.length === 0) throw new Error('Provide at least one --node key=prompt.');
+
+        const nodes = nodeSpecs.map((raw) => {
+          const eq = raw.indexOf('=');
+          if (eq <= 0) throw new Error(`Invalid --node "${raw}": expected key=prompt.`);
+          return { key: raw.slice(0, eq), prompt: raw.slice(eq + 1) };
+        });
+        const depOf = new Map<string, string>();
+        for (const raw of opts.dep ?? []) {
+          const eq = raw.indexOf('=');
+          if (eq <= 0) throw new Error(`Invalid --dep "${raw}": expected child=parent.`);
+          depOf.set(raw.slice(0, eq), raw.slice(eq + 1));
+        }
+        const nodesWithDeps = nodes.map((n) => ({ ...n, ...(depOf.has(n.key) ? { dependsOn: depOf.get(n.key) } : {}) }));
+
+        const result = await daemonClient.post<{ tasks: { key: string; taskId: string; scheduleState: string }[] }>(
+          '/api/task-dags',
+          { repositoryId: repoId, nodes: nodesWithDeps },
+        );
+        if (outputOptions().json) emitJson(result);
+        else {
+          for (const t of result.tasks) printResult(`${t.key}\t${t.taskId}\t${t.scheduleState}`);
+          printInfo(`Declared ${result.tasks.length}-node task DAG; roots started, children unblock on parent release.`);
+        }
+      } catch (err) {
+        handleError(err);
+      }
+    });
+
   task
     .command('list')
     .description('List tasks')

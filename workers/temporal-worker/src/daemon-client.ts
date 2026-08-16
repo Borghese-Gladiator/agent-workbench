@@ -50,6 +50,9 @@ export interface DaemonClient {
   postObservability(payload: PhaseObservability): Promise<void>;
   /** Trigger repository discovery through the daemon (single writer) and return the snapshot id. */
   refreshRepository(repositoryId: string): Promise<{ snapshotId: string }>;
+  /** Task DAG orchestration: notify the daemon that this task released its draft PR, so the
+   *  scheduler starts any blocked children stacked on it. Best-effort — never fail the phase on it. */
+  notifyReleased(taskId: string): Promise<void>;
 }
 
 export function createDaemonClient(): DaemonClient {
@@ -76,6 +79,9 @@ export function createDaemonClient(): DaemonClient {
         {},
       );
       return { snapshotId: snapshot.snapshotId };
+    },
+    async notifyReleased(taskId) {
+      await postOrPut('POST', `/internal/task-released/${encodeURIComponent(taskId)}`, {});
     },
   };
 }

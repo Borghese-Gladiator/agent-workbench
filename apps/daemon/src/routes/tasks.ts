@@ -25,9 +25,11 @@ import {
   listFindingsByTask,
 } from '@awb/database';
 import type { TaskSize } from '@awb/domain';
+import { validateTaskDag, TaskDagValidationError, type TaskDagSpec } from '@awb/domain';
 import { routeFeedback, NO_ROUTING_SIGNAL, type FeedbackRoutingSignal } from '@awb/github';
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
 import { taskQueueName } from '../temporal-worker-constants.js';
+import type { TaskScheduler } from '../scheduler.js';
 
 export interface CreatedTaskRecord {
   taskId: string;
@@ -44,7 +46,11 @@ export interface CreatedTaskRecord {
   updatedAt: string;
 }
 
-export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchDatabase): void {
+export function registerTaskRoutes(
+  app: FastifyInstance,
+  database: WorkbenchDatabase,
+  scheduler: TaskScheduler,
+): void {
   app.post<{
     Body: { repositoryId: string; prompt: string; size?: TaskSize; parentTaskId?: string; baseBranch?: string };
   }>('/api/tasks', async (request, reply) => {
@@ -73,11 +79,13 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
     });
 
     // Persist the task row so it survives a daemon restart and `task show` reads lifecycle state
-    // from SQLite, replacing the previous session-scoped in-memory array.
+    // from SQLite, replacing the previous session-scoped in-memory array. This path starts the
+    // workflow inline, so mark it `started` — the scheduler's reconcile must never re-start it.
     upsertTask(database.db, {
       id: taskId,
       repositoryId,
       prompt,
+      scheduleState: 'started',
       ...(size ? { size } : {}),
       ...(parentTaskId ? { parentTaskId } : {}),
       ...(baseBranch ? { baseBranch } : {}),
@@ -85,6 +93,49 @@ export function registerTaskRoutes(app: FastifyInstance, database: WorkbenchData
 
     reply.code(201);
     return { taskId, repositoryId, workflowId, ...(baseBranch ? { baseBranch } : {}) };
+  });
+
+  // Task DAG orchestration: declare a whole stacked-PR DAG atomically. Validates (unique keys,
+  // known refs, acyclic, single-parent stacking) + topo-sorts BEFORE any write, then creates every
+  // task row in one pass — roots `ready`, non-roots `blocked` with their `parent_task_id` edge.
+  // Only the roots are started now; the scheduler starts each child when its parent releases its
+  // draft PR. A validation failure writes nothing.
+  app.post<{ Body: TaskDagSpec }>('/api/task-dags', async (request, reply) => {
+    const { repositoryId, nodes } = request.body ?? {};
+    let order: string[];
+    try {
+      order = validateTaskDag({ repositoryId, nodes });
+    } catch (err) {
+      reply.code(400);
+      return { error: err instanceof TaskDagValidationError ? err.message : String(err) };
+    }
+
+    // Assign a persisted task id per spec key, then create rows parent-first (topo order).
+    const idByKey = new Map<string, string>(nodes.map((n) => [n.key, randomUUID()]));
+    const created: { key: string; taskId: string; parentTaskId?: string; scheduleState: string }[] = [];
+    for (const key of order) {
+      const node = nodes.find((n) => n.key === key)!;
+      const taskId = idByKey.get(key)!;
+      const parentTaskId = node.dependsOn ? idByKey.get(node.dependsOn) : undefined;
+      const scheduleState = parentTaskId ? 'blocked' : 'ready';
+      upsertTask(database.db, {
+        id: taskId,
+        repositoryId,
+        prompt: node.prompt,
+        scheduleState,
+        ...(parentTaskId ? { parentTaskId } : {}),
+      });
+      created.push({ key, taskId, parentTaskId, scheduleState });
+    }
+
+    // Start the roots (the scheduler resolves eligibility + starts; children follow on release).
+    await scheduler.reconcileReady();
+
+    reply.code(201);
+    return {
+      repositoryId,
+      tasks: created.map((c) => ({ key: c.key, taskId: c.taskId, parentTaskId: c.parentTaskId, scheduleState: c.scheduleState })),
+    };
   });
 
   app.get('/api/tasks', async () => {

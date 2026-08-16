@@ -1,5 +1,5 @@
 import { eq, inArray } from 'drizzle-orm';
-import type { TaskPhase, RunCondition, DeliveryState, TaskSize } from '@awb/domain';
+import type { TaskPhase, RunCondition, DeliveryState, ScheduleState, TaskSize } from '@awb/domain';
 import {
   tasks,
   runs,
@@ -62,6 +62,9 @@ export interface UpsertTaskInput {
   /** Stacked-PR edge (TASK-72): set once at creation, never cleared by a later sync. */
   parentTaskId?: string;
   baseBranch?: string;
+  /** Scheduler-owned DAG state (task DAG orchestration). Written authoritatively by the daemon
+   *  scheduler; a lifecycle sync that omits it must not change it. */
+  scheduleState?: ScheduleState;
 }
 
 export function upsertTask(db: DrizzleDb, input: UpsertTaskInput): void {
@@ -78,6 +81,7 @@ export function upsertTask(db: DrizzleDb, input: UpsertTaskInput): void {
     size: input.size ?? existing?.size ?? null,
     parentTaskId: input.parentTaskId ?? existing?.parentTaskId ?? null,
     baseBranch: input.baseBranch ?? existing?.baseBranch ?? null,
+    scheduleState: input.scheduleState ?? existing?.scheduleState ?? 'ready',
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -95,6 +99,8 @@ export function upsertTask(db: DrizzleDb, input: UpsertTaskInput): void {
         // The stacking edge is set once at creation; a later phase/state sync must not wipe it.
         ...(input.parentTaskId ? { parentTaskId: input.parentTaskId } : {}),
         ...(input.baseBranch ? { baseBranch: input.baseBranch } : {}),
+        // The scheduler owns scheduleState; only overwrite when explicitly provided.
+        ...(input.scheduleState ? { scheduleState: input.scheduleState } : {}),
         updatedAt: row.updatedAt,
       },
     })
@@ -119,6 +125,23 @@ export function getTaskDeliveredBranch(db: DrizzleDb, taskId: string): string | 
 
 export function listTasks(db: DrizzleDb): TaskRow[] {
   return db.select().from(tasks).all();
+}
+
+/** Direct children of a task in the stacking DAG (task DAG orchestration): the tasks whose
+ *  `parentTaskId` is this task. Used by the scheduler to unblock dependents when a parent releases. */
+export function listTasksByParent(db: DrizzleDb, parentTaskId: string): TaskRow[] {
+  return db.select().from(tasks).where(eq(tasks.parentTaskId, parentTaskId)).all();
+}
+
+/** Tasks whose workflow has not been started yet, awaiting their parent's release. */
+export function listBlockedTasks(db: DrizzleDb): TaskRow[] {
+  return db.select().from(tasks).where(eq(tasks.scheduleState, 'blocked')).all();
+}
+
+/** Tasks the scheduler may still start — anything not yet `started` (roots that are `ready` plus
+ *  `blocked` children). Used by the reconcile sweep (poll + boot). */
+export function listStartableTasks(db: DrizzleDb): TaskRow[] {
+  return db.select().from(tasks).where(inArray(tasks.scheduleState, ['ready', 'blocked'])).all();
 }
 
 export interface TaskWithRepository extends TaskRow {

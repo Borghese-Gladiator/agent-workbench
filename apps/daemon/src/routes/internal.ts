@@ -4,6 +4,7 @@ import { upsertTask, persistRunStateSnapshot, insertSemanticEvent, persistPhaseO
 import { RunStateSnapshotSchema, SemanticEventSchema, PhaseObservabilitySchema } from '@awb/domain';
 import { getRepository, refreshRepositorySnapshot } from '@awb/repository';
 import type { SemanticEventBus } from '../event-bus.js';
+import type { TaskScheduler } from '../scheduler.js';
 
 /**
  * Internal worker→daemon data channel. The worker's Activities hold only a read-only DB
@@ -16,7 +17,21 @@ export function registerInternalRoutes(
   app: FastifyInstance,
   database: WorkbenchDatabase,
   eventBus: SemanticEventBus,
+  scheduler: TaskScheduler,
 ): void {
+  // Task DAG orchestration: the release phase notifies the daemon the moment a task's DRAFT PR
+  // opens (it reached pr-readiness). The scheduler starts any blocked children stacked on it.
+  // Best-effort for the caller — the poll/boot reconcile is the correctness backstop — so failures
+  // here still return 200 (the worker must not fail the release phase on a scheduling hiccup).
+  app.post<{ Params: { taskId: string } }>('/internal/task-released/:taskId', async (request) => {
+    try {
+      await scheduler.onParentReleased(request.params.taskId);
+    } catch {
+      // swallowed: reconcile() will re-derive eligibility on the next tick
+    }
+    return { ok: true };
+  });
+
   app.put<{ Params: { taskId: string }; Body: { repositoryId: string; prompt: string; phase?: string; condition?: string; deliveryState?: string } }>(
     '/internal/tasks/:taskId',
     async (request, reply) => {

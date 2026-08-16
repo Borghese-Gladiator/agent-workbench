@@ -6,7 +6,13 @@ import type { Client } from '@temporalio/client';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createDatabase, upsertTask, getTask, repositories, workspaceLeases, type WorkbenchDatabase } from '@awb/database';
 import { registerTaskRoutes } from './tasks.js';
+import { TaskScheduler } from '../scheduler.js';
 import { setTemporalClientForTesting, workflowIdFor } from '../temporal-client.js';
+
+/** A scheduler whose start/hasReleased are no-ops — the signal-route tests don't exercise the DAG. */
+function makeStubScheduler(database: WorkbenchDatabase): TaskScheduler {
+  return new TaskScheduler({ database, startTask: async () => {}, hasReleased: async () => false });
+}
 
 interface RecordedSignal {
   workflowId: string;
@@ -49,7 +55,7 @@ describe('task PR-lifecycle signal routes', () => {
       .values({ id: 'repo-1', canonicalPath: '/tmp/repo', name: 'repo', remoteUrl: null, defaultBranch: 'main', trusted: true, createdAt: iso, updatedAt: iso })
       .run();
     app = Fastify({ logger: false });
-    registerTaskRoutes(app, database);
+    registerTaskRoutes(app, database, makeStubScheduler(database));
     await app.ready();
   });
 
@@ -176,5 +182,86 @@ describe('task PR-lifecycle signal routes', () => {
     });
     expect(res.statusCode).toBe(404);
     expect(res.json().error).toContain('workflow not found');
+  });
+});
+
+describe('POST /api/task-dags (stacked-PR DAG declaration)', () => {
+  let app: FastifyInstance;
+  let database: WorkbenchDatabase;
+  let dbDir: string;
+  let started: string[];
+  const released = new Set<string>();
+
+  beforeEach(async () => {
+    dbDir = await mkdtemp(join(tmpdir(), 'awb-task-dags-'));
+    database = createDatabase(join(dbDir, 'workbench.sqlite'));
+    const iso = new Date().toISOString();
+    database.db
+      .insert(repositories)
+      .values({ id: 'repo-1', canonicalPath: '/tmp/repo', name: 'repo', remoteUrl: null, defaultBranch: 'main', trusted: true, createdAt: iso, updatedAt: iso })
+      .run();
+    started = [];
+    released.clear();
+    const scheduler = new TaskScheduler({
+      database,
+      startTask: async (input) => {
+        started.push(input.taskId);
+      },
+      hasReleased: async (parentTaskId) => released.has(parentTaskId),
+    });
+    app = Fastify({ logger: false });
+    registerTaskRoutes(app, database, scheduler);
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+    database.close();
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  it('creates a linear chain with only the root started and children blocked', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/task-dags',
+      payload: {
+        repositoryId: 'repo-1',
+        nodes: [
+          { key: 'a', prompt: 'A' },
+          { key: 'b', prompt: 'B', dependsOn: 'a' },
+          { key: 'c', prompt: 'C', dependsOn: 'b' },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    const byKey = Object.fromEntries(body.tasks.map((t: { key: string }) => [t.key, t]));
+    expect(byKey.a.scheduleState).toBe('ready');
+    expect(byKey.b.scheduleState).toBe('blocked');
+    expect(byKey.c.scheduleState).toBe('blocked');
+    // Child edges point at the resolved parent task ids.
+    expect(byKey.b.parentTaskId).toBe(byKey.a.taskId);
+    expect(byKey.c.parentTaskId).toBe(byKey.b.taskId);
+    // Only the root was started (children wait for their parent to release).
+    expect(started).toEqual([byKey.a.taskId]);
+    // And the persisted rows carry the edges.
+    expect(getTask(database.db, byKey.b.taskId)?.parentTaskId).toBe(byKey.a.taskId);
+  });
+
+  it('rejects a cyclic spec and writes nothing', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/task-dags',
+      payload: {
+        repositoryId: 'repo-1',
+        nodes: [
+          { key: 'a', prompt: 'A', dependsOn: 'b' },
+          { key: 'b', prompt: 'B', dependsOn: 'a' },
+        ],
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/cycle/);
+    expect(started).toHaveLength(0);
   });
 });

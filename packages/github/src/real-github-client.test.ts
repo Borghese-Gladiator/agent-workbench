@@ -64,6 +64,27 @@ describe('createRealGitHubClient', () => {
     );
   });
 
+  // Draft-only invariant (task DAG orchestration / product-level "never"): the workbench must never
+  // open a ready-for-review PR nor flip an existing draft to ready. Guard both the create path
+  // (always draft:true) and the update path (never passes draft at all → can't un-draft).
+  it('never opens a non-draft PR and never un-drafts one', async () => {
+    const octokit = makeFakeOctokit();
+    const client = createRealGitHubClient(octokit);
+
+    await client.createDraftPullRequest({
+      owner: 'acme', repo: 'widgets', headBranch: 'awb/task-1', baseBranch: 'main', title: 't', body: 'b',
+    });
+    const createMock = octokit.pulls.create as unknown as ReturnType<typeof vi.fn>;
+    const createArg = createMock.mock.calls[0]?.[0] as { draft?: boolean };
+    expect(createArg.draft).toBe(true);
+
+    await client.updatePullRequest({ owner: 'acme', repo: 'widgets', pullNumber: 7, title: 'x', body: 'y' });
+    const updateMock = octokit.pulls.update as unknown as ReturnType<typeof vi.fn>;
+    const updateArg = updateMock.mock.calls[0]?.[0] as { draft?: boolean };
+    // The update path must not carry a `draft` field at all — it can only touch title/body.
+    expect(updateArg).not.toHaveProperty('draft');
+  });
+
   it('maps postComment to octokit.issues.createComment', async () => {
     const octokit = makeFakeOctokit();
     const client = createRealGitHubClient(octokit);

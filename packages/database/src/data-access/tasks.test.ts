@@ -29,7 +29,18 @@ import {
   workspaceLeases,
   type WorkbenchDatabase,
 } from '../index.js';
-import { upsertTask, getTask, getTaskDeliveredBranch, ensureRun, ensurePhaseAttempt, deleteTask, listTasksWithRepository } from './tasks.js';
+import {
+  upsertTask,
+  getTask,
+  getTaskDeliveredBranch,
+  listTasksByParent,
+  listBlockedTasks,
+  listStartableTasks,
+  ensureRun,
+  ensurePhaseAttempt,
+  deleteTask,
+  listTasksWithRepository,
+} from './tasks.js';
 
 const REPO_ID = 'repo-1';
 const now = '2026-07-28T00:00:00.000Z';
@@ -253,5 +264,51 @@ describe('stacked-PR edge (TASK-72)', () => {
       .values({ id: 'task-parent-lease', repositoryId: REPO_ID, taskId: 'task-parent', baseRef: 'main', baseSha: 'sha', branchName: 'awb/task-parent-slug', worktreePath: '/tmp/wt', executionProfile: 'native-trusted', allocatedPortsJson: '[]', state: 'active', createdAt: now })
       .run();
     expect(getTaskDeliveredBranch(db.db, 'task-parent')).toBe('awb/task-parent-slug');
+  });
+});
+
+describe('schedule state (task DAG orchestration)', () => {
+  let dir: string;
+  let db: WorkbenchDatabase;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'awb-sched-'));
+    db = createDatabase(join(dir, 'wb.sqlite'));
+    db.db
+      .insert(repositories)
+      .values({ id: REPO_ID, canonicalPath: '/tmp/repo', name: 'repo', remoteUrl: null, defaultBranch: 'main', trusted: true, createdAt: now, updatedAt: now })
+      .run();
+  });
+
+  afterEach(async () => {
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('defaults scheduleState to ready and round-trips an explicit value', () => {
+    upsertTask(db.db, { id: 'root', repositoryId: REPO_ID, prompt: 'p' });
+    expect(getTask(db.db, 'root')?.scheduleState).toBe('ready');
+
+    upsertTask(db.db, { id: 'child', repositoryId: REPO_ID, prompt: 'p', scheduleState: 'blocked' });
+    expect(getTask(db.db, 'child')?.scheduleState).toBe('blocked');
+  });
+
+  it('does not clobber scheduleState on a sync that omits it', () => {
+    upsertTask(db.db, { id: 'child', repositoryId: REPO_ID, prompt: 'p', scheduleState: 'blocked' });
+    // A later phase-only sync must leave the scheduler-owned state alone.
+    upsertTask(db.db, { id: 'child', repositoryId: REPO_ID, prompt: '', phase: 'plan' });
+    expect(getTask(db.db, 'child')?.scheduleState).toBe('blocked');
+  });
+
+  it('lists children by parent, blocked tasks, and startable tasks', () => {
+    upsertTask(db.db, { id: 'A', repositoryId: REPO_ID, prompt: 'A', scheduleState: 'started' });
+    upsertTask(db.db, { id: 'B', repositoryId: REPO_ID, prompt: 'B', parentTaskId: 'A', scheduleState: 'blocked' });
+    upsertTask(db.db, { id: 'C', repositoryId: REPO_ID, prompt: 'C', parentTaskId: 'A', scheduleState: 'blocked' });
+    upsertTask(db.db, { id: 'root2', repositoryId: REPO_ID, prompt: 'r', scheduleState: 'ready' });
+
+    expect(listTasksByParent(db.db, 'A').map((t) => t.id).sort()).toEqual(['B', 'C']);
+    expect(listBlockedTasks(db.db).map((t) => t.id).sort()).toEqual(['B', 'C']);
+    // Startable = not-yet-started (ready + blocked); the `started` A is excluded.
+    expect(listStartableTasks(db.db).map((t) => t.id).sort()).toEqual(['B', 'C', 'root2']);
   });
 });

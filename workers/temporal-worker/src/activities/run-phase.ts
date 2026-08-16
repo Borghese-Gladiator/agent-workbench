@@ -1437,6 +1437,19 @@ const challengeHandler: PhaseHandler = {
  * await-human gate (the Workflow's `pullRequestMerged`/`pullRequestClosed` handlers own the
  * transition). A non-complete decision blocks.
  */
+/**
+ * Task DAG orchestration: tell the daemon this task released its draft PR, so the scheduler starts
+ * any blocked children stacked on it. Strictly best-effort — a scheduling hiccup must never fail
+ * the release phase, and the daemon's reconcile poll re-derives eligibility regardless.
+ */
+async function notifyReleasedBestEffort(ctx: PhaseContext, taskId: string): Promise<void> {
+  try {
+    await ctx.daemon?.notifyReleased(taskId);
+  } catch {
+    // swallowed by design — the poll/boot reconcile is the correctness backstop
+  }
+}
+
 const releaseHandler: PhaseHandler = {
   phase: 'release',
   async run(ctx): Promise<PhaseOutcome> {
@@ -1466,6 +1479,9 @@ const releaseHandler: PhaseHandler = {
             objective: runState.contract?.objective ?? state.prompt ?? state.taskId,
           }),
         );
+        // Task DAG orchestration: this task has delivered (branch landed) — unblock any stacked
+        // children. Best-effort; the daemon's reconcile poll is the backstop.
+        await notifyReleasedBestEffort(ctx, state.taskId);
         return {
           kind: 'early',
           result: {
@@ -1606,6 +1622,11 @@ const releaseHandler: PhaseHandler = {
     if (!decision.complete) {
       return { kind: 'early', result: blockedResult('release', decision.missing) };
     }
+
+    // Task DAG orchestration: the draft PR is open — this task has RELEASED. Notify the daemon so
+    // the scheduler starts any blocked children stacked on this task's branch. Best-effort; the
+    // daemon's reconcile poll is the correctness backstop.
+    await notifyReleasedBestEffort(ctx, state.taskId);
 
     // Per product spec, Release completing its own readiness checklist still gates on a human
     // merge/close decision before the Workflow may proceed to Assimilate — the Workflow's

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TaskPhaseSchema, RunConditionSchema, DeliveryStateSchema } from './lifecycle.js';
+import { TaskPhaseSchema, RunConditionSchema, DeliveryStateSchema, ScheduleStateSchema } from './lifecycle.js';
 
 export const TaskSchema = z.object({
   id: z.string(),
@@ -14,6 +14,9 @@ export const TaskSchema = z.object({
   /** The base branch this task's worktree/branch is created from and its PR opens against. When set
    *  (typically the parent's delivered branch), it overrides the repository default branch. */
   baseBranch: z.string().optional(),
+  /** Scheduler-owned DAG state (task DAG orchestration): `blocked` until the parent releases its
+   *  draft PR, then `ready`, then `started`. Defaults to `ready` for a directly-created task. */
+  scheduleState: ScheduleStateSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
