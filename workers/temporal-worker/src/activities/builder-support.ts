@@ -24,6 +24,12 @@ export interface RealBuilderAttemptInput {
    * rather than re-exploring from zero. Stable across attempts (keyed by slice, not attempt number).
    */
   resumeSessionId?: string;
+  /**
+   * Human-readable reasons a prior code-fixable gate (e.g. QA/exercise) blocked on. Appended to the
+   * builder instruction so a repair attempt re-implements knowing WHY the last candidate failed,
+   * instead of re-running blind. Empty/undefined on a first attempt.
+   */
+  priorFeedback?: string[];
 }
 
 export interface RealBuilderAttemptResult {
@@ -70,10 +76,14 @@ async function runBuilderSession(input: RealBuilderAttemptInput): Promise<RealBu
 
   try {
     const startedAt = Date.now();
+    const instruction =
+      input.priorFeedback && input.priorFeedback.length > 0
+        ? `${input.slice.objective}\n\nA prior attempt failed QA/review. Address these before finishing:\n${input.priorFeedback.map((f) => `- ${f}`).join('\n')}`
+        : input.slice.objective;
     const execution = await input.adapter.execute(
       session,
       {
-        instruction: input.slice.objective,
+        instruction,
         stopConditions: { maxTokens: input.tokenBudget, maxWallClockMs: input.runtimeBudgetMs },
       },
       input.eventSink,

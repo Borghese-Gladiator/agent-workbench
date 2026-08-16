@@ -35,6 +35,13 @@ export interface TaskRunState {
   qaEvidence: Evidence[];
   reviewerSessionId?: string;
   reviewFindings: import('@awb/domain').Finding[];
+  /**
+   * Human-readable reasons a code-fixable gate (today: exercise/QA) last blocked on, carried forward
+   * so the next implement attempt re-prompts the builder with WHY it failed instead of re-running
+   * blind. Set when a code-fixable block loops back to implement; cleared once the builder consumes
+   * it, so a later clean pass never re-surfaces stale feedback.
+   */
+  repairFeedback?: string[];
   artifactStore: ArtifactStore;
   artifactsDir?: string;
   /** Whether prepare successfully installed the worktree's dependencies (real path). */

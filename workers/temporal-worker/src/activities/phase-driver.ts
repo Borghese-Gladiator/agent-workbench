@@ -185,7 +185,6 @@ export async function drivePhase(handler: PhaseHandler, ctx: PhaseContext): Prom
   });
 
   const outcome = await handler.run(ctx);
-  await ctx.store.save(ctx.state.taskId, ctx.runState);
 
   let result: PhaseAttemptResult;
   if (outcome.kind === 'early') {
@@ -211,6 +210,11 @@ export async function drivePhase(handler: PhaseHandler, ctx: PhaseContext): Prom
         : blockedResult(handler.phase, decision.missing);
     }
   }
+
+  // Persist AFTER the result is computed so run-state mutations made inside `onBlocked` (e.g. the
+  // exercise gate stashing repair feedback for the next implement attempt) are saved, not just the
+  // handler-body mutations.
+  await ctx.store.save(ctx.state.taskId, ctx.runState);
 
   // Attach the agent usage this attempt accumulated so the Workflow can aggregate token +
   // per-phase runtime totals. undefined when no agent session ran (or on the mock

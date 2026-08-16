@@ -37,5 +37,10 @@ export const RunStateSnapshotSchema = z.object({
    * field carries the reconstructed map back onto the worker's `TaskRunState`.
    */
   builderResumeSessions: z.record(z.string(), z.string()).optional(),
+  /**
+   * Human-readable reasons a code-fixable gate (exercise/QA) last blocked on, carried forward so the
+   * next implement attempt re-prompts the builder with why it failed. Cleared once consumed.
+   */
+  repairFeedback: z.array(z.string()).optional(),
 });
 export type RunStateSnapshot = z.infer<typeof RunStateSnapshotSchema>;

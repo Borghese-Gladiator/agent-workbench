@@ -856,6 +856,10 @@ const implementHandler: PhaseHandler = {
             runtimeBudgetMs: assignment.runtimeBudgetMs,
             eventSink: sink,
             resumeSessionId: priorSessionId,
+            // On a repair loop-back, tell the builder why the last candidate failed QA/review.
+            ...(runState.repairFeedback && runState.repairFeedback.length > 0
+              ? { priorFeedback: runState.repairFeedback }
+              : {}),
           });
           // Capture the provider session token so a later attempt resumes rather than cold-starts.
           if (attempt.sessionId) {
@@ -918,6 +922,10 @@ const implementHandler: PhaseHandler = {
         };
       }
     }
+
+    // Repair feedback has now been fed to this attempt's builder sessions; clear it so a later clean
+    // pass (or an unrelated re-entry) never re-surfaces stale QA reasons.
+    runState.repairFeedback = undefined;
 
     // On the real path, a candidate commit exists when the builder advanced HEAD past the base SHA;
     // targeted checks passing is exactly what the per-slice builder loop already gated `success` on
@@ -1260,7 +1268,14 @@ const exerciseHandler: PhaseHandler = {
       candidateOverrides: { baseSha: context.baseSha, candidateSha: context.candidateSha },
       // See mapExerciseBlock: a real observed failure routes `repair → implement`; a pure evidence
       // deficiency escalates to a human `qa-inconclusive` gate instead of looping into implement.
-      onBlocked: (missing) => mapExerciseBlock(exercise, missing, state.taskId),
+      // On a code-fixable block, carry the QA reasons onto run state so the next implement attempt
+      // re-prompts the builder with WHY it failed rather than re-running blind.
+      onBlocked: (missing) => {
+        if (classifyExerciseBlock(exercise) === 'code-fixable') {
+          runState.repairFeedback = missing;
+        }
+        return mapExerciseBlock(exercise, missing, state.taskId);
+      },
     };
   },
 };

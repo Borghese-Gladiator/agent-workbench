@@ -28,6 +28,8 @@ class FakeBuilderAdapter implements CodingAgentAdapter {
   private cwd = '';
   /** Captures the createSession input so tests can assert the resume id was threaded. */
   lastCreateInput?: CreateAgentSessionInput;
+  /** Captures the execute assignment so tests can assert the instruction handed to the model. */
+  lastAssignment?: AgentAssignment;
   constructor(
     private readonly onExecute: (cwd: string) => Promise<void>,
     private readonly completed = true,
@@ -39,7 +41,8 @@ class FakeBuilderAdapter implements CodingAgentAdapter {
     this.lastCreateInput = input;
     return { id: 'sess-1', role: input.role, taskId: input.taskId, providerId: this.id, createdAt: '' };
   }
-  async execute(_s: AgentSession, _a: AgentAssignment, _sink: AgentEventSink): Promise<AgentExecutionResult> {
+  async execute(_s: AgentSession, a: AgentAssignment, _sink: AgentEventSink): Promise<AgentExecutionResult> {
+    this.lastAssignment = a;
     await this.onExecute(this.cwd);
     return {
       completed: this.completed,
@@ -184,5 +187,49 @@ describe('runRealBuilderAttempt (Stage 2 real builder)', () => {
 
     expect(adapter.lastCreateInput?.resumeSessionId).toBe('prior-session-42');
     expect(result.sessionId).toBe('provider-session-99');
+  });
+
+  // TASK-63 repair loop: prior QA/review feedback is appended to the builder instruction so a
+  // repair attempt re-implements knowing why the last candidate failed, not blind.
+  it('appends priorFeedback to the builder instruction on a repair attempt', async () => {
+    const adapter = new FakeBuilderAdapter(async (cwd) => {
+      await writeFile(join(cwd, 'greeting.txt'), 'hello\n');
+    });
+
+    await runRealBuilderAttempt({
+      adapter,
+      taskId: 'task-1',
+      worktreePath: worktree,
+      slice,
+      allowedTools: [],
+      tokenBudget: 1000,
+      runtimeBudgetMs: 1000,
+      eventSink: () => {},
+      priorFeedback: ['1 behavioral claim(s) have a committed diff that touches none of their target paths'],
+    });
+
+    const instruction = adapter.lastAssignment?.instruction ?? '';
+    expect(instruction).toContain(slice.objective);
+    expect(instruction).toContain('A prior attempt failed QA/review');
+    expect(instruction).toContain('touches none of their target paths');
+  });
+
+  it('uses the bare slice objective when no priorFeedback is supplied (first attempt)', async () => {
+    const adapter = new FakeBuilderAdapter(async (cwd) => {
+      await writeFile(join(cwd, 'greeting.txt'), 'hello\n');
+    });
+
+    await runRealBuilderAttempt({
+      adapter,
+      taskId: 'task-1',
+      worktreePath: worktree,
+      slice,
+      allowedTools: [],
+      tokenBudget: 1000,
+      runtimeBudgetMs: 1000,
+      eventSink: () => {},
+    });
+
+    expect(adapter.lastAssignment?.instruction).toBe(slice.objective);
   });
 });
