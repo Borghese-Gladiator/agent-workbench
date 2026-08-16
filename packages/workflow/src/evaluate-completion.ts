@@ -231,13 +231,18 @@ export type ExerciseBlockKind = 'code-fixable' | 'evidence-deficiency';
  *   - `policyBlockingErrorsPresent` — a real runtime, console, or network error the QA run saw.
  *   - `!structuredAssertionsPass` — a structured assertion actually ran and failed (a real defect
  *     in observed behavior), distinct from an assertion being absent.
+ *   - `behavioralClaimsWithUntouchedTarget` non-empty — the candidate diff doesn't touch a claim's
+ *     target files at all (a no-op / off-target build); re-running implement is exactly the remedy.
  * Everything else is an evidence/QA-authoring deficiency that re-running implement/verify can never
  * satisfy — a missing recording or trace, a scenario that never ran, a behavioral claim with no
  * *authored* strong assertion, or evidence not tied to the candidate SHA — so it escalates to a
  * human `qa-inconclusive` gate rather than looping into implement.
  */
 export function classifyExerciseBlock(ctx: ExerciseContext): ExerciseBlockKind {
-  const codeFixable = ctx.policyBlockingErrorsPresent || !ctx.structuredAssertionsPass;
+  const codeFixable =
+    ctx.policyBlockingErrorsPresent ||
+    !ctx.structuredAssertionsPass ||
+    (ctx.behavioralClaimsWithUntouchedTarget?.length ?? 0) > 0;
   return codeFixable ? 'code-fixable' : 'evidence-deficiency';
 }
 
