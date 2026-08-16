@@ -1209,10 +1209,16 @@ const exerciseHandler: PhaseHandler = {
 
     // A behavioral claim's committed diff must touch at least one path the plan associated with it.
     // The plan links claims to files via each slice's claimIds + likelyPaths; a claim's target paths
-    // are the union of likelyPaths across every slice covering it. Only computed on the real path
-    // (mock has no worktree/diff), and only when a candidate commit exists.
+    // are the union of likelyPaths across every slice covering it. Gated on the runtime profile: only
+    // runtimes serving weaker/local models (pi, opencode) get this stringent check, since the
+    // likelyPaths prediction adds no signal for frontier models and risks false-blocking correct
+    // work whose files the planner mis-predicted. Requires a real worktree + candidate commit.
     let untouchedTargetClaims: string[] = [];
-    if (ctx.profile.usesRealAgent && runState.worktreePath && runState.candidateSha) {
+    if (
+      ctx.profile.needsStringentCandidateChecks &&
+      runState.worktreePath &&
+      runState.candidateSha
+    ) {
       const claimTargetPaths = new Map<string, string[]>();
       for (const slice of runState.plan?.slices ?? []) {
         for (const claimId of slice.claimIds) {
