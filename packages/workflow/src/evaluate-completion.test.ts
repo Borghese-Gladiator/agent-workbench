@@ -315,6 +315,24 @@ describe('evaluatePhaseCompletion — exercise', () => {
     };
     expect(evaluatePhaseCompletion(candidateFor('exercise'), ctx).complete).toBe(true);
   });
+
+  // TASK-63: a no-op / off-target candidate (diff touches none of the claim's target paths) must
+  // not clear the gate on QA-assertion evidence alone.
+  it('is not complete when a behavioral claim diff touches none of its target paths', () => {
+    const ctx: CompletionContext = {
+      exercise: { ...completeContext.exercise!, behavioralClaimsWithUntouchedTarget: ['claim-1'] },
+    };
+    const result = evaluatePhaseCompletion(candidateFor('exercise'), ctx);
+    expect(result.complete).toBe(false);
+    expect(result.missing.some((m) => m.includes('touches none of their target paths'))).toBe(true);
+  });
+
+  it('stays complete when every claim diff touched a target path (empty list)', () => {
+    const ctx: CompletionContext = {
+      exercise: { ...completeContext.exercise!, behavioralClaimsWithUntouchedTarget: [] },
+    };
+    expect(evaluatePhaseCompletion(candidateFor('exercise'), ctx).complete).toBe(true);
+  });
 });
 
 // TASK-75: a blocked exercise gate must route by whether re-coding can fix it. Only a real

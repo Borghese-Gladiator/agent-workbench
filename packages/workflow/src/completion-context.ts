@@ -72,6 +72,16 @@ export interface CompletionContext {
      * no longer rubber-stamp a behavioral claim. Optional for back-compat with fixtures.
      */
     behavioralClaimsMissingStrongAssertion?: string[];
+    /**
+     * Behavioral claim ids whose committed diff touches none of the paths the plan associated with
+     * them (`PlanSlice.likelyPaths`). Non-empty ⇒ the gate does not clear: a no-op / off-target
+     * candidate (e.g. only `package-lock.json` committed for a README claim) can no longer pass QA
+     * on assertion evidence alone. Populated ONLY for runtimes flagged
+     * `needsStringentCandidateChecks` (weaker/local models — pi, opencode); frontier runtimes and
+     * the mock path leave it empty, so the check never false-blocks their correct work. Optional for
+     * back-compat with fixtures.
+     */
+    behavioralClaimsWithUntouchedTarget?: string[];
     structuredAssertionsPass: boolean;
     requiredRecordingExists: boolean;
     browserScenariosHaveTraces: boolean;

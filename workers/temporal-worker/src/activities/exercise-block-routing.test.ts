@@ -21,6 +21,7 @@ describe('mapExerciseBlock (TASK-75)', () => {
   it.each([
     ['a policy-blocking runtime error', { policyBlockingErrorsPresent: true }],
     ['a structured assertion that ran and failed', { structuredAssertionsPass: false }],
+    ['a no-op / off-target candidate diff', { behavioralClaimsWithUntouchedTarget: ['claim-1'] }],
   ])('routes %s to repair → implement (a real defect the builder can fix)', (_label, override) => {
     const result = mapExerciseBlock({ ...base, ...override }, ['x'], 'task-1');
     expect(result.outcome).toBe('repair');

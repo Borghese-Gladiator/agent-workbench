@@ -82,6 +82,18 @@ export interface RuntimeProfile {
   readonly toolDocTier: ToolDocTier;
 
   /**
+   * Whether the workbench must independently verify that the candidate diff actually addresses each
+   * behavioral claim, rather than trusting the agent to self-verify. TRUE for runtimes commonly
+   * serving small/local models (`pi`, `opencode` with an ollama model), which produced the empty /
+   * off-target candidates TASK-63 caught. FALSE for frontier hosted runtimes (`claude`, `codex`),
+   * whose models are trusted to hit the target and for which the planner's `likelyPaths` prediction
+   * adds no signal — gating on it there only risks false-blocking correct work whose files the
+   * planner mis-predicted. (Honest imperfection: `opencode` can also run a hosted model; this flag
+   * reflects the common local-model configuration and could later be refined per-project.)
+   */
+  readonly needsStringentCandidateChecks: boolean;
+
+  /**
    * The model to run a given phase under, in THIS runtime's own naming, or `undefined` for the
    * runtime/adapter default. A project-configured `config.model` overrides the per-phase table for
    * every phase (operator override). Claude/Codex/OpenCode use one model for all phases today (return
@@ -104,6 +116,7 @@ const mockProfile: RuntimeProfile = {
   usesDurableRunState: false,
   usesSdkToolNames: false,
   toolDocTier: 'recipes',
+  needsStringentCandidateChecks: false,
   modelForPhase: () => undefined,
   createAdapter: () => new MockAgentAdapter(),
 };
@@ -115,6 +128,7 @@ const claudeProfile: RuntimeProfile = {
   usesDurableRunState: true,
   usesSdkToolNames: true,
   toolDocTier: 'full',
+  needsStringentCandidateChecks: false,
   modelForPhase: (_phase, config) => config.model,
   createAdapter: () => new ClaudeAgentAdapter(),
 };
@@ -126,6 +140,7 @@ const codexProfile: RuntimeProfile = {
   usesDurableRunState: true,
   usesSdkToolNames: false,
   toolDocTier: 'full',
+  needsStringentCandidateChecks: false,
   modelForPhase: (_phase, config) => config.model,
   createAdapter: (config) => new CodexAgentAdapter({ model: config.model, bin: config.binary }),
 };
@@ -138,6 +153,8 @@ const piProfile: RuntimeProfile = {
   usesSdkToolNames: false,
   // Local models digest terse recipe cards, not a tool's full agent doc.
   toolDocTier: 'recipes',
+  // Local models can't be trusted to self-verify; the workbench checks the diff hits each claim.
+  needsStringentCandidateChecks: true,
   // An explicit project model wins for every phase; otherwise the per-phase table routes heavy
   // reasoning phases to a fast model that doesn't stall locally, falling back to the capable default.
   modelForPhase: (phase, config) => config.model ?? piModelForPhase(phase),
@@ -154,7 +171,9 @@ const openCodeProfile: RuntimeProfile = {
   usesRealWorktree: true,
   usesDurableRunState: true,
   usesSdkToolNames: false,
+  // Hosted-capable, so full tool docs; but commonly driven with a local ollama model in practice.
   toolDocTier: 'full',
+  needsStringentCandidateChecks: true,
   modelForPhase: (_phase, config) => config.model,
   createAdapter: (config) => new OpenCodeAgentAdapter({ model: config.model, bin: config.binary }),
 };
