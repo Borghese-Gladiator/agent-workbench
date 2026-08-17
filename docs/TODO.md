@@ -552,99 +552,92 @@ port + `AWB_DATA_DIR`), drives a fresh task to pr-readiness, and tears down **on
 the isolated stack — with the MAIN stack's running task untouched, and **without the
 skill ever asking whether to isolate**.
 
-### [ ] TASK-104: `verify` runs EVERY discovered test+build command (root full-suite + all 24 packages), serially, with no per-command timeout → exhausts the 30-min activity budget
+### [ ] TASK-104: `verify` records NOTHING per-command, so a stalled 30-min verify is completely opaque — write incremental command timing so it's debuggable
 
-> **Re-verified against `main` @ `320b2dd` (2026-08-17).** Still an issue; the
-> "dogfood fixes" in that commit touched delivery/DAG code, not the verify path.
-> Code paths below are current line numbers on that main.
+> **Re-investigated against `main` @ `320b2dd` (2026-08-17).** The premise
+> ("commands are slow") was wrong: measured on this repo, the root `pnpm test`
+> (`vitest run`, 132 files) finishes in **~21s** and `pnpm build` in **~13s**. The
+> real problem is a *hang* with **zero per-command observability**.
 
-**What's wrong.** `verifyHandler` (`workers/temporal-worker/src/activities/run-phase.ts:941`)
-calls `resolveVerificationCommands` (`command-support.ts:86`), which returns **every**
-discovered command whose purpose is `unit-test` or `build` (`command-support.ts:94-97`)
-with **no filtering by which packages the diff touched**. For agent-workbench,
-discovery recorded (verified in the `repository_commands` table): the root
-`unit-test = pnpm test` (which is `vitest run` = **132 test files**, incl. self-booting
-e2e like `tasks-completion-e2e.test.ts` / `run-phase-e2e.test.ts`), **plus one
-`unit-test = npm run test` per package (24 of them), plus ~24 `build` commands**. So a
-2-file, test-only change re-runs the entire monorepo *and* every package build. Two
-aggravating factors found in code:
-- `runVerificationMatrix` runs them **serially** — `for (const command of commands)`,
-  each `await`ed (`packages/verification/src/verification-runner.ts:142`) — so the
-  wall-clock is the *sum*, not the max.
-- The verify `VerificationRunContext` sets **no `timeoutMs`** (`run-phase.ts:967-983`),
-  and `runCommand` only arms a timeout `if (timeoutMs !== undefined)`
-  (`packages/execution/src/command-runner.ts:113`), so **each command runs unbounded**.
-The only ceiling is the workflow's `startToCloseTimeout: '30 minutes'`
-(`packages/workflow/src/task-workflow.ts:22`). With `maximumAttempts: 3` the activity
-burns 3 × 30 min ≈ 90 min and then the **whole workflow FAILS** (terminal) — this is
-what killed the first dogfood run (observed `STATUS_FAILED`; `phase verify started
-(attempt 1)` logged at 21:07 → 21:37 → 22:08, exactly 30 min apart; **zero**
-`phase_attempts` / `command_executions` rows persisted because verify never completed a
-single pass).
+**What's wrong.** The `verify` phase runs the repo's discovered `unit-test`+`build`
+commands through `runVerificationMatrix`
+(`packages/verification/src/verification-runner.ts:136-145`), **serially** (`for (const
+command of commands)`, each `await`ed). Each command's result is turned into `Evidence`
+**only after that command finishes**, and the whole batch is returned to the verify
+handler **only after ALL commands complete** (`run-phase.ts:985-988`). The
+`command_executions` table exists (`packages/database/src/schema/sessions.ts:57`) but
+**is never written by the verification runner** (verified: the only references in
+`src/` are the schema definition + a cascade-delete — no insert). So while verify is
+running there is **no durable, incremental record of which command is executing or how
+long it has taken**. When the first dogfood run's verify consumed its full 30-minute
+Temporal `startToCloseTimeout` (`packages/workflow/src/task-workflow.ts:22`) and the
+workflow failed, the DB held a single `verify-1` `phase_attempts` row with
+`ended_at`/`outcome` = null and **zero** `command_executions` — leaving no way to tell
+*which* of the ~49 serial commands (root suite + 24 per-package tests + ~24 builds)
+hung. Since the individual commands are fast, the 30 min was a **hang** — the prime
+suspect being a self-booting e2e test (`tasks-completion-e2e.test.ts` /
+`run-phase-e2e.test.ts`) blocking on a port already held by the running workbench stack
+— but we **cannot confirm it** precisely because nothing was recorded.
 
-**What to do.** Scope the verify command set to the **changed packages** (the base→head
-diff already identifies them) instead of returning the whole discovered matrix; drop
-the redundant root full-suite when per-package commands cover the change; and
-**exclude the self-booting e2e/integration tests** from the verify gate (run them
-elsewhere). Independently, give verify commands a per-command `timeoutMs` so one hung
-command can't consume the whole activity budget silently.
+**What to do.** Make verify **debuggable first**: write an incremental
+`command_executions` row per command (started_at on spawn, ended_at + exit_code on
+finish) as the matrix runs, so a live/failed verify shows exactly which command is in
+flight and how long it has taken. Then, with that visibility, **streamline** so a simple
+change's verify never approaches 30 min — most likely by making the self-booting e2e
+tests fail fast (or be excluded) rather than hang on a port conflict. Keep running every
+command (no diff-scoping, no per-command timeouts — explicitly out of scope per the
+owner); the goal is visibility + no-hang, not fewer commands.
 
-**Where.** `command-support.ts:86-101` (`resolveVerificationCommands` — add diff-scope),
-`run-phase.ts:941-1006` (`verifyHandler` — set `timeoutMs`, pass changed-package
-filter), `verification-runner.ts:142` (serial loop). Relates to the velocity/slice
-machinery that already knows the touched files, and to TASK-106 (a scoped verify can't
-naively call the per-package `test` script).
+**Where.** `packages/verification/src/verification-runner.ts:74-145`
+(`runCommandAndRecordEvidence` / `runVerificationMatrix` — add incremental
+`command_executions` writes), `command_executions` schema
+(`packages/database/src/schema/sessions.ts:57`, currently write-only-in-tests), the
+self-booting e2e tests (`workers/temporal-worker/src/run-phase-e2e.test.ts`,
+`apps/daemon/src/routes/tasks-completion-e2e.test.ts` — make port-conflict fail fast).
 
-**How we'll know it's done.** A single-package change verifies in well under the
-timeout, running only that package's tests (not the root suite, not other packages,
-not e2e), and a hung command is cut by its own `timeoutMs` rather than the 30-min
-activity kill.
+**How we'll know it's done.** During a verify run, `command_executions` shows a row per
+command with live timing; and a simple change's verify completes fast (no 30-min hang)
+because the e2e tests no longer block on a busy port.
 
-### [ ] TASK-105: activity-timeout retries are invisible to the workbench — no attempt bump, no durable trace, and a slow phase is misclassified as a transient infra failure
+### [ ] TASK-105: `verify` can consume the whole 30-min activity budget in ONE `runPhase` invocation — revisit the timeout / heartbeat so a legitimately-long verify isn't a terminal failure
 
-> **Re-verified against `main` @ `320b2dd` (2026-08-17).** Still an issue;
-> `startToCloseTimeout`/`maximumAttempts` and the attempt-counter flow are unchanged
-> (the +2 lines that commit added to `task-workflow.ts` were the stacked-PR
-> `baseBranch`, unrelated).
+> **Re-investigated against `main` @ `320b2dd` (2026-08-17).** Companion to TASK-104
+> (the timeout is only *reached* because verify hangs; this ticket is the ceiling
+> itself). Correction to earlier drafts: a timed-out phase does **not** persist
+> "nothing" — a `verify-1` `phase_attempts` row IS written at phase start (via the
+> `phase-started` semantic event → `ensureRunAndPhaseAttempt`); it just never gets an
+> `ended_at`/`outcome` because the phase never completes. (The `retry_of` lineage
+> column is **not on `main`** — it lives on the open `ui-roadmap` PR #18; the copy in
+> the live DB is a leftover from running that branch against the shared SQLite. Nothing
+> to wire or delete here.)
 
-**What's wrong.** `attemptNumber` is bumped **in the workflow**, once per phase
-dispatch: `task-workflow.ts:215` does `attemptNumber + 1` immediately before
-`await activities.runPhase(...)` (`:217`). When that **activity** hits its
-`startToCloseTimeout`, Temporal retries the *activity* per the RetryPolicy — but the
-**workflow code does not re-execute**; the pending `await` is simply re-dispatched with
-the **same input**, so `state.attemptNumber` is frozen and `control-plane-events.ts:70`
-emits `phase … started (attempt 1)` every retry (observed: three identical "attempt 1"
-events 30 min apart). Consequences:
-- The workbench's own no-progress accounting (`failureStreak` /
-  `repeated-failure-no-progress`, `task-workflow.ts:252-258`) only counts workflow-level
-  `repair` outcomes — it **never sees** activity-timeout retries, so it can neither
-  escalate nor de-dupe them.
-- A timed-out phase persists **nothing** — no `phase_attempts` row, no
-  `command_executions`, no evidence (all written on phase completion, which never
-  happens). The run is completely opaque in the DB.
-- The RetryPolicy comment (`task-workflow.ts:6-9`) says retries are only for *transient
-  infrastructure* failures (provider timeout, GitHub blip, fs hiccup). A verify that is
-  legitimately slow because it's over-scoped (TASK-104) is **misclassified** as
-  transient, silently burns the 3-attempt budget (≈90 min), then fails the whole
-  workflow terminally.
+**What's wrong.** The `runPhase` activity has a flat `startToCloseTimeout: '30 minutes'`
+with `maximumAttempts: 3` (`packages/workflow/src/task-workflow.ts:21-31`). A single
+verify pass that runs the full command matrix (TASK-104) can approach that ceiling; when
+it does, Temporal kills and **retries the activity**, but the workflow-held
+`attemptNumber` is fixed for that dispatch, so each retry re-emits `phase verify started
+(attempt 1)` (observed three times, 30 min apart) and the workbench's own no-progress
+accounting (`failureStreak` / `repeated-failure-no-progress`,
+`task-workflow.ts:252-258`) — which only counts workflow-level `repair` outcomes —
+**never sees the retries**. After 3 × 30 min the activity fails permanently and the whole
+workflow goes terminal. The RetryPolicy comment (`task-workflow.ts:24-27`) says retries
+are meant for *transient infrastructure* failures; a slow-but-progressing verify is
+misclassified as one.
 
-**What to do.** Distinguish "activity is genuinely making progress but slow" from
-"transient infra failure." Options: heartbeat long-running phases (so Temporal sees
-liveness and a `heartbeatTimeout` replaces the coarse `startToClose`), and/or record a
-durable phase-attempt row *at start* so timed-out attempts are counted and visible,
-and/or shorten per-command work (TASK-104) so the 30-min ceiling is never approached.
-At minimum, an activity retry should be counted as a distinct attempt with a recorded
-outcome, not a silent replay of "attempt 1".
+**What to do.** Make a long-but-live verify survivable and legible: **heartbeat** the
+activity (so Temporal sees liveness and a `heartbeatTimeout` replaces the coarse
+`startToClose`), and/or raise the verify budget for phases that legitimately run a full
+matrix. This is deliberately separate from TASK-104: even after verify stops hanging, the
+30-min-single-invocation ceiling is a latent cliff worth removing.
 
-**Where.** `packages/workflow/src/task-workflow.ts:2-10` (proxyActivities retry/timeout),
-`:215-217` (attempt bump vs activity retry), `:252-258` (no-progress accounting);
-`workers/temporal-worker/src/activities/control-plane-events.ts:70` (the "attempt N"
-emit). Related to the known cold-restart-on-retry gap (`observability-live-proof`,
-TASK-32).
+**Where.** `packages/workflow/src/task-workflow.ts:21-31` (proxyActivities
+retry/timeout), `:215-217` (attempt bump vs. activity retry), `:252-258` (no-progress
+accounting); `workers/temporal-worker/src/activities/run-phase.ts` (verify heartbeat).
+Related to the cold-restart-on-retry gap (`observability-live-proof`, TASK-32).
 
-**How we'll know it's done.** A phase that exceeds the activity budget either
-heartbeats and continues, or is recorded as a distinct, counted attempt with a
-persisted outcome — never a silent "attempt 1" replay that leaves no DB trace.
+**How we'll know it's done.** A verify that legitimately runs long heartbeats and
+completes instead of being killed at 30 min, and a genuinely stuck phase is surfaced as
+a counted, recorded failure rather than a silent "attempt 1" replay.
 
 ### [ ] TASK-106: Per-package `test` script (`vitest run --dir .`) finds zero tests when run from the package dir
 
@@ -658,8 +651,10 @@ persisted outcome — never a silent "attempt 1" replay that leaves no DB trace.
 'workers/**/*.test.ts']`) and packages have no local vitest config. Run from inside
 e.g. `packages/config`, `--dir .` re-roots resolution there, so the glob becomes
 `packages/config/packages/**/*.test.ts` → matches nothing → `No test files found,
-exiting with code 1`. So a *scoped* verify (the TASK-104 fix) can't just shell out to
-the package's own `test` script as-is — it would report a false failure.
+exiting with code 1`. Confirmed real, not "a package with no tests": `packages/config`
+has 2 test files / **31 passing tests** when run correctly from the repo root — the
+per-package script simply can't find them. So `pnpm --filter @awb/<pkg> test` reports a
+false failure for every package.
 
 **What to do.** Make the per-package `test` script actually run that package's tests —
 either a per-package `vitest.config.ts` with a local `include`, or change the script to
