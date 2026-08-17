@@ -4,6 +4,265 @@ Prioritized List of Things to Fix
 Every task should have what is wrong / what to do, where, and how we'll know when it's done
 
 
+## Group AA — Autonomy pivot: remove human approvals, loop to a draft PR (TOP PRIORITY)
+
+The direction: the workbench stops being a human-in-the-loop system with an approval
+queue and becomes a **true autonomous loop against falsifiable success criteria** whose
+**terminal state is always a draft PR**. Merging is a human action taken **out-of-band on
+GitHub**, not a phase the workbench parks on. "Is the work correct" is the workbench's job
+(deterministic, looped); "do we want to merge it" is the human's job (on the PR). This
+removes every human gate, deletes the `/approvals` surface, and makes non-convergence
+open a draft PR with an honest unmet-criteria report rather than parking a queue.
+
+**Decisions locked (do not re-litigate):**
+- Remove **all** human gates — repo-trust becomes a one-time config flag, not a per-run
+  gate; task-contract-approval and pr-readiness are removed. Fully autonomous prompt → draft PR.
+- Non-convergence (budget exhausted, repeated-failure-no-progress, qa-inconclusive,
+  planner-critic-non-convergence) → **open a draft PR anyway**, clearly marking the unmet
+  success criteria in the PR body/checklist. Every task terminates at a draft PR.
+- Success criteria = **falsifiable acceptance claims proven by real evidence**: tests pass
+  AND interactive QA (click + assert) exercises each behavioral claim AND adversarial
+  review has no blocking findings. TASK-90 (interactive QA) is therefore a **hard
+  dependency** — without it the loop "succeeds" on shallow navigate+screenshot evidence.
+
+### [ ] TASK-104: Remove all human gates — repo-trust becomes one-time config, contract-approval and pr-readiness deleted
+
+**What's wrong.** The lifecycle has three mandatory human gates
+(`MANDATORY_GATE_REASONS`, `packages/policy/src/human-gates.ts:73-77`:
+`first-time-repository-trust`, `task-contract-approval`, `pr-readiness`) plus a long list
+of conditional/blocking gate reasons (`HumanGateReasonSchema`,
+`packages/domain/src/lifecycle.ts:65-84`). The workflow escalates to `awaiting-human` and
+parks (`packages/workflow/src/task-workflow.ts:196,256-274`); the release handler returns a
+`pr-readiness` gate as its terminal step (`run-phase.ts:1598,1747`). This makes every task
+depend on a human sitting in an approval queue — the exact model we are removing.
+
+**What to do.** Strip human approval from the critical path end to end:
+- **Repo-trust → one-time config flag.** Move `first-time-repository-trust` out of the
+  per-run gate machinery into a persisted `repository.trusted` boolean set once at
+  registration (`awb repo add --trust` / `awb repo trust`); no runtime gate, no per-task
+  prompt. A non-trusted repo is simply refused up front, not parked mid-run.
+- **Delete `task-contract-approval` as a gate.** The specify phase still produces the
+  contract (it is the source of the success criteria), but the workflow no longer waits for
+  a human to approve it — it advances straight to plan once the contract is well-formed.
+- **Delete `pr-readiness` as a gate.** The release phase opens the draft PR as its terminal
+  action (see TASK-106) instead of parking for human PR approval.
+- Remove `pending_gate_reason`/`awaiting-human` from the *happy path*. Keep the
+  `HumanGateReason` enum values only insofar as TASK-105 repurposes them as
+  unmet-criteria labels in the PR report; nothing should route to `awaiting-human` as a
+  wait state.
+
+**Where.** `packages/policy/src/human-gates.ts` (drop `MANDATORY_GATE_REASONS`, the
+escalation predicates), `packages/domain/src/lifecycle.ts:65-84` (prune the enum to what
+TASK-105 still uses), `packages/workflow/src/task-workflow.ts:105,196,256-274`
+(remove `awaiting-human` escalation + `pr-readiness` on release),
+`packages/workflow/src/loop-routing.ts:68` (`shouldEscalateToHuman`),
+`workers/temporal-worker/src/activities/run-phase.ts:1598,1747` (release no longer returns
+a `pr-readiness` gate), plus repo-trust plumbing in `packages/repository` +
+`apps/cli`. Depends on TASK-106 (draft-PR terminal) landing together so release has
+somewhere to go. Relates to `docs/security.md` (repo-trust is still the security boundary —
+it becomes config, not un-enforced).
+
+**How we'll know it's done.** *Unit:* a routine task advances specify→plan→…→release with
+**zero** `awaiting-human` transitions; a non-trusted repo is refused at registration, not
+mid-run. *Manual:* drive a task on a trusted local repo with `--no-input` and it reaches a
+draft PR without a single approval prompt.
+
+### [ ] TASK-105: Bounded autonomous loop against falsifiable success criteria (replaces human parking on non-convergence)
+
+**What's wrong.** Today, when the loop can't satisfy criteria it escalates to a human gate:
+`repeated-failure-no-progress` at `NO_PROGRESS_THRESHOLD = 3`
+(`task-workflow.ts:256-259`), `qa-inconclusive`, `budget-exceeded`,
+`planner-critic-non-convergence`. That is a *park-and-wait-for-human* model. In the new
+model the loop is bounded and **terminal without a human**: it runs until the success
+criteria are met OR a budget (attempts / tokens / wall-clock) is exhausted, then hands off
+to the draft-PR terminal (TASK-106) — it never waits in an approval queue.
+
+**What to do.** Define an explicit loop budget and a structured terminal outcome:
+- A `LoopBudget` (max phase attempts per phase, max total tokens, max wall-clock) checked in
+  the workflow; when a repair/replan cycle would exceed it, stop looping.
+- Replace each `awaiting-human` escalation with a **terminal** `UnmetCriteria` outcome
+  carrying: which acceptance claims are unproven, the last candidate SHA, the blocking
+  findings, and *why* the loop stopped (converged-unmet vs. budget-exhausted vs.
+  genuinely-stuck fingerprint). This structured object is what TASK-106 renders into the PR
+  body.
+- Wire the richer `failure-fingerprint.ts` machinery (currently unwired per TASK-75's note)
+  into the stop decision so "genuinely stuck" is distinguished from "made partial progress."
+- Success = all falsifiable acceptance claims proven by real evidence (tests pass +
+  interactive QA per TASK-90 exercises each behavioral claim + no blocking review findings).
+  This is the exit condition; TASK-90 is a hard dependency.
+
+**Where.** `packages/workflow/src/task-workflow.ts:70,251-274` (budget check + terminal
+outcome instead of `awaiting-human`), `packages/workflow/src/loop-routing.ts`,
+`packages/workflow/src/failure-fingerprint.ts:44-60` (wire it in),
+`packages/workflow/src/evaluate-completion.ts` (the success predicate stays the arbiter),
+new `LoopBudget`/`UnmetCriteria` types in `packages/domain`. Depends on TASK-90 (interactive
+QA as the real success signal) and pairs with TASK-104/106. Relates to TASK-75 and the
+`qa-static-checks-miss-runtime-bugs` learning.
+
+**How we'll know it's done.** *Unit:* a task that cannot satisfy a claim within budget
+terminates with a populated `UnmetCriteria` (claims + SHA + findings + stop-reason) and
+**never** enters `awaiting-human`; a task that satisfies all claims terminates `succeeded`.
+*Manual:* drive an intentionally-unsatisfiable task and confirm it stops at the budget and
+produces the unmet-criteria object, not a parked gate.
+
+### [ ] TASK-106: Draft PR is the terminal state for EVERY task — with an honest met/unmet success-criteria report in the body
+
+**What's wrong.** Release today parks on a `pr-readiness` human gate
+(`run-phase.ts:1598,1747`) rather than treating the draft PR as the finish line. There is
+no PR-body report of which success criteria were met vs. unmet. In the new model, **every**
+task — converged or not — ends by opening (or updating) a draft PR whose body honestly
+states the acceptance-claim outcomes, so a human reviews and merges on GitHub out-of-band.
+
+**What to do.**
+- Make the release phase open a **draft** PR as its terminal action, unconditionally (no
+  `pr-readiness` gate). On success, all claims are marked proven; on non-convergence
+  (TASK-105 `UnmetCriteria`), open the draft PR anyway with the unmet claims called out.
+- Render a **success-criteria checklist** into the PR body: each acceptance claim → met /
+  unmet, the evidence link (recording/trace/test result) for met claims, and the reason +
+  last candidate SHA for unmet ones. Reuse the existing PR evidence-matrix machinery
+  (`packages/github`) rather than inventing a second renderer.
+- The draft stays a draft — the workbench **never** marks it ready or merges it. (That is
+  the human's out-of-band action; note the existing `close-pr` skill already does
+  ready+merge as a *separate* human-invoked step, which is exactly the intended boundary.)
+
+**Where.** `workers/temporal-worker/src/activities/run-phase.ts:1541-1598,1743-1747` (release
+terminal → draft PR, drop the `pr-readiness` return), `packages/github` (PR body =
+evidence matrix + met/unmet checklist; the draft-PR + evidence-matrix code already exists),
+consumes TASK-105's `UnmetCriteria`. Depends on TASK-104 (gate removal) and TASK-105
+(terminal outcome). Relates to the `github-pr-video-upload` and `close-pr` learnings and
+TASK-71 (no-origin → local delivery still applies when there is no remote to PR against).
+
+**How we'll know it's done.** *Unit:* release always produces a draft PR (never a
+`pr-readiness` gate); the PR body contains a per-claim met/unmet checklist sourced from
+evidence. *Manual:* drive one converged and one intentionally-unsatisfiable task; both end
+as draft PRs, the first with all claims met + evidence links, the second with the unmet
+claims and reasons clearly listed — neither is auto-merged.
+
+### [ ] TASK-107: Delete the `/approvals` control-plane surface and its supporting queue concept
+
+**What's wrong.** The current UI has an `/approvals` surface (a stub cross-task gate lookup)
+that the autonomy pivot makes obsolete — there is no human approval queue any more.
+`/approvals`, `GatePanel`, the sidebar approvals badge, and any pending-gate projection are
+now dead concepts. (A prior backlog item, TASK-82, planned to *expand* this into a real
+approval inbox; that item has been **deleted** from this backlog as a direct consequence of
+the pivot — do not resurrect it.)
+
+**What to do.** Remove the `/approvals` route and page, `GatePanel`, and the approvals
+sidebar entry + badge. If any "needs attention" surface remains useful, it becomes a
+**read-only** list of tasks that ended `UnmetCriteria` (linking to their draft PRs), not an
+actionable approval queue. This is primarily a deletion; it is listed here (not just in
+Group O) because it is a direct consequence of TASK-104.
+
+**Where.** `apps/web/src/pages/ApprovalsPage.tsx`, `GatePanel.tsx`,
+`apps/web/src/components/layout/AppSidebar.tsx` (drop Approvals), `apps/web/src/App.tsx`
+(drop `/approvals`). Depends on TASK-104. Note: this is a frontend deletion — the backend
+gate removal is TASK-104.
+
+**How we'll know it's done.** *Manual:* there is no `/approvals` route, no approvals sidebar
+entry, and no code path that lists "pending human gates."
+
+
+## Group AB — Observability gaps (backend, high priority)
+
+Three real, verified backend gaps in the observability layer. (Two other findings — the web
+client dropping `runtimeAttribution`, and telemetry being off-by-default — are deliberately
+**out of scope here**: the first is frontend, the second is intentional and documented.)
+
+> **Correction to an earlier audit claim:** the workbench **does** have observability — a
+> real three-channel design (semantic_events + per-session token/runtime tables + OTel),
+> per ADR-008. What does **not** exist is a package literally named `packages/observability/`
+> (verified: no such directory, no such workspace package among the 23). The functionality
+> lives in `packages/telemetry`, `packages/database` (`schema/observability.ts` +
+> `data-access/observability.ts` + `schema/sessions.ts`), and
+> `workers/temporal-worker/src/activities/observability-accumulator.ts`. Several backlog
+> items (TASK-61/79/89/98) cite `packages/observability/` — that path is wrong; see TASK-108.
+
+### [ ] TASK-108: Backlog + docs cite a nonexistent `packages/observability/` — fix the path drift
+
+**What's wrong.** TASK-61, TASK-79, TASK-89, and TASK-98 all point their "Where" at
+`packages/observability/`, which **does not exist** (verified: no directory of that name
+outside `archive/`, not among the 23 workspace packages). Anyone picking up those tasks
+starts in the wrong place. The real homes are `packages/telemetry` (OTel) and
+`packages/database` (`data-access/observability.ts`, `schema/observability.ts`,
+`schema/sessions.ts`) plus `workers/temporal-worker/src/activities/observability-accumulator.ts`.
+
+**What to do.** Correct the `packages/observability/` references in TASK-61/79/89/98 (and
+anywhere else in `docs/`) to the actual packages. This is a documentation-accuracy fix, not
+code — but it is blocking clarity for the token-audit work (TASK-79) which is high priority.
+
+**Where.** `docs/TODO.md` (the four tasks' "Where" fields), any `docs/` mention of a
+`packages/observability` module.
+
+**How we'll know it's done.** *Manual:* `rg 'packages/observability' docs/` returns nothing
+(or only this task's own note), and each corrected task names the real package.
+
+### [ ] TASK-109: `context_composition` is a chars/4 ESTIMATE, not measured tokens — the token-attribution surface is synthetic
+
+**What's wrong.** The "8 token-source buckets" (`context_composition`) that the token-audit
+work (TASK-79) and any future Usage view read from are **not measured** — they are computed
+by `estimateContextComposition` as `Math.ceil(JSON.stringify(payload).length / 4)` per
+bucket (`workers/temporal-worker/src/activities/observability-accumulator.ts:138-150`). This
+is a character-count heuristic that (a) never reconciles against the model's actually
+reported `inputTokens` in `model_invocations`, (b) is badly wrong for code/JSON/non-English,
+and (c) **cannot see the thing the token-cost finding says dominates cost** — accumulated
+in-session context and replayed tool output — because it only measures the payloads the
+workbench hands in, not what the transcript actually grew to. So ranking prompts/phases by
+this number (the whole point of TASK-79) would rank a synthetic quantity.
+
+**What to do.** Make context attribution real, or clearly demote it:
+- Reconcile the buckets against the provider-reported input tokens (`model_invocations`):
+  the buckets should **sum to** the measured input tokens for that invocation (scale/attribute
+  the measured total across sources), not be an independent chars/4 guess.
+- Where the provider exposes cache-read vs. fresh-input (already read back as
+  `cachedInputTokens`), attribute those separately so "context we paid to re-send" is visible
+  — that is the cost lever `group-e-token-memory-graph` names.
+- If a source genuinely can't be measured, label the field `*_estimated` so downstream
+  (TASK-79, any Usage view) never presents it as measured. Do **not** let an estimate masquerade
+  as attribution.
+
+**Where.** `workers/temporal-worker/src/activities/observability-accumulator.ts:138-150`
+(`estimateContextComposition`), the `context_composition` schema
+(`packages/database/src/schema/observability.ts`) and read path
+(`data-access/observability.ts:getTokenBreakdown`), reconciled against `model_invocations`
+usage. Hard input to TASK-79 (measure before cutting). Relates to
+`group-e-token-memory-graph` and `docs/token-cost-measurement.md`.
+
+**How we'll know it's done.** *Unit:* for a real invocation, the `context_composition`
+buckets sum to (within a small rounding tolerance) the provider-reported input tokens in
+`model_invocations`, not to a chars/4 count; any unmeasurable field is suffixed `_estimated`.
+*Manual:* TASK-79's per-phase ranking is driven by reconciled tokens, and cache-read vs.
+fresh-input is distinguishable.
+
+### [ ] TASK-110: The structured logger (`createLogger`) is defined but has ZERO consumers — wire it or delete it
+
+**What's wrong.** `docs/observability.md` presents a third OTel sub-channel — *"a leveled,
+structured logger (`createLogger`) stamped with run_id/task_id, replacing raw stdout
+diagnostics."* In reality `createLogger` is imported **nowhere** outside its own package
+(verified: zero non-test consumers across `apps/`, `workers/`, `packages/`). Diagnostics
+still come from raw process stdout (`awb logs <service>`), exactly as the doc's own "kept
+honest" box admits at the bottom — but the taxonomy section sells the logger as an active
+channel. The code and the doc disagree.
+
+**What to do.** Decide and make it true:
+- **Wire it** — replace the raw `console.*`/stdout diagnostics in the worker and daemon hot
+  paths with `createLogger` stamped with `run_id`/`task_id`, so app logs are structured and
+  correlatable (the stated design), **or**
+- **Delete it** — remove `createLogger` and correct `docs/observability.md` to stop claiming
+  a structured-log channel that doesn't run.
+- Prefer wiring (it is genuinely useful for the transport-drop debugging case the doc
+  describes), but either outcome ends the code/doc mismatch.
+
+**Where.** `packages/telemetry/src/logger.ts` (`createLogger`), the worker/daemon
+diagnostic call sites (`workers/temporal-worker/src/`, `apps/daemon/src/`),
+`docs/observability.md:56-57` (the App-logs claim). Relates to the transport-drop debugging
+runbook in that doc.
+
+**How we'll know it's done.** *Manual:* either `rg 'createLogger' -g '!*.test.ts'` shows
+real consumers in worker/daemon and app logs carry `run_id`/`task_id`, **or** `createLogger`
+is gone and the doc no longer claims a structured-log channel. No third "defined but unused"
+state.
+
+
 ## Group H — Measure before expanding (evaluation & token spend)
 
 Three "prove it earns its cost" tasks: does the extra planning phase help, is the
@@ -27,7 +286,8 @@ metrics (TASK-55) and cost instrumentation (TASK-46) rather than a bespoke pipel
 Output a short writeup: keep program-design as-is, collapse it into a richer `plan`
 artifact, or drop it. Do NOT expand the phase further until this call is made.
 
-**Where.** `packages/observability/` (run attributes, via TASK-55), a config flag to
+**Where.** `packages/telemetry` (OTel run attributes/spans) + `packages/database`
+(`data-access/observability.ts`, run/attempt/session tables), a config flag to
 disable program-design for A/B, the evaluation writeup in `docs/`. Depends on
 TASK-55/TASK-46 for the metric plumbing; evaluates TASK-51/TASK-52.
 
@@ -84,7 +344,8 @@ grounded in querying real runs, not eyeballing the templates.
 
 **What to do.** Query the actual runs to find the token sinks, then cut them:
 - Pull real per-phase token spend from the existing instrumentation
-  (`packages/observability/` + the SQLite run tables — `tokenBreakdown` /
+  (`packages/telemetry` + the SQLite run tables in `packages/database`
+  (`data-access/observability.ts`) — `tokenBreakdown` /
   `runtimeAttribution` are already on the wire, see the `ui-roadmap` learning) so we
   can rank phases and prompts by **actual** tokens consumed across real tasks, not
   estimates. Include cache-read vs. cache-write vs. fresh-input split.
@@ -102,7 +363,8 @@ grounded in querying real runs, not eyeballing the templates.
 
 **Where.** The prompt-assembly path per phase
 (`workers/temporal-worker/src/activities/` phase prompts + any injected skill/context
-support), `packages/observability/` + the run/attempt/session token tables for the
+support), `packages/telemetry` + the run/attempt/session token tables in
+`packages/database` (`data-access/observability.ts`) for the
 query side, a short ranked writeup + the applied reductions in `docs/`. Depends on
 the TASK-46/TASK-55 token plumbing for the query surface; relates to
 `group-e-token-memory-graph` (in-session context is the real cost, not caching) and
@@ -114,97 +376,6 @@ reductions with a before/after token delta on the same runs. Not "we reviewed th
 prompts," but "we queried the runs, found X phase burns N tokens on Y, cut it, and
 re-measured."
 
-
-## Group I — Delivery & stacked PRs
-
-The two ways a finished change fails to *land*: no origin to open a PR against,
-and no way to stack one task's branch on the previous task's branch.
-
-### [x] TASK-71: No `origin` → task can't deliver; should branch + merge to local `master` instead
-
-**What's wrong.** When a repo has no `origin` remote, a task that is fully
-implemented and verified has nowhere to go. The delivery/PR-readiness path assumes
-a remote to push to and a PR to open, so a done change strands in the worktree. In
-one live case both games were fully implemented, committed, and verified in the
-worktree (307 unit tests + both Playwright e2e specs passing), yet the run could
-never "deliver" — compounded by the run being stuck in a QA-evidence gate loop
-(`repeated-failure-no-progress`) that re-raises forever, so it never reaches its own
-pr-readiness gate. The code was done and there was no delivery mechanism for it.
-
-**What to do.** When there is no `origin`, deliver locally: create the feature
-branch, then merge it into the local default branch (`master`/`main`) as a new
-commit (or fast-forward), rather than attempting a push/PR. Detect the
-no-remote case explicitly and route delivery to a local-merge strategy. Two seams
-already make this tractable (verified): (1) the release handler already
-runtime-swaps the delivery mechanism — the mock path injects `FakeGitHubClient` /
-`FakeGitPushRunner` at `run-phase.ts:1461-1464`, so a "no-origin → local merge"
-runner can be injected the same way; (2) resolving the local target branch is
-already solved by `getDefaultBranch` (`packages/repository/src/git.ts:49-71`,
-origin/HEAD → current branch → main/master fallback) — only the delivery *action*
-is missing. This is the mirror of the `close-worktree` Mode-B / no-remote handling.
-(The QA-evidence false-positive loop that kept this particular run from reaching
-pr-readiness is a separate defect; see TASK-75.)
-
-**Where.** Verified on main: push is hardcoded to `origin`
-(`packages/github/src/push.ts:12-14`, `git push origin`); the repo ref resolves only
-from a GitHub-parseable remote (`delivery-support.ts:29-34` `resolveRepoRef`); when
-that returns undefined the release handler terminally blocks
-(`run-phase.ts:1455-1458`, "could not resolve a GitHub owner/repo…"); delivery always
-opens a PR via Octokit (`packages/github/src/delivery.ts:50,72-79` →
-`real-github-client.ts:18-22`). A grep found **zero** existing local-merge fallback.
-Relates to the `close-worktree-detect-merged-mode` learning.
-
-**How we'll know it's done.** *Unit:* a delivery test on a repo with no `origin`
-produces a feature branch merged into local `master` with a new commit, and does
-NOT attempt a push. *Manual:* drive a small task on a local-only repo end to end and
-confirm the change lands as a commit on local `master` with no remote configured.
-
-### [x] TASK-72: Stacked-PR DAG — tasks whose branches stack on one another with distinct bases
-
-**What's wrong.** There is no first-class way to build a *chain* of stacked PRs,
-where each task's branch is based on the previous task's delivered branch (not
-`master`), and each PR's base = the previous PR's branch. Today this only works by
-manually threading `repository.defaultBranch` between runs:
-
-1. Set `repository.defaultBranch` = previous task's delivered branch (for PR#0,
-   leave it `master`).
-2. Create the task with a tightly-scoped prompt pointing at the exact files.
-3. Approve the contract gate; drive to pr-readiness, answering gates.
-4. Once the PR is opened, record its branch → becomes the base for the next task.
-5. After all deliver, use `gh` to confirm each PR's base = the previous PR's branch.
-
-That is a manual DAG walked by hand. It should be a declared dependency graph the
-workbench executes.
-
-**What to do.** Reference the "V4" DAG design for how to declare a task graph and
-let each node's branch stack on its parent. Model an explicit task dependency edge
-(parent task → child task) that sets the child's base branch to the parent's
-delivered branch, and carries that base through both worktree creation and PR
-creation (so the opened PR's base = parent's branch, not `master`). PR#0's base
-stays `master`/`main`. This subsumes the manual `defaultBranch`-threading recipe
-above into declared edges. The plumbing is ~90% present (verified): the base string
-already flows lease `baseRef` → `baseBranch` → `octokit.pulls.create({ base })`
-(`run-phase.ts:1467,1515` → `real-github-client.ts:22`), so an arbitrary base is
-*accepted* — what's missing is a per-task base **override** and a task-dependency
-field to source it from. Minimal change: thread a base override into
-`materializeWorktree` (`worktree-support.ts:13-35`) and add the edge/base field to
-`TaskSchema` (`packages/domain/src/tasks.ts:4-13`).
-
-**Where.** Verified gaps on main: the lease `baseRef` is set **only** from
-`repository.defaultBranch` (`worktree-support.ts:32`); `materializeWorktree` takes no
-base param and its caller passes none (`run-phase.ts:697-702`); the worktree/branch
-is created FROM that baseRef (`packages/workspace/src/worktree.ts:64-65`);
-`repository.defaultBranch` is per-repo, set once at registration
-(`schema/repository.ts:18`, `persist.ts:42`); `TaskSchema` has **no**
-base/parent/dependency field (`tasks.ts:4-13`). The existing `dependsOn` in the code
-is unrelated (repository *unit* graph + evidence supersession), and stacked-PR hits
-exist only under superseded `archive/`. Relates to the `flex-dashboards-stacked-prs`
-and `parallel-fanout-rebase-conflict` learnings.
-
-**How we'll know it's done.** *Unit:* a two-node DAG resolves the child's base
-branch to the parent's delivered branch, and PR-creation is called with that base.
-*Manual:* drive a 3-task stacked chain and confirm via `gh` that each PR's base =
-the previous PR's branch (PR#0 base=`master`), with no manual `defaultBranch` edits.
 
 ### [ ] TASK-102: Task DAG supports fan-out but NOT fan-in — a scheduling-only edge for "wait for A AND B"
 
@@ -709,11 +880,19 @@ directories.
 
 ## Group O — UI: the operational control plane
 
+> **Read in light of the autonomy pivot (Group AA).** The workbench no longer has a human
+> approval queue — TASK-82 (approval inbox) was **deleted** and TASK-107 removes the
+> `/approvals` surface. Throughout Group O, ignore any "Approvals page / approvals count /
+> human intervention" language below; the only survivor is a **read-only** "Needs attention"
+> list of tasks that ended `UnmetCriteria` (TASK-105), linking to their draft PRs. The build
+> order likewise drops the Approvals step.
+
 The web app is not a project-management tool with an execution engine bolted on; it
 is an **operational control plane for autonomous software work**. The redesign
 target: the Board shows what the factory is doing, the Tasks table gives precise
 control, Task Detail explains exactly what happened (Phase Attempts → Agent Sessions
-→ Model Invocations), Approvals handles human intervention, Verification proves the
+→ Model Invocations), a read-only **Needs attention** list surfaces tasks that ended
+`UnmetCriteria` (no human-approval actions), Verification proves the
 result, Usage shows where resources went, Repositories define the environments. `Run`
 is a storage boundary, **not** a user-facing entity — do not expose it.
 
@@ -726,8 +905,9 @@ is a storage boundary, **not** a user-facing entity — do not expose it.
 > `ApprovalsPage.tsx`/`GatePanel.tsx`/`TaskDetailPage.tsx`, and a phased plan at
 > `docs/design/ui-roadmap-plan.md`. Merge/reimplement from it rather than starting
 > fresh; the tasks below are scoped to *what is still absent on `main`* (verified by
-> audit). The plan doc's build order (foundation → Task Detail → Approvals → Board +
-> Overview → Repo Detail) is the recommended sequence and matches TASK-80..85.
+> audit). The plan doc's build order (foundation → Task Detail → Board +
+> Overview → Repo Detail) is the recommended sequence (the Approvals step is dropped per
+> the autonomy pivot) and matches the surviving TASK-80..86.
 
 ### [ ] TASK-80: Shared read foundation — `derivedStatus` in domain + `task_summary` projection + retry lineage + freshness metadata
 
@@ -845,45 +1025,6 @@ SHA with stale-evidence warnings, and per-attempt/session token + runtime attrib
 `tokenBreakdown`/`runtimeAttribution` now rendered. *Unit:* the client type includes
 both fields; the activity route returns the FK tree for a real task.
 
-### [ ] TASK-82: Approvals as a real cross-task human-gate queue (not a task-ID lookup)
-
-**What's wrong.** `/approvals` is a self-described stub: the user must type a
-repository id **and** task id, then it shows that one task's gate via `GatePanel`; the
-page itself renders a banner admitting "There is no daemon route yet that lists every
-pending gate across all tasks" (`apps/web/src/pages/ApprovalsPage.tsx:47-51`). There is
-**no** cross-task pending-gate query and **no** `approval_request`/
-`ApprovalRequestSummary` projection (the nearest is `human_decisions`,
-`schema/evidence.ts:84`, which records decisions, not a pending queue). Human-in-the-
-loop is the whole point of the control plane, and it currently requires knowing the
-task id in advance.
-
-**What to do.** Make `/approvals` a real inbox. Add a durable pending-gate projection /
-list query (`ApprovalRequestSummary`: `gateId, repositoryId, taskId, reason
-(HumanGateReason), status, requestedAt, resolvedAt?, phaseAttemptId?, candidateSha?,
-summary`) and a `GET /api/approvals` route. Two-pane UI: left = pending gates across
-all tasks (reason, task, repo, phase, age, risk, candidate); right = the exact
-approval context (what/why, triggering `HumanGateReason` from
-`lifecycle.ts:55-75`, proposed operation, affected paths, network destination,
-candidate SHA, phase attempt, related acceptance claim, agent rationale, consequence
-of denial). Actions: Approve / Deny / Deny-with-instructions / Open task. **Temporal
-stays authoritative for actionability** — on approve/deny: revalidate against the live
-workflow, submit the Temporal Update, wait for ack, update the projection. Feed a
-pending count to the sidebar badge. Cover **every** `HumanGateReason` including
-`pr-readiness` (today display-only). Do not invent "approve similar forever" in the
-frontend unless the policy model supports it.
-
-**Where.** New projection + `listPendingHumanGates()` in `packages/database/` +
-`GET /api/approvals` in `apps/daemon/src/routes/`, reworked
-`apps/web/src/pages/ApprovalsPage.tsx` + reusable `GatePanel.tsx` (both prototyped on
-`timothyshee/ui-roadmap`). Depends on TASK-80 (projection + `pending_gate_reason`).
-Relates to the `brief-reject-flow` and `cli-drivable-completion-gap` learnings.
-
-**How we'll know it's done.** *Manual:* `/approvals` lists every pending gate across
-all tasks with no task-id entry, and approving one revalidates against the live
-workflow, submits the update, and updates the queue + sidebar badge. *Unit:* the
-pending-gate list query returns open gates across active tasks and excludes resolved
-ones.
-
 ### [ ] TASK-83: Board at `/board` (read-only, `deriveTaskStatus`-driven) + Overview at `/`
 
 **What's wrong.** Neither exists. `/` renders the **repository registry**
@@ -919,8 +1060,10 @@ view. The sidebar (`AppSidebar.tsx:14-20`) has no Overview/Board entries.
 **Where.** `apps/web/src/App.tsx:18-26` (+`/board`, repoint `/`),
 `apps/web/src/components/layout/AppSidebar.tsx:14-20` (add Overview + Board), new
 `OverviewPage` + `TaskBoard.tsx` (board prototyped on `timothyshee/ui-roadmap`), new
-`GET /api/overview` reading the projection + approvals count. Depends on TASK-80 (and
-TASK-82 for the approvals count). Relates to `ui-roadmap` and `ui-redesign-decisions`.
+`GET /api/overview` reading the projection. Depends on TASK-80. The "Needs attention"
+section lists tasks that ended `UnmetCriteria` (per the autonomy pivot, TASK-105) — a
+read-only surface, **not** an approval queue. Relates to `ui-roadmap` and
+`ui-redesign-decisions`.
 
 **How we'll know it's done.** *Manual:* `/board` columns are the canonical
 `deriveTaskStatus` set with projection-backed cards and no `runId`, responsive even
@@ -1046,20 +1189,21 @@ Record the explicit non-goals so they are not re-proposed:
   task-level attribution + retry lineage + task events are proven reliable; a polished
   aggregate over untrustworthy attribution erodes trust in the whole system. Global
   evidence page: not until a cross-task use case exists (see TASK-86).
-- **No Temporal fan-out for list pages.** Overview/Board/Tasks/Approvals read the
+- **No Temporal fan-out for list pages.** Overview/Board/Tasks read the
   `task_summary` projection (TASK-80) and stay responsive when Temporal is degraded;
-  the live workflow stays authoritative only for mutable state, gate actionability,
-  resume, cancel, and approval updates. When Temporal is unavailable: show persisted
-  state, label "Live workflow unavailable," disable approve/resume/cancel, keep history
-  accessible. When SQLite is behind: prefer live for current phase/condition/gate/token
+  the live workflow stays authoritative only for mutable state,
+  resume, and cancel. When Temporal is unavailable: show persisted
+  state, label "Live workflow unavailable," disable resume/cancel, keep history
+  accessible. When SQLite is behind: prefer live for current phase/condition/token
   total and show a subtle "Updating history" indicator — never show mismatched totals
   without explanation.
 
 **What to do.** Treat this as a standing constraint on the Group-O tasks; call it out
 in reviews if any PR reintroduces a run route, a draggable board, a competing status
 field, or a global page ahead of its dependency. Sidebar stays lean initially
-(Overview / Board / Tasks / Repositories / Approvals / Settings, with a global **Create
-Task** button in the shell); Usage + Activity are added later.
+(Overview / Board / Tasks / Repositories / Settings, with a global **Create
+Task** button in the shell — no Approvals entry per the autonomy pivot); Usage + Activity
+are added later.
 
 **Where.** Cross-cutting over Group O; no code target of its own. Relates to
 `ui-roadmap` (item 10 in the plan doc), the `run-phase.ts` single-run model, and the
@@ -1105,6 +1249,12 @@ badge on Task Detail updates within ~300ms (same as the timeline), not after a 2
 *Unit:* a new event for the open task triggers a `getState` re-query.
 
 ### [ ] TASK-90: Browser QA never interacts — production scenario is navigate+screenshot, so broken apps pass (Sheng Ji case)
+
+> **Now a HARD DEPENDENCY of the autonomy pivot (Group AA).** With human approval gates
+> removed (TASK-104) and the loop exiting on "success criteria met" (TASK-105), interactive
+> QA is the *only* thing standing between "loop declares success" and a broken app becoming
+> a draft-PR marked all-claims-met. Until this lands, TASK-105's success predicate rests on
+> shallow navigate+screenshot evidence. Prioritize alongside Group AA.
 
 **What's wrong.** A run can succeed while shipping a functionally broken artifact. The
 production browser-QA scenario is **hardcoded** to two liveness steps —
@@ -1576,7 +1726,8 @@ draggable board, deliberate no-subagent policy, project-memory-as-markdown).
   model. Bias: we already committed to Temporal; look for ideas, not a swap.
 - **Self-built observability writeup** —
   `https://doneyli.substack.com/p/i-built-my-own-observability-for` — compare to our
-  `packages/observability/` (OTel spans, `runtime_attribution`, `context_composition`,
+  observability (`packages/telemetry` OTel spans + `packages/database`
+  `runtime_attribution`/`context_composition`,
   trace-per-run); relates to TASK-79 and the `observability-live-proof` learning.
 - **SQLite vs Beads** — investigate Beads as an alternative to our SQLite store. Bias:
   SQLite-as-single-writer (daemon-owned) is a firm invariant (`AGENTS.md`); "no Postgres/
