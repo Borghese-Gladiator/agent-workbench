@@ -552,58 +552,121 @@ port + `AWB_DATA_DIR`), drives a fresh task to pr-readiness, and tears down **on
 the isolated stack — with the MAIN stack's running task untouched, and **without the
 skill ever asking whether to isolate**.
 
-### [ ] TASK-104: `verify` runs the ENTIRE monorepo suite (132 files, incl. self-booting e2e) → 30-min timeout retry loop
+### [ ] TASK-104: `verify` runs EVERY discovered test+build command (root full-suite + all 24 packages), serially, with no per-command timeout → exhausts the 30-min activity budget
 
-**What's wrong.** On the agent-workbench dogfood, the `verify` phase's `runPhase`
-activity ran `vitest run` at the **repo root**, picking up all **132 test files**
-across every package — including e2e tests that boot real infra
-(`apps/daemon/src/routes/tasks-completion-e2e.test.ts`,
-`workers/temporal-worker/src/run-phase-e2e.test.ts`). For a 2-file, test-only
-change this is absurdly over-scoped, and it exceeds the workflow's
-`startToCloseTimeout: '30 minutes'` (`packages/workflow/src/task-workflow.ts:22`).
-Temporal then kills and retries the activity from scratch — an unbounded no-progress
-loop (observed: 3 attempts, `lastFailure: activity StartToClose timeout`, output
-tokens frozen at the `implement`-phase value the whole time). The self-booting e2e
-tests are doubly hostile because a workbench stack is *already running* during the
-dogfood, so they can collide on ports/temporal.
+> **Re-verified against `main` @ `320b2dd` (2026-08-17).** Still an issue; the
+> "dogfood fixes" in that commit touched delivery/DAG code, not the verify path.
+> Code paths below are current line numbers on that main.
 
-**What to do.** Scope the `verify` test command to the changed packages (the diff
-already tells us which packages moved), not a root-level full-suite run. At minimum,
-exclude the e2e/integration tests from the verify gate (run them elsewhere). Relates
-to the velocity/slice machinery that already knows the touched files.
+**What's wrong.** `verifyHandler` (`workers/temporal-worker/src/activities/run-phase.ts:941`)
+calls `resolveVerificationCommands` (`command-support.ts:86`), which returns **every**
+discovered command whose purpose is `unit-test` or `build` (`command-support.ts:94-97`)
+with **no filtering by which packages the diff touched**. For agent-workbench,
+discovery recorded (verified in the `repository_commands` table): the root
+`unit-test = pnpm test` (which is `vitest run` = **132 test files**, incl. self-booting
+e2e like `tasks-completion-e2e.test.ts` / `run-phase-e2e.test.ts`), **plus one
+`unit-test = npm run test` per package (24 of them), plus ~24 `build` commands**. So a
+2-file, test-only change re-runs the entire monorepo *and* every package build. Two
+aggravating factors found in code:
+- `runVerificationMatrix` runs them **serially** — `for (const command of commands)`,
+  each `await`ed (`packages/verification/src/verification-runner.ts:142`) — so the
+  wall-clock is the *sum*, not the max.
+- The verify `VerificationRunContext` sets **no `timeoutMs`** (`run-phase.ts:967-983`),
+  and `runCommand` only arms a timeout `if (timeoutMs !== undefined)`
+  (`packages/execution/src/command-runner.ts:113`), so **each command runs unbounded**.
+The only ceiling is the workflow's `startToCloseTimeout: '30 minutes'`
+(`packages/workflow/src/task-workflow.ts:22`). With `maximumAttempts: 3` the activity
+burns 3 × 30 min ≈ 90 min and then the **whole workflow FAILS** (terminal) — this is
+what killed the first dogfood run (observed `STATUS_FAILED`; `phase verify started
+(attempt 1)` logged at 21:07 → 21:37 → 22:08, exactly 30 min apart; **zero**
+`phase_attempts` / `command_executions` rows persisted because verify never completed a
+single pass).
 
-**Where.** The verify-phase command resolution (repository-commands / run-phase
-verify step) + `packages/workflow/src/task-workflow.ts:22` (timeout).
+**What to do.** Scope the verify command set to the **changed packages** (the base→head
+diff already identifies them) instead of returning the whole discovered matrix; drop
+the redundant root full-suite when per-package commands cover the change; and
+**exclude the self-booting e2e/integration tests** from the verify gate (run them
+elsewhere). Independently, give verify commands a per-command `timeoutMs` so one hung
+command can't consume the whole activity budget silently.
 
-**How we'll know it's done.** A small, single-package change verifies in well under
-the timeout, running only that package's tests.
+**Where.** `command-support.ts:86-101` (`resolveVerificationCommands` — add diff-scope),
+`run-phase.ts:941-1006` (`verifyHandler` — set `timeoutMs`, pass changed-package
+filter), `verification-runner.ts:142` (serial loop). Relates to the velocity/slice
+machinery that already knows the touched files, and to TASK-106 (a scoped verify can't
+naively call the per-package `test` script).
 
-### [ ] TASK-105: `startToCloseTimeout` retries re-run the phase from scratch with no memory (attempt counter resets)
+**How we'll know it's done.** A single-package change verifies in well under the
+timeout, running only that package's tests (not the root suite, not other packages,
+not e2e), and a hung command is cut by its own `timeoutMs` rather than the 30-min
+activity kill.
 
-**What's wrong.** When a `runPhase` activity times out, Temporal retries it, but the
-workbench's own attempt counter does not advance across the retry — `semantic_events`
-showed `phase verify started (attempt 1)` **three times**, and `phase_attempts`
-recorded no outcome at all. So a phase that legitimately needs longer than the
-activity timeout (TASK-104) is indistinguishable from real no-progress, and the
-`repeated-failure-no-progress` accounting can't see it. Related to the known
-cold-restart-on-retry gap (`observability-live-proof`, TASK-32).
+### [ ] TASK-105: activity-timeout retries are invisible to the workbench — no attempt bump, no durable trace, and a slow phase is misclassified as a transient infra failure
 
-**Where.** `run-phase` activity retry handling + attempt accounting; workflow
-`startToCloseTimeout`.
+> **Re-verified against `main` @ `320b2dd` (2026-08-17).** Still an issue;
+> `startToCloseTimeout`/`maximumAttempts` and the attempt-counter flow are unchanged
+> (the +2 lines that commit added to `task-workflow.ts` were the stacked-PR
+> `baseBranch`, unrelated).
 
-**How we'll know it's done.** An activity retry either resumes or is counted as a
-distinct attempt with a recorded outcome, not a silent replay of "attempt 1".
+**What's wrong.** `attemptNumber` is bumped **in the workflow**, once per phase
+dispatch: `task-workflow.ts:215` does `attemptNumber + 1` immediately before
+`await activities.runPhase(...)` (`:217`). When that **activity** hits its
+`startToCloseTimeout`, Temporal retries the *activity* per the RetryPolicy — but the
+**workflow code does not re-execute**; the pending `await` is simply re-dispatched with
+the **same input**, so `state.attemptNumber` is frozen and `control-plane-events.ts:70`
+emits `phase … started (attempt 1)` every retry (observed: three identical "attempt 1"
+events 30 min apart). Consequences:
+- The workbench's own no-progress accounting (`failureStreak` /
+  `repeated-failure-no-progress`, `task-workflow.ts:252-258`) only counts workflow-level
+  `repair` outcomes — it **never sees** activity-timeout retries, so it can neither
+  escalate nor de-dupe them.
+- A timed-out phase persists **nothing** — no `phase_attempts` row, no
+  `command_executions`, no evidence (all written on phase completion, which never
+  happens). The run is completely opaque in the DB.
+- The RetryPolicy comment (`task-workflow.ts:6-9`) says retries are only for *transient
+  infrastructure* failures (provider timeout, GitHub blip, fs hiccup). A verify that is
+  legitimately slow because it's over-scoped (TASK-104) is **misclassified** as
+  transient, silently burns the 3-attempt budget (≈90 min), then fails the whole
+  workflow terminally.
+
+**What to do.** Distinguish "activity is genuinely making progress but slow" from
+"transient infra failure." Options: heartbeat long-running phases (so Temporal sees
+liveness and a `heartbeatTimeout` replaces the coarse `startToClose`), and/or record a
+durable phase-attempt row *at start* so timed-out attempts are counted and visible,
+and/or shorten per-command work (TASK-104) so the 30-min ceiling is never approached.
+At minimum, an activity retry should be counted as a distinct attempt with a recorded
+outcome, not a silent replay of "attempt 1".
+
+**Where.** `packages/workflow/src/task-workflow.ts:2-10` (proxyActivities retry/timeout),
+`:215-217` (attempt bump vs activity retry), `:252-258` (no-progress accounting);
+`workers/temporal-worker/src/activities/control-plane-events.ts:70` (the "attempt N"
+emit). Related to the known cold-restart-on-retry gap (`observability-live-proof`,
+TASK-32).
+
+**How we'll know it's done.** A phase that exceeds the activity budget either
+heartbeats and continues, or is recorded as a distinct, counted attempt with a
+persisted outcome — never a silent "attempt 1" replay that leaves no DB trace.
 
 ### [ ] TASK-106: Per-package `test` script (`vitest run --dir .`) finds zero tests when run from the package dir
 
-**What's wrong.** Each package's `test` script is `vitest run --dir .`, but the root
-`vitest.config.ts` `include` glob is repo-root-relative
-(`packages/**/*.test.ts`, …). Running it from inside e.g. `packages/config` matches
-nothing → `No test files found, exiting with code 1`. So a *scoped* verify (the
-TASK-104 fix) can't just shell out to the package's own `test` script as-is.
+> **Re-verified LIVE against `main` @ `320b2dd` (2026-08-17):**
+> `pnpm --filter @awb/config test` → `No test files found, exiting with code 1`.
+> Still an issue.
 
-**Where.** `vitest.config.ts` `include` globs vs the per-package `test` scripts
-(`packages/*/package.json`).
+**What's wrong.** Each package's `test` script is `vitest run --dir .`
+(`packages/*/package.json`), but the root `vitest.config.ts:5` `include` glob is
+**repo-root-relative** (`['packages/**/*.test.ts', 'apps/**/*.test.ts',
+'workers/**/*.test.ts']`) and packages have no local vitest config. Run from inside
+e.g. `packages/config`, `--dir .` re-roots resolution there, so the glob becomes
+`packages/config/packages/**/*.test.ts` → matches nothing → `No test files found,
+exiting with code 1`. So a *scoped* verify (the TASK-104 fix) can't just shell out to
+the package's own `test` script as-is — it would report a false failure.
+
+**What to do.** Make the per-package `test` script actually run that package's tests —
+either a per-package `vitest.config.ts` with a local `include`, or change the script to
+target the package's own test glob rather than `--dir .` against the root config.
+
+**Where.** `vitest.config.ts:5` (root `include` globs) vs the per-package `test`
+scripts (`packages/*/package.json`).
 
 **How we'll know it's done.** `pnpm --filter @awb/config test` runs that package's
 tests and passes.
