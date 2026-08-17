@@ -25,6 +25,7 @@ let attemptRetries: Counter | undefined;
 let transportDrops: Counter | undefined;
 let phaseDuration: Histogram | undefined;
 let phaseStarts: Counter | undefined;
+let repairFindings: Counter | undefined;
 
 function meter() {
   return metrics.getMeter(METER_NAME);
@@ -69,4 +70,17 @@ export function recordPhaseDuration(durationMs: number, attrs: MetricAttributes)
     unit: 'ms',
   });
   phaseDuration.record(durationMs, clean(attrs));
+}
+
+/**
+ * A finding a code-fixable gate raised to re-prompt the next builder attempt (challenge review or
+ * exercise/QA). Counts how often the loop bounces back to implement WITH actionable feedback —
+ * distinct from `awb.phase.failed` (a thrown phase) and from a human gate; a rising rate flags a
+ * runtime whose builder repeatedly needs correction. Attrs carry {phase, category, severity}.
+ */
+export function recordRepairFinding(attrs: MetricAttributes): void {
+  repairFindings ??= meter().createCounter('awb.repair.findings', {
+    description: 'Findings raised to re-prompt the builder on a code-fixable repair',
+  });
+  repairFindings.add(1, clean(attrs));
 }

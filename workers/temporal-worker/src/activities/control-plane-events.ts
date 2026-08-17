@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { TaskPhase, SemanticEvent, EventType } from '@awb/domain';
+import type { TaskPhase, SemanticEvent, EventType, Finding } from '@awb/domain';
 import { runIdForTask } from '@awb/database';
 import {
   recordPhaseStarted,
@@ -7,6 +7,7 @@ import {
   recordAttemptRetryScheduled,
   recordTransportDrop,
   recordPhaseDuration,
+  recordRepairFinding,
 } from '@awb/telemetry';
 import type { DaemonClient } from '../daemon-client.js';
 
@@ -32,6 +33,13 @@ export interface ControlPlaneEmitter {
   sessionStarted(fields: { role: string; cwd: string; resumeKey?: string }): Promise<void>;
   sessionResumed(fields: { role: string; cwd: string; resumeKey: string }): Promise<void>;
   phaseDuration(durationMs: number, outcome: string): void;
+  /**
+   * A code-fixable gate raised these findings to re-prompt the next builder attempt (challenge
+   * review or exercise/QA). Emits one `finding-created` event per finding + an `awb.repair.findings`
+   * metric, making the repair loop-back visible in the durable stream/dashboard and cross-run
+   * metrics instead of an undifferentiated implement re-attempt. Best-effort.
+   */
+  repairFindingsRaised(findings: Finding[]): Promise<void>;
 }
 
 export function createControlPlaneEmitter(input: ControlPlaneEmitterInput): ControlPlaneEmitter {
@@ -116,6 +124,24 @@ export function createControlPlaneEmitter(input: ControlPlaneEmitterInput): Cont
         recordPhaseDuration(durationMs, { ...metricAttrs, outcome });
       } catch {
         /* telemetry is best-effort */
+      }
+    },
+    async repairFindingsRaised(findings) {
+      for (const f of findings) {
+        try {
+          recordRepairFinding({ ...metricAttrs, category: f.category, severity: f.severity });
+        } catch {
+          /* telemetry is best-effort */
+        }
+        const where = f.path ? ` (${f.path}${f.line !== undefined ? `:${f.line}` : ''})` : '';
+        await post('finding-created', `[repair] ${f.category}/${f.severity}: ${f.description}${where}`, {
+          findingId: f.id,
+          category: f.category,
+          severity: f.severity,
+          path: f.path,
+          line: f.line,
+          claimIds: f.claimIds,
+        });
       }
     },
   };

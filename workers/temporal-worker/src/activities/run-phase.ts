@@ -1272,7 +1272,7 @@ const exerciseHandler: PhaseHandler = {
       // implement attempt re-prompts the builder with what failed rather than re-running blind.
       onBlocked: (missing) => {
         if (classifyExerciseBlock(exercise) === 'code-fixable') {
-          runState.repairFindings = missing.map((reason) => ({
+          const findings: Finding[] = missing.map((reason) => ({
             id: randomUUID(),
             taskId: state.taskId,
             candidateSha: resolveCandidateSha(runState),
@@ -1282,6 +1282,9 @@ const exerciseHandler: PhaseHandler = {
             description: reason,
             status: 'open',
           }));
+          runState.repairFindings = findings;
+          // Best-effort: make the repair loop-back visible in the durable stream + metrics.
+          void ctx.controlPlane?.repairFindingsRaised(findings);
         }
         return mapExerciseBlock(exercise, missing, state.taskId);
       },
@@ -1499,6 +1502,8 @@ const challengeHandler: PhaseHandler = {
         // Carry the open review findings onto run state so the phase they route to re-prompts its
         // agent with the original findings (description, path/line, remediation) instead of blind.
         runState.repairFindings = open;
+        // Best-effort: surface the review-driven repair in the durable stream + metrics.
+        void ctx.controlPlane?.repairFindingsRaised(open);
         const category = open.some((f) => f.category === 'requirements')
           ? 'requirements'
           : open.some((f) => f.category === 'architecture')

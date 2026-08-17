@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SemanticEvent } from '@awb/domain';
+import type { Finding, SemanticEvent } from '@awb/domain';
 import { createControlPlaneEmitter } from './control-plane-events.js';
 import type { DaemonClient } from '../daemon-client.js';
 
@@ -80,5 +80,39 @@ describe('control-plane events (TASK-34)', () => {
     // Should not throw even though there is no daemon to post to.
     await emitter.phaseStarted({ cwd: '/tmp/worktree' });
     await emitter.phaseFailed({ errorClass: 'x', message: 'y', resumable: false, retryScheduled: false });
+  });
+
+  it('emits one finding-created event per repair finding, with category/severity/location', async () => {
+    const { daemon, posted } = capturingDaemon();
+    const emitter = createControlPlaneEmitter({ taskId: 'task-1', phase: 'exercise', attemptNumber: 1, daemon });
+    const findings: Finding[] = [
+      {
+        id: 'f-1',
+        taskId: 'task-1',
+        severity: 'high',
+        category: 'requirements',
+        claimIds: ['claim-1'],
+        path: 'src/rank.ts',
+        line: 42,
+        description: 'higher rank does not beat lower',
+        status: 'open',
+      },
+      { id: 'f-2', taskId: 'task-1', severity: 'blocker', category: 'correctness', claimIds: [], description: 'crash on empty', status: 'open' },
+    ];
+
+    await emitter.repairFindingsRaised(findings);
+
+    expect(posted.map((e) => e.type)).toEqual(['finding-created', 'finding-created']);
+    expect(posted[0]?.summary).toBe('[repair] requirements/high: higher rank does not beat lower (src/rank.ts:42)');
+    expect((posted[0]?.payloadJson as { findingId?: string }).findingId).toBe('f-1');
+    // A finding with no path renders no location suffix.
+    expect(posted[1]?.summary).toBe('[repair] correctness/blocker: crash on empty');
+  });
+
+  it('repairFindingsRaised is a no-op with no daemon (does not throw)', async () => {
+    const emitter = createControlPlaneEmitter({ taskId: 'task-1', phase: 'exercise', attemptNumber: 1 });
+    await emitter.repairFindingsRaised([
+      { id: 'f', taskId: 'task-1', severity: 'high', category: 'requirements', claimIds: [], description: 'x', status: 'open' },
+    ]);
   });
 });
