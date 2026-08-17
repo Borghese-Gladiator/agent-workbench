@@ -172,22 +172,17 @@ describe('describeRuntimeShape', () => {
     const shape = describeRuntimeShape({
       AWB_AGENT_RUNTIME: 'claude',
       AWB_QA_MODE: 'browser',
-      AWB_SLICE_DIFF_CAP: '0',
-      AWB_SLICE_DIFF_LINE_CAP: '400',
-      AWB_SLICE_DIFF_FILE_CAP: '12',
     } as NodeJS.ProcessEnv);
     expect(shape).toEqual({
       agentRuntime: 'claude',
       qaMode: 'browser',
-      sliceDiffCap: { disabled: true, lineCap: 400, fileCap: 12 },
     });
   });
 
-  it('degrades an unset runtime to mock with qa off and no caps', () => {
+  it('degrades an unset runtime to mock with qa off', () => {
     const shape = describeRuntimeShape({} as NodeJS.ProcessEnv);
     expect(shape.agentRuntime).toBe('mock');
     expect(shape.qaMode).toBeNull();
-    expect(shape.sliceDiffCap).toEqual({ disabled: false, lineCap: null, fileCap: null });
   });
 
   it('degrades a typo/unknown runtime to mock (matches what the stack actually runs)', () => {

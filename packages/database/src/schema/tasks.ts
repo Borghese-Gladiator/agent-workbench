@@ -1,5 +1,5 @@
 import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
-import type { TaskPhase, RunCondition, DeliveryState, TaskSize } from '@awb/domain';
+import type { TaskPhase, RunCondition, DeliveryState, ScheduleState, TaskSize } from '@awb/domain';
 import { repositories } from './repository.js';
 
 export const tasks = sqliteTable('tasks', {
@@ -13,6 +13,11 @@ export const tasks = sqliteTable('tasks', {
   deliveryState: text('delivery_state').notNull().$type<DeliveryState>(),
   /** Task size class; nullable until the specify classifier sets it. */
   size: text('size').$type<TaskSize>(),
+  /** Stacked-PR edge (TASK-72): parent task + base branch override; both null for a root task. */
+  parentTaskId: text('parent_task_id'),
+  baseBranch: text('base_branch'),
+  /** Scheduler-owned DAG state; defaults to 'ready' (directly-created task). */
+  scheduleState: text('schedule_state').notNull().$type<ScheduleState>().default('ready'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });

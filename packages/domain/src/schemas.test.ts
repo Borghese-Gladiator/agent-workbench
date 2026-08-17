@@ -7,6 +7,7 @@ import {
   TaskContractSchema,
   AcceptanceClaimSchema,
   ImplementationPlanSchema,
+  TaskSchema,
   WorkspaceLeaseSchema,
   EvidenceSchema,
   FindingSchema,
@@ -128,6 +129,25 @@ describe('domain schemas', () => {
       status: 'draft',
     });
     expect(plan.status).toBe('draft');
+  });
+
+  it.each([
+    ['root task without stacking fields', {}],
+    ['stacked task', { parentTaskId: 'task-0', baseBranch: 'awb/task-0-slug' }],
+  ])('parses a Task (%s)', (_label, extra) => {
+    const task = TaskSchema.parse({
+      id: 'task-1',
+      repositoryId: 'repo-1',
+      prompt: 'do the thing',
+      phase: 'specify',
+      condition: 'running',
+      deliveryState: 'not-started',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...extra,
+    });
+    expect(task.parentTaskId).toBe((extra as { parentTaskId?: string }).parentTaskId);
+    expect(task.baseBranch).toBe((extra as { baseBranch?: string }).baseBranch);
   });
 
   it('parses a WorkspaceLease', () => {

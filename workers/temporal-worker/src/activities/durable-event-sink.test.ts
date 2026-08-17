@@ -18,6 +18,7 @@ function collectingClient(events: SemanticEvent[], opts: { throwOnPost?: boolean
     async refreshRepository() {
       return { snapshotId: 'snap-test' };
     },
+    async notifyReleased() {},
     async persistStartCommand() {},
   };
 }

@@ -16,6 +16,7 @@ function capturingDaemon(): { daemon: DaemonClient; posted: SemanticEvent[] } {
     async refreshRepository() {
       return { snapshotId: 'snap' };
     },
+    async notifyReleased() {},
     async persistStartCommand() {},
   };
   return { daemon, posted };

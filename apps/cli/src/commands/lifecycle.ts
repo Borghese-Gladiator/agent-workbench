@@ -63,10 +63,6 @@ async function ensureRuntime(opts: { verbose?: boolean } = {}): Promise<{
 /** One-line human summary of the active runtime env (TASK-70). */
 function formatRuntimeConfig(cfg: RuntimeConfigHealth): string {
   const parts = [`runtime=${cfg.agentRuntime}`, `qa=${cfg.qaMode ?? 'off'}`];
-  if (cfg.sliceDiffCap.disabled) parts.push('slice-cap=off');
-  else if (cfg.sliceDiffCap.lineCap || cfg.sliceDiffCap.fileCap) {
-    parts.push(`slice-cap=${cfg.sliceDiffCap.lineCap ?? 'default'}L/${cfg.sliceDiffCap.fileCap ?? 'default'}F`);
-  }
   return parts.join(' ');
 }
 

@@ -65,4 +65,32 @@ describe('materializeWorktree (Stage 1 real worktree)', () => {
     await teardownWorktree({ repositoryId: repository.id, lease, preserve: false });
     expect(existsSync(lease.worktreePath)).toBe(false);
   });
+
+  it('branches from baseOverride (stacked PRs) instead of the repository default branch', async () => {
+    // A "parent" branch that diverges from main by one commit — the child must start from its tip.
+    await execFileAsync('git', ['checkout', '-q', '-b', 'awb/parent'], { cwd: repoDir });
+    await writeFile(join(repoDir, 'parent.txt'), 'from parent\n');
+    await execFileAsync('git', ['add', '-A'], { cwd: repoDir });
+    await execFileAsync('git', ['commit', '-q', '-m', 'parent work'], { cwd: repoDir });
+    const { stdout: parentSha } = await execFileAsync('git', ['rev-parse', 'awb/parent'], { cwd: repoDir });
+    await execFileAsync('git', ['checkout', '-q', 'main'], { cwd: repoDir });
+
+    const { layout } = initDataDir();
+    const database = createDatabase(layout.workbenchSqlite);
+    const repository = await registerRepository(database.db, { canonicalPath: repoDir });
+    database.close();
+
+    const lease = await materializeWorktree({
+      repositoryId: repository.id,
+      taskId: 'task-child',
+      baseOverride: 'awb/parent',
+    });
+
+    // The child worktree is rooted at the parent branch's tip and contains its file.
+    expect(lease.baseRef).toBe('awb/parent');
+    expect(lease.baseSha).toBe(parentSha.trim());
+    expect(existsSync(join(lease.worktreePath, 'parent.txt'))).toBe(true);
+
+    await teardownWorktree({ repositoryId: repository.id, lease, preserve: false });
+  });
 });

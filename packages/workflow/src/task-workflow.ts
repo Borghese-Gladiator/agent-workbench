@@ -95,6 +95,8 @@ function initialState(input: TaskWorkflowInput): TaskWorkflowState {
     // An intake size hint (CLI --size) seeds the classifier's prior; the classifier/gate can still
     // change it. phaseSet stays undefined until specify completes and derives it.
     size: input.size,
+    // Stacked-PR base override (TASK-72); prepare/release read it off the coordination state.
+    baseBranch: input.baseBranch,
   };
 }
 

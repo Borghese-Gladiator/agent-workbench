@@ -56,6 +56,9 @@ export interface DaemonClient {
   postObservability(payload: PhaseObservability): Promise<void>;
   /** Trigger repository discovery through the daemon (single writer) and return the snapshot id. */
   refreshRepository(repositoryId: string): Promise<{ snapshotId: string }>;
+  /** Task DAG orchestration: notify the daemon that this task released its draft PR, so the
+   *  scheduler starts any blocked children stacked on it. Best-effort — never fail the phase on it. */
+  notifyReleased(taskId: string): Promise<void>;
   /**
    * Persist a `start` command inferred over a task worktree and proven to boot, so a later exercise
    * run reuses it (Tier-1) instead of re-inferring. Write funnels through the daemon (single writer).
@@ -92,6 +95,9 @@ export function createDaemonClient(): DaemonClient {
         {},
       );
       return { snapshotId: snapshot.snapshotId };
+    },
+    async notifyReleased(taskId) {
+      await postOrPut('POST', `/internal/task-released/${encodeURIComponent(taskId)}`, {});
     },
     async persistStartCommand(input) {
       const { repositoryId, ...body } = input;

@@ -37,7 +37,7 @@ describe('daemon /api/status', () => {
       testEnv = undefined;
     }
     delete process.env.AWB_DATA_DIR;
-    for (const k of ['AWB_AGENT_RUNTIME', 'AWB_QA_MODE', 'AWB_SLICE_DIFF_CAP', 'AWB_SLICE_DIFF_LINE_CAP', 'AWB_SLICE_DIFF_FILE_CAP']) {
+    for (const k of ['AWB_AGENT_RUNTIME', 'AWB_QA_MODE']) {
       delete process.env[k];
     }
   });
@@ -46,18 +46,15 @@ describe('daemon /api/status', () => {
     it('reports the runtime env the stack booted with', () => {
       process.env.AWB_AGENT_RUNTIME = 'claude';
       process.env.AWB_QA_MODE = 'browser';
-      process.env.AWB_SLICE_DIFF_CAP = '0';
       const cfg = describeRuntimeConfig();
       expect(cfg.agentRuntime).toBe('claude');
       expect(cfg.qaMode).toBe('browser');
-      expect(cfg.sliceDiffCap.disabled).toBe(true);
     });
 
     it('degrades an unset/unknown runtime to mock and reports qa off', () => {
       const cfg = describeRuntimeConfig();
       expect(cfg.agentRuntime).toBe('mock');
       expect(cfg.qaMode).toBeNull();
-      expect(cfg.sliceDiffCap.disabled).toBe(false);
 
       process.env.AWB_AGENT_RUNTIME = 'not-a-runtime';
       expect(describeRuntimeConfig().agentRuntime).toBe('mock');

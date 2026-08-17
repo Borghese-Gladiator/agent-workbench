@@ -76,11 +76,6 @@ export function resolveRuntimeConfig(): RuntimeConfig {
 export interface RuntimeShapeConfig {
   agentRuntime: string;
   qaMode: string | null;
-  sliceDiffCap: {
-    disabled: boolean;
-    lineCap: number | null;
-    fileCap: number | null;
-  };
 }
 
 export const KNOWN_AGENT_RUNTIMES = ['claude', 'codex', 'pi', 'opencode', 'mock'] as const;
@@ -96,16 +91,9 @@ export function describeRuntimeShape(env: NodeJS.ProcessEnv = process.env): Runt
   const rawRuntime = env.AWB_AGENT_RUNTIME?.trim();
   const known = new Set<string>(KNOWN_AGENT_RUNTIMES);
   const agentRuntime = rawRuntime && known.has(rawRuntime) ? rawRuntime : 'mock';
-  const lineRaw = env.AWB_SLICE_DIFF_LINE_CAP;
-  const fileRaw = env.AWB_SLICE_DIFF_FILE_CAP;
   return {
     agentRuntime,
     qaMode: env.AWB_QA_MODE ?? null,
-    sliceDiffCap: {
-      disabled: env.AWB_SLICE_DIFF_CAP === '0',
-      lineCap: lineRaw ? Number.parseInt(lineRaw, 10) : null,
-      fileCap: fileRaw ? Number.parseInt(fileRaw, 10) : null,
-    },
   };
 }
 

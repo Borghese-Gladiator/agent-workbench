@@ -17,6 +17,7 @@ import type { RunStateSnapshot, SemanticEvent } from '@awb/domain';
 import { getRepositoryCommands } from '@awb/repository';
 import { registerInternalRoutes } from './internal.js';
 import { SemanticEventBus } from '../event-bus.js';
+import { TaskScheduler } from '../scheduler.js';
 
 const REPO_ID = 'repo-1';
 const TASK_ID = 'task-1';
@@ -50,7 +51,8 @@ describe('internal worker→daemon routes', () => {
     seedRepo(database);
     eventBus = new SemanticEventBus();
     app = Fastify({ logger: false });
-    registerInternalRoutes(app, database, eventBus);
+    const scheduler = new TaskScheduler({ database, startTask: async () => {}, hasReleased: async () => false });
+    registerInternalRoutes(app, database, eventBus, scheduler);
     await app.ready();
   });
 

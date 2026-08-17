@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { Octokit } from '@octokit/rest';
-import { getRemotes } from '@awb/repository';
+import { getRemotes, getDefaultBranch } from '@awb/repository';
 import {
   createRealGitHubClient,
   createReleaseAssetUploader,
@@ -31,6 +31,40 @@ export async function resolveRepoRef(worktreePath: string): Promise<RepoRef | un
   const origin = remotes.find((r) => r.name === 'origin') ?? remotes[0];
   if (!origin) return undefined;
   return parseGitHubRemote(origin.fetchUrl || origin.pushUrl);
+}
+
+/**
+ * Resolves the repository root (main checkout) that owns a linked worktree, so a local merge can
+ * check out and merge into the default branch there. `--git-common-dir` points at the shared
+ * `<repo>/.git`; its parent is the repo root. Falls back to the worktree itself if the repo is not
+ * a linked worktree (the common dir already sits at the worktree root).
+ */
+export async function resolveRepositoryRoot(worktreePath: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+    cwd: worktreePath,
+  });
+  const commonDir = stdout.trim();
+  return commonDir.endsWith('/.git') ? commonDir.slice(0, -'/.git'.length) : worktreePath;
+}
+
+/**
+ * Decides where a finished branch should land. When the worktree has a GitHub-parseable `origin`,
+ * delivery opens a real draft PR (`kind: 'github'`). When there is NO such remote, delivery falls
+ * back to a local merge into the repo's default branch (`kind: 'local-merge'`) — the no-remote
+ * mirror of `close-worktree`'s cleanup path, so a done change still lands instead of stranding.
+ */
+export async function resolveDeliveryTarget(
+  worktreePath: string,
+): Promise<{ kind: 'github'; ref: RepoRef } | { kind: 'local-merge'; defaultBranch: string }> {
+  const ref = await resolveRepoRef(worktreePath);
+  if (ref) return { kind: 'github', ref };
+  // Resolve the default branch from the REPOSITORY ROOT, never the worktree: a linked worktree's
+  // `git branch --show-current` returns the FEATURE branch, which would make local-merge try to
+  // check out (and merge into) the very branch it's delivering — a branch already checked out in
+  // the worktree, which git refuses. The root's current branch is the real default (main/master).
+  const repositoryRoot = await resolveRepositoryRoot(worktreePath);
+  const defaultBranch = await getDefaultBranch(repositoryRoot);
+  return { kind: 'local-merge', defaultBranch };
 }
 
 /** The token the real GitHub client authenticates with, taken from the ambient `gh` CLI login. */

@@ -36,6 +36,16 @@ export const DeliveryStateSchema = z.enum([
 ]);
 export type DeliveryState = z.infer<typeof DeliveryStateSchema>;
 
+/**
+ * Scheduler-owned lifecycle axis (task DAG orchestration), distinct from `deliveryState` (which is
+ * workflow-owned and, on the persisted task row, frozen at creation). The daemon scheduler writes
+ * this authoritatively: `blocked` = row created but its workflow NOT started, waiting on the
+ * parent task to release its draft PR; `ready` = eligible / a root node; `started` = the workflow
+ * has been started (never re-start).
+ */
+export const ScheduleStateSchema = z.enum(['blocked', 'ready', 'started']);
+export type ScheduleState = z.infer<typeof ScheduleStateSchema>;
+
 export const CompletionCandidateSchema = z.object({
   phase: TaskPhaseSchema,
   phaseAttemptId: z.string(),
@@ -71,7 +81,6 @@ export const HumanGateReasonSchema = z.enum([
   'qa-inconclusive',
   'reviewer-product-decision',
   'waiver-request',
-  'slice-diff-exceeds-cap',
 ]);
 export type HumanGateReason = z.infer<typeof HumanGateReasonSchema>;
 

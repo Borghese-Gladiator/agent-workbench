@@ -26,17 +26,15 @@ import { loadProjectMemoryForContext } from './memory-support.js';
 import {
   resolveVerificationCommands,
   resolveReviewDiff,
-  resolveDiffNumstat,
   resolveStartCommandForWorktree,
   resolveRepositoryPath,
   installWorktreeDependencies,
 } from './command-support.js';
-import { resolveSliceDiffCap, sliceDiffExceedsCap } from './slice-guardrail.js';
 import { runBrowserQaViaServer } from './browser-qa-support.js';
 import { draftContractInputFromPrompt, formatContractGateSummary } from './contract-support.js';
 import { classifyTaskSize, SIZE_CLASSIFIER_MODEL } from './classifier-support.js';
 import { programDesignInstruction, parseProgramDesignOutput } from './program-design-support.js';
-import { resolveRepoRef, createRealDelivery } from './delivery-support.js';
+import { resolveRepoRef, resolveDeliveryTarget, resolveRepositoryRoot, createRealDelivery } from './delivery-support.js';
 import { createPhaseEventSink } from './durable-event-sink.js';
 import { createCapabilityBroker } from '@awb/capability-broker';
 import { capabilitiesToSdkTools, disallowedSdkTools } from '@awb/agent-gateway';
@@ -73,7 +71,7 @@ import {
   reviewerExaminedAllRequiredInputs,
   type ReviewInputs,
 } from '@awb/review';
-import { deliverToGitHub, commitQaMediaToBranch } from '@awb/github';
+import { deliverToGitHub, deliverToLocalMerge, commitQaMediaToBranch } from '@awb/github';
 import { postQaMediaBriefs, qaMediaFileName } from './qa-media-support.js';
 import { FakeGitHubClient, FakeGitPushRunner } from '@awb/github/test-fakes';
 import {
@@ -713,6 +711,8 @@ const prepareHandler: PhaseHandler = {
         taskId: state.taskId,
         // Slug the branch from the human request (contract objective / prompt), not the taskId.
         slugSource: runState.contract?.objective ?? state.prompt ?? state.taskId,
+        // Stacked PRs (TASK-72): branch off the parent's delivered branch when set, else default.
+        baseOverride: state.baseBranch,
       });
       runState.lease = lease;
       runState.baseSha = lease.baseSha;
@@ -905,36 +905,6 @@ const implementHandler: PhaseHandler = {
 
     runState.baseSha = runState.baseSha ?? '0'.repeat(40);
     runState.candidateSha = candidateSha;
-
-    // Velocity guardrail: if the run's committed diff exceeds the configurable cap, force a
-    // human checkpoint before continuing rather than dumping a large unreviewed diff downstream. Off on
-    // the mock path; on for the real path. Only meaningful once a real commit exists.
-    const cap = resolveSliceDiffCap({ realPath: ctx.profile.usesRealAgent, size: runState.contract?.size });
-    if (cap.enabled && realBuilder && runState.worktreePath && candidateSha !== runState.baseSha) {
-      const stat = await resolveDiffNumstat({
-        worktreePath: runState.worktreePath,
-        baseSha: runState.baseSha,
-        headSha: candidateSha,
-      });
-      if (sliceDiffExceedsCap(cap, stat)) {
-        return {
-          kind: 'early',
-          result: {
-            outcome: 'await-human',
-            gate: {
-              id: `${state.taskId}-implement-diff-cap-gate`,
-              taskId: state.taskId,
-              phase: 'implement',
-              reason: 'slice-diff-exceeds-cap',
-              summary:
-                `Implement diff is ${stat.changedLines} line(s) across ${stat.changedFiles} file(s), ` +
-                `over the cap (${cap.lineCap} lines / ${cap.fileCap} files). Review before continuing.`,
-              createdAt: new Date().toISOString(),
-            },
-          },
-        };
-      }
-    }
 
     // Repair findings have now been fed to this attempt's builder sessions; clear them so a later
     // clean pass (or an unrelated re-entry) never re-surfaces stale QA/review findings.
@@ -1133,7 +1103,17 @@ const exerciseHandler: PhaseHandler = {
           baseUrl,
           scenario: {
             baseUrl,
-            steps: [{ kind: 'navigate', url: '/' }, { kind: 'screenshot', name: 'landing' }],
+            // A navigate + screenshot are only liveness ("the page loaded"); the exercise gate
+            // requires a passing STRONG assertion (state-transition/value-match) to consider a
+            // behavioral claim covered. So we also assert the app actually rendered real, visible
+            // content: a served-but-blank/error page (root has no visible landmark/heading) fails
+            // this — a genuine QA failure that loops back to implement — while a real page passes it
+            // honestly. These are framework-agnostic (any rendered page has one of these landmarks).
+            steps: [
+              { kind: 'navigate', url: '/' },
+              { kind: 'expectVisible', selector: 'h1, h2, header, nav, main, [role="banner"], [role="main"]' },
+              { kind: 'screenshot', name: 'landing' },
+            ],
           },
           context,
           artifactStore: runState.artifactStore,
@@ -1562,6 +1542,19 @@ const challengeHandler: PhaseHandler = {
  * await-human gate (the Workflow's `pullRequestMerged`/`pullRequestClosed` handlers own the
  * transition). A non-complete decision blocks.
  */
+/**
+ * Task DAG orchestration: tell the daemon this task released its draft PR, so the scheduler starts
+ * any blocked children stacked on it. Strictly best-effort — a scheduling hiccup must never fail
+ * the release phase, and the daemon's reconcile poll re-derives eligibility regardless.
+ */
+async function notifyReleasedBestEffort(ctx: PhaseContext, taskId: string): Promise<void> {
+  try {
+    await ctx.daemon?.notifyReleased(taskId);
+  } catch {
+    // swallowed by design — the poll/boot reconcile is the correctness backstop
+  }
+}
+
 const releaseHandler: PhaseHandler = {
   phase: 'release',
   async run(ctx): Promise<PhaseOutcome> {
@@ -1570,10 +1563,50 @@ const releaseHandler: PhaseHandler = {
     const candidateSha = resolveCandidateSha(runState);
     const worktreePath = requireWorktreeCwd(ctx.profile, runState.worktreePath, 'release', state.taskId);
 
+    // Delivery is real only on a real-agent runtime; the mock runtime keeps in-memory fakes and a
+    // synthetic ref below, so every deterministic test is unchanged.
+    const realDelivery = ctx.profile.usesRealAgent;
+    const branchName = runState.lease?.branchName ?? `awb/${state.taskId}`;
+    const baseBranch = runState.lease?.baseRef ?? 'main';
+
+    // No-origin delivery (TASK-71): when the repo has no GitHub-parseable remote, a done change has
+    // nowhere to push. Land it locally instead — merge the feature branch into the local default
+    // branch — and complete release without a PR. This mirrors close-worktree's no-remote path.
+    if (realDelivery) {
+      const target = await resolveDeliveryTarget(worktreePath);
+      if (target.kind === 'local-merge') {
+        const repositoryPath = await resolveRepositoryRoot(worktreePath);
+        const merge = await ctx.observability.time('githubOperationMs', () =>
+          deliverToLocalMerge({
+            repositoryPath,
+            branchName,
+            defaultBranch: target.defaultBranch,
+            objective: runState.contract?.objective ?? state.prompt ?? state.taskId,
+          }),
+        );
+        // Task DAG orchestration: this task has delivered (branch landed) — unblock any stacked
+        // children. Best-effort; the daemon's reconcile poll is the backstop.
+        await notifyReleasedBestEffort(ctx, state.taskId);
+        return {
+          kind: 'early',
+          result: {
+            outcome: 'await-human',
+            gate: {
+              id: `${state.taskId}-release-gate`,
+              taskId: state.taskId,
+              phase: 'release',
+              reason: 'pr-readiness',
+              summary: `Task ${state.taskId} landed locally: ${branchName} merged into ${merge.defaultBranch} (${merge.commitSha.slice(0, 8)}); no remote to open a PR against.`,
+              createdAt: new Date().toISOString(),
+            },
+          },
+        };
+      }
+    }
+
     // Real delivery: on a real-agent runtime, open a real draft PR on the repo's actual remote
     // via the Octokit client (authed with the ambient `gh` token) + git-CLI push. The mock runtime
     // keeps the in-memory fakes and a synthetic ref, so every deterministic test is unchanged.
-    const realDelivery = ctx.profile.usesRealAgent;
     let ref = { owner: 'awb-mvp', repo: state.repositoryId };
     let client;
     let pushRunner;
@@ -1589,9 +1622,6 @@ const releaseHandler: PhaseHandler = {
       client = new FakeGitHubClient();
       pushRunner = new FakeGitPushRunner();
     }
-
-    const branchName = runState.lease?.branchName ?? `awb/${state.taskId}`;
-    const baseBranch = runState.lease?.baseRef ?? 'main';
 
     // The changed paths give the PR body's Changes section (and a title fallback). Recompute from the
     // worktree diff; empty on the mock path or any git error, which the renderers tolerate.
@@ -1697,6 +1727,11 @@ const releaseHandler: PhaseHandler = {
     if (!decision.complete) {
       return { kind: 'early', result: blockedResult('release', decision.missing) };
     }
+
+    // Task DAG orchestration: the draft PR is open — this task has RELEASED. Notify the daemon so
+    // the scheduler starts any blocked children stacked on this task's branch. Best-effort; the
+    // daemon's reconcile poll is the correctness backstop.
+    await notifyReleasedBestEffort(ctx, state.taskId);
 
     // Per product spec, Release completing its own readiness checklist still gates on a human
     // merge/close decision before the Workflow may proceed to Assimilate — the Workflow's

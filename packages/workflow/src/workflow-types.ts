@@ -38,6 +38,12 @@ export interface TaskWorkflowState {
    * result must NOT overwrite a human override, so this pins the size against the classifier.
    */
   sizeHumanOverridden?: boolean;
+  /**
+   * Base branch override (TASK-72 stacked PRs): the branch the worktree/branch is created from and
+   * the PR opens against, when it must not be the repository default branch (e.g. a parent task's
+   * delivered branch). Undefined for a root task, which uses the repository default branch.
+   */
+  baseBranch?: string;
 }
 
 export interface TaskWorkflowInput {
@@ -46,6 +52,8 @@ export interface TaskWorkflowInput {
   prompt?: string;
   /** Optional intake size hint (e.g. CLI `--size`); the specify classifier uses it as a prior/override. */
   size?: TaskSize;
+  /** Base branch override for stacked PRs (TASK-72); threaded into worktree + PR creation. */
+  baseBranch?: string;
   /**
    * Present only on a continue-as-new re-seed: the full coordination state carried over
    * from the previous run so the new execution resumes exactly where the old one left off, with a

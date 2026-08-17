@@ -120,7 +120,7 @@ re-measured."
 The two ways a finished change fails to *land*: no origin to open a PR against,
 and no way to stack one task's branch on the previous task's branch.
 
-### [ ] TASK-71: No `origin` → task can't deliver; should branch + merge to local `master` instead
+### [x] TASK-71: No `origin` → task can't deliver; should branch + merge to local `master` instead
 
 **What's wrong.** When a repo has no `origin` remote, a task that is fully
 implemented and verified has nowhere to go. The delivery/PR-readiness path assumes
@@ -159,7 +159,7 @@ produces a feature branch merged into local `master` with a new commit, and does
 NOT attempt a push. *Manual:* drive a small task on a local-only repo end to end and
 confirm the change lands as a commit on local `master` with no remote configured.
 
-### [ ] TASK-72: Stacked-PR DAG — tasks whose branches stack on one another with distinct bases
+### [x] TASK-72: Stacked-PR DAG — tasks whose branches stack on one another with distinct bases
 
 **What's wrong.** There is no first-class way to build a *chain* of stacked PRs,
 where each task's branch is based on the previous task's delivered branch (not
