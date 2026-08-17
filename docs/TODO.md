@@ -206,6 +206,47 @@ branch to the parent's delivered branch, and PR-creation is called with that bas
 *Manual:* drive a 3-task stacked chain and confirm via `gh` that each PR's base =
 the previous PR's branch (PR#0 base=`master`), with no manual `defaultBranch` edits.
 
+### [ ] TASK-102: Task DAG supports fan-out but NOT fan-in — a scheduling-only edge for "wait for A AND B"
+
+**What's wrong.** The shipped stacked-PR DAG (`schedule_state` + `parent_task_id` +
+`TaskScheduler`, merged in #23) is a **forest of stacking chains**, not a general DAG.
+The single edge means *two things at once*: (1) scheduling — "don't start until the
+parent releases its draft PR", and (2) stacking — "base your git branch on the parent's
+delivered branch". Because a git branch can be based on exactly ONE ref, a node can have
+at most one parent (`parent_task_id` is a scalar column, and `validateTaskDag`
+deliberately rejects fan-in). So **fan-out works** (many children share one
+`parent_task_id`; `onParentReleased` starts them all in parallel), but **fan-in is
+impossible** (a task cannot wait on — or stack on — two parents). Today the
+`decompose-into-dag` skill works around this by *linearizing*: pick a primary parent to
+stack on and order the other predecessor before it.
+
+**What to do.** Add a **scheduling-only** dependency edge, distinct from the stacking
+edge, so a task can wait for *multiple* predecessors to complete without stacking its
+branch on any of them (each such node's PR base stays the repo default branch — this is
+the archived "V4 DAG" model: edges = run-order only, independent branches). Concretely:
+a `task_dependencies` edge table (edges-as-rows → arbitrary DAG: chains, fan-out,
+fan-in, diamonds), a scheduler eligibility rule of "start when EVERY predecessor has
+released" (vs. the current single-parent check), and a way to declare per-edge whether
+it is `stack` (base on parent, ≤1) or `after` (wait only, N). Keep the stacking edge as
+the special case it is. Reuse the existing `TaskScheduler.reconcile` / `listBlockedTasks`
+loop and the topo-sort/validation in `validateTaskDag` (extend it to allow multiple
+`after` parents while still forbidding multiple `stack` parents).
+
+**Where.** `packages/domain/src/task-dag.ts` (`validateTaskDag`, `TaskDagNode.dependsOn`
+is currently a single key), `packages/database` (new `task_dependencies` edge table +
+migration; `parent_task_id` stays as the stacking edge), `apps/daemon/src/scheduler.ts`
+(`isEligible` → "all predecessors released", `onParentReleased` → fan-in reconcile),
+`apps/daemon/src/routes/tasks.ts` (`POST /api/task-dags` accepts per-edge mode), and the
+`decompose-into-dag` skill (stop force-linearizing genuine fan-in). Relates to the
+archived `agentic-development-task-system-v4__ai` QueueService (scheduling-DAG prior art)
+and TASK-72.
+
+**How we'll know it's done.** *Unit:* `validateTaskDag` accepts a diamond (D depends on
+B and C, both depend on A) with `after` edges and rejects two `stack` parents; the
+scheduler starts D only after BOTH B and C release. *Manual:* declare a fan-in DAG and
+confirm the join node starts exactly once, after all its predecessors delivered, with its
+PR base = the default branch (not stacked).
+
 
 ## Group J — QA without a start command
 
