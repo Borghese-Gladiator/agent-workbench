@@ -27,7 +27,19 @@ function slugify(source: string): string {
  * the branch reads sanely (e.g. `awb/portal-header-subtitle-game-count-ecabb015`); a short
  * taskId suffix preserves uniqueness without dumping the full UUID (twice) into the name.
  */
+function taskShortId(taskId: string): string {
+  return taskId.replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'task';
+}
+
 export function resolveTaskBranchName(taskId: string, slugSource: string): string {
-  const shortId = taskId.replace(/[^a-z0-9]/gi, '').slice(0, 8) || 'task';
-  return `awb/${slugify(stripScopePreamble(slugSource))}-${shortId}`;
+  return `awb/${slugify(stripScopePreamble(slugSource))}-${taskShortId(taskId)}`;
+}
+
+/**
+ * Derives the on-disk worktree *directory* leaf name for a task: `<slug>-<shortId>`. Mirrors the
+ * branch slug/short-id (minus the `awb/` prefix, which is not a valid path segment) so
+ * `git worktree list` shows a human-readable, distinguishable directory instead of a bare UUID.
+ */
+export function resolveWorktreeDirName(taskId: string, slugSource: string): string {
+  return `${slugify(stripScopePreamble(slugSource))}-${taskShortId(taskId)}`;
 }

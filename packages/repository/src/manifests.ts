@@ -200,6 +200,148 @@ export async function readPyprojectScripts(dir: string): Promise<Record<string, 
 }
 
 /**
+ * Extracts a Python distribution's declared name from its manifests — pyproject `[project] name`
+ * or `[tool.poetry] name`. Returns undefined when none is declared. Small dependency-free scraper,
+ * consistent with the rest of this module (no TOML parser).
+ */
+export function readPythonPackageName(manifests: PythonManifest[]): string | undefined {
+  const pyproject = manifests.find((m) => m.kind === 'pyproject');
+  if (!pyproject) return undefined;
+  for (const header of ['[project]', '[tool.poetry]']) {
+    const after = pyproject.raw.split(header)[1];
+    if (!after) continue;
+    const body = after.split(/^\[/m)[0] ?? '';
+    const match = body.match(/^\s*name\s*=\s*["']([^"']+)["']/m);
+    if (match) return match[1] as string;
+  }
+  return undefined;
+}
+
+/** Strips a PEP 508 / requirements line down to its bare distribution name (no extras, no specifier). */
+function normalizeDistributionName(spec: string): string | undefined {
+  const name = spec
+    .trim()
+    .split(/[<>=!~;\[ ]/)[0]
+    ?.trim();
+  return name && /^[A-Za-z0-9._-]+$/.test(name) ? name : undefined;
+}
+
+/**
+ * Extracts the declared dependency distribution names from a Python unit's manifests — pyproject
+ * `[project] dependencies`, `[tool.poetry.dependencies]`, and `requirements.txt`. Names only (version
+ * specifiers and extras stripped) so a cross-unit edge is a name match, mirroring the JS path.
+ */
+export function readPythonDependencyNames(manifests: PythonManifest[]): string[] {
+  const names = new Set<string>();
+
+  const pyproject = manifests.find((m) => m.kind === 'pyproject');
+  if (pyproject) {
+    // [project] dependencies = ["foo>=1", "bar[extra]"]
+    const projectDeps = pyproject.raw.match(/dependencies\s*=\s*\[([\s\S]*?)\]/);
+    if (projectDeps?.[1]) {
+      for (const m of projectDeps[1].matchAll(/["']([^"']+)["']/g)) {
+        const name = normalizeDistributionName(m[1] as string);
+        if (name) names.add(name);
+      }
+    }
+    // [tool.poetry.dependencies] as a table: name = "^1.0"
+    const poetryDeps = pyproject.raw.split('[tool.poetry.dependencies]')[1];
+    if (poetryDeps) {
+      const body = poetryDeps.split(/^\[/m)[0] ?? '';
+      for (const m of body.matchAll(/^\s*([A-Za-z0-9._-]+)\s*=/gm)) {
+        const name = m[1] as string;
+        if (name.toLowerCase() !== 'python') names.add(name);
+      }
+    }
+  }
+
+  const requirements = manifests.find((m) => m.kind === 'requirements.txt');
+  if (requirements) {
+    for (const line of requirements.raw.split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('-')) continue;
+      const name = normalizeDistributionName(trimmed);
+      if (name) names.add(name);
+    }
+  }
+
+  return [...names];
+}
+
+/** Reads a Go module's own path from `go.mod` (`module <path>`). Undefined when absent. */
+export async function readGoModule(dir: string): Promise<string | undefined> {
+  const raw = await readTextFile(dir, 'go.mod');
+  if (!raw) return undefined;
+  const match = raw.match(/^\s*module\s+(\S+)/m);
+  return match ? (match[1] as string) : undefined;
+}
+
+/**
+ * Reads the required module paths from a `go.mod` — both the single-line form (`require x/y v1`) and
+ * the block form (`require (\n  x/y v1\n  ...\n)`). Paths only (versions dropped) so an in-repo edge
+ * is a module-path match against another unit's `module` line.
+ */
+export async function readGoRequires(dir: string): Promise<string[]> {
+  const raw = await readTextFile(dir, 'go.mod');
+  if (!raw) return [];
+  const modules = new Set<string>();
+  for (const m of raw.matchAll(/^\s*require\s+(\S+)\s+\S+/gm)) modules.add(m[1] as string);
+  for (const block of raw.matchAll(/require\s*\(([\s\S]*?)\)/g)) {
+    for (const line of (block[1] as string).split('\n')) {
+      const entry = line.trim();
+      if (!entry || entry.startsWith('//')) continue;
+      const path = entry.split(/\s+/)[0];
+      if (path) modules.add(path);
+    }
+  }
+  return [...modules];
+}
+
+/**
+ * Reads a JVM module's own coordinate and the coordinates it depends on. Maven `pom.xml` gives the
+ * exact `groupId:artifactId` for the module and each `<dependency>`; Gradle `build.gradle[.kts]`
+ * gives `group` + `rootProject.name` (best-effort) and `implementation`/`api "group:artifact:ver"`
+ * coordinates. Names are `group:artifact`, so an in-repo edge is a coordinate match. Small
+ * regex-based scraper, consistent with the module's no-XML/Groovy-parser convention.
+ */
+export async function readJvmCoordinates(
+  dir: string,
+): Promise<{ name?: string; deps: string[] } | undefined> {
+  const pom = await readTextFile(dir, 'pom.xml');
+  if (pom) {
+    const deps = new Set<string>();
+    for (const dep of pom.matchAll(/<dependency>([\s\S]*?)<\/dependency>/g)) {
+      const body = dep[1] as string;
+      const group = body.match(/<groupId>\s*([^<\s]+)\s*<\/groupId>/)?.[1];
+      const artifact = body.match(/<artifactId>\s*([^<\s]+)\s*<\/artifactId>/)?.[1];
+      if (group && artifact) deps.add(`${group}:${artifact}`);
+    }
+    // The module's own coordinate is the top-level (non-<parent>) groupId/artifactId.
+    const topLevel = pom.replace(/<parent>[\s\S]*?<\/parent>/g, '');
+    const group = topLevel.match(/<groupId>\s*([^<\s]+)\s*<\/groupId>/)?.[1];
+    const artifact = topLevel.match(/<artifactId>\s*([^<\s]+)\s*<\/artifactId>/)?.[1];
+    const name = group && artifact ? `${group}:${artifact}` : undefined;
+    return { name, deps: [...deps] };
+  }
+
+  const gradle = (await readTextFile(dir, 'build.gradle')) ?? (await readTextFile(dir, 'build.gradle.kts'));
+  if (gradle) {
+    const deps = new Set<string>();
+    for (const m of gradle.matchAll(
+      /(?:implementation|api|compile|runtimeOnly|testImplementation)[\s(]+["']([\w.-]+:[\w.-]+):[\w.$-]+["']/g,
+    )) {
+      deps.add(m[1] as string);
+    }
+    const group = gradle.match(/^\s*group\s*=?\s*["']([\w.-]+)["']/m)?.[1];
+    const artifact = gradle.match(/rootProject\.name\s*=\s*["']([\w.-]+)["']/)?.[1];
+    const name = group && artifact ? `${group}:${artifact}` : undefined;
+    return { name, deps: [...deps] };
+  }
+
+  return undefined;
+}
+
+/**
  * Reads the workspace-package globs a repo declares, so discovery can recurse into workspace
  * sub-packages that don't sit under the conventional monorepo container dirs (e.g. `games/*`,
  * `portal`). Handles both npm/yarn `workspaces` in package.json (array or `{ packages: [] }`) and

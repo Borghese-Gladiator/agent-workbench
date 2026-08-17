@@ -201,6 +201,41 @@ function evaluateAssimilate(ctx: CompletionContext['assimilate']): CompletionDec
   return decision(reasons, missing);
 }
 
+type ExerciseContext = NonNullable<CompletionContext['exercise']>;
+
+/**
+ * How a blocked `exercise` decision should be routed. `code-fixable` means a genuine
+ * runtime/behavior defect the builder can address by re-coding (route `repair → implement`).
+ * `evidence-deficiency` means the code may well be correct but the QA *evidence* is
+ * missing or not tied to the candidate (a missing recording/trace, a claim with no strong
+ * assertion, evidence not SHA-scoped) — re-running implement/verify cannot produce it, so the
+ * task must escalate to a human `qa-inconclusive` gate instead of looping into implement.
+ */
+export type ExerciseBlockKind = 'code-fixable' | 'evidence-deficiency';
+
+/**
+ * Classify a blocked `exercise` gate from the signals it evaluated. A genuine code defect takes
+ * precedence: if a code-fixable signal failed, the block is `code-fixable` even when evidence
+ * signals also failed (re-coding can fix the defect and re-run QA). Only when every failing signal
+ * is an evidence-capture deficiency is the block `evidence-deficiency`. Callers pass the same
+ * `exercise` CompletionContext handed to `evaluatePhaseCompletion`.
+ *
+ * The discriminator is whether QA observed a *real failure* versus merely *missing/insufficient
+ * evidence*. Code-fixable failures are things the builder can address by changing the code and
+ * re-running QA:
+ *   - `policyBlockingErrorsPresent` — a real runtime, console, or network error the QA run saw.
+ *   - `!structuredAssertionsPass` — a structured assertion actually ran and failed (a real defect
+ *     in observed behavior), distinct from an assertion being absent.
+ * Everything else is an evidence/QA-authoring deficiency that re-running implement/verify can never
+ * satisfy — a missing recording or trace, a scenario that never ran, a behavioral claim with no
+ * *authored* strong assertion, or evidence not tied to the candidate SHA — so it escalates to a
+ * human `qa-inconclusive` gate rather than looping into implement.
+ */
+export function classifyExerciseBlock(ctx: ExerciseContext): ExerciseBlockKind {
+  const codeFixable = ctx.policyBlockingErrorsPresent || !ctx.structuredAssertionsPass;
+  return codeFixable ? 'code-fixable' : 'evidence-deficiency';
+}
+
 /**
  * The only function permitted to decide a TaskPhase is complete. Pure and deterministic: given
  * the same CompletionCandidate and CompletionContext, always returns the same CompletionDecision.

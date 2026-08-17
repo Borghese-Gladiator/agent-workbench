@@ -46,6 +46,7 @@ function fakeDaemonClient(database: WorkbenchDatabase): DaemonClient {
       return { snapshotId: 'snap-test' };
     },
     async notifyReleased() {},
+    async persistStartCommand() {},
   };
 }
 

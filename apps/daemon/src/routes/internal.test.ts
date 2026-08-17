@@ -14,6 +14,7 @@ import {
   type WorkbenchDatabase,
 } from '@awb/database';
 import type { RunStateSnapshot, SemanticEvent } from '@awb/domain';
+import { getRepositoryCommands } from '@awb/repository';
 import { registerInternalRoutes } from './internal.js';
 import { SemanticEventBus } from '../event-bus.js';
 import { TaskScheduler } from '../scheduler.js';
@@ -170,5 +171,25 @@ describe('internal worker→daemon routes', () => {
   it('POST /internal/events rejects an invalid event', async () => {
     const res = await app.inject({ method: 'POST', url: '/internal/events', payload: { not: 'an event' } });
     expect(res.statusCode).toBe(400);
+  });
+
+  it('POST /internal/repositories/:id/commands persists a validated start command', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: `/internal/repositories/${REPO_ID}/commands`,
+      payload: { command: 'npm run dev', cwd: '/w/tree', validatedAtSha: 'sha-1' },
+    });
+    expect(res.statusCode).toBe(200);
+    const start = (await getRepositoryCommands(database.db, REPO_ID)).find((c) => c.purpose === 'start');
+    expect(start).toMatchObject({ command: 'npm run dev', source: 'inferred', status: 'validated' });
+  });
+
+  it('POST /internal/repositories/:id/commands 404s an unknown repo', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/internal/repositories/nope/commands',
+      payload: { command: 'x', cwd: '/w' },
+    });
+    expect(res.statusCode).toBe(404);
   });
 });

@@ -13,6 +13,11 @@ export function daemonBaseUrl(): string {
   return resolveRuntimeConfig().daemonUrl;
 }
 
+// Cap each daemon call so a wedged handler (e.g. a heavy discovery scan) fails fast with a clear
+// timeout rather than undici's opaque connection drop. Kept under the activity's start-to-close
+// timeout so the abort, not the activity, is what surfaces.
+const DAEMON_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+
 async function requestJson<T = unknown>(method: 'POST' | 'PUT', path: string, body: unknown): Promise<T> {
   const url = `${daemonBaseUrl()}${path}`;
   let response: Response;
@@ -21,6 +26,7 @@ async function requestJson<T = unknown>(method: 'POST' | 'PUT', path: string, bo
       method,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(DAEMON_REQUEST_TIMEOUT_MS),
     });
   } catch (err) {
     throw new Error(`daemon ${method} ${path} failed to connect: ${err instanceof Error ? err.message : String(err)}`);
@@ -53,6 +59,16 @@ export interface DaemonClient {
   /** Task DAG orchestration: notify the daemon that this task released its draft PR, so the
    *  scheduler starts any blocked children stacked on it. Best-effort — never fail the phase on it. */
   notifyReleased(taskId: string): Promise<void>;
+  /**
+   * Persist a `start` command inferred over a task worktree and proven to boot, so a later exercise
+   * run reuses it (Tier-1) instead of re-inferring. Write funnels through the daemon (single writer).
+   */
+  persistStartCommand(input: {
+    repositoryId: string;
+    command: string;
+    cwd: string;
+    validatedAtSha?: string;
+  }): Promise<void>;
 }
 
 export function createDaemonClient(): DaemonClient {
@@ -82,6 +98,10 @@ export function createDaemonClient(): DaemonClient {
     },
     async notifyReleased(taskId) {
       await postOrPut('POST', `/internal/task-released/${encodeURIComponent(taskId)}`, {});
+    },
+    async persistStartCommand(input) {
+      const { repositoryId, ...body } = input;
+      await postOrPut('POST', `/internal/repositories/${encodeURIComponent(repositoryId)}/commands`, body);
     },
   };
 }

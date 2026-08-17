@@ -19,6 +19,7 @@ function collectingClient(events: SemanticEvent[], opts: { throwOnPost?: boolean
       return { snapshotId: 'snap-test' };
     },
     async notifyReleased() {},
+    async persistStartCommand() {},
   };
 }
 

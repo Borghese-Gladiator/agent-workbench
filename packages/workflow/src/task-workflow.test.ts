@@ -10,6 +10,7 @@ import {
   pullRequestMergedSignal,
   pullRequestClosedSignal,
   getCurrentStateQuery,
+  getPendingHumanGateQuery,
 } from './task-workflow.js';
 import { createScriptedActivities } from './test-activities.js';
 import type { TaskWorkflowInput } from './workflow-types.js';
@@ -51,7 +52,7 @@ function awaitHuman(phase: TaskPhase, reason: Parameters<typeof makeGate>[1]): P
   return { outcome: 'await-human', gate: makeGate(phase, reason) };
 }
 
-function makeGate(phase: TaskPhase, reason: 'task-contract-approval' | 'pr-readiness') {
+function makeGate(phase: TaskPhase, reason: 'task-contract-approval' | 'pr-readiness' | 'qa-inconclusive') {
   return {
     id: `gate-${phase}`,
     taskId: 'task-1',
@@ -322,6 +323,78 @@ describe('TaskWorkflow', () => {
       },
     );
     expect(result.phase).toBe('assimilate');
+  }, 30_000);
+
+  // TASK-75 problem (1): an exercise *evidence deficiency* now surfaces as an await-human
+  // `qa-inconclusive` gate. It must park on the FIRST occurrence — no failureStreak, so it can
+  // never reach the 3-strike `repeated-failure-no-progress` trap that a `repair → implement` loop
+  // produced. Contrast with the escalation test above: three `repair()`s were needed to escalate.
+  it('parks an exercise qa-inconclusive gate on first hit, not repeated-failure-no-progress (TASK-75)', async () => {
+    let observedReason: string | undefined;
+    let observedAfterOneExercise = false;
+    const { result } = await runWithActivities(
+      {
+        specify: [candidate('specify')],
+        plan: [candidate('plan')],
+        // The exercise handler returns this exact shape for a pure evidence deficiency (see
+        // mapExerciseBlock). It is scripted ONCE — if the workflow looped it into implement and
+        // re-ran exercise, the streak logic would eventually escalate with a DIFFERENT reason.
+        exercise: [awaitHuman('exercise', 'qa-inconclusive')],
+      },
+      async (handle) => {
+        await waitForCondition(async () => {
+          const state = await handle.query(getCurrentStateQuery);
+          if (state.condition === 'awaiting-human') {
+            const gate = await handle.query(getPendingHumanGateQuery);
+            observedReason = gate?.reason;
+            // Prove the gate opened while still ON the exercise phase (not after bouncing to
+            // implement): attemptNumber is the first exercise attempt and phase is exercise.
+            observedAfterOneExercise = state.phase === 'exercise';
+            return true;
+          }
+          return false;
+        });
+        // Resolve the gate (as a human supplying QA config would) so the run can finish and the
+        // test env tears down cleanly. Re-scripting exercise as a candidate lets it proceed.
+        await handle.signal(cancelSignal);
+      },
+    );
+    expect(observedReason).toBe('qa-inconclusive');
+    expect(observedReason).not.toBe('repeated-failure-no-progress');
+    expect(observedAfterOneExercise).toBe(true);
+    expect(result.condition).toBe('cancelled');
+  }, 30_000);
+
+  // TASK-75 problem (2): a candidate that satisfies its claim and passes must EXIT the exercise
+  // gate and reach pr-readiness — it must not accumulate any failure and must not park at
+  // repeated-failure-no-progress. A clean exercise `candidate()` walks straight through to release.
+  it('a passing exercise candidate reaches pr-readiness without a no-progress park (TASK-75)', async () => {
+    let sawRepeatedFailurePark = false;
+    const { result } = await runWithActivities(
+      {
+        specify: [candidate('specify')],
+        plan: [candidate('plan')],
+        prepare: [candidate('prepare')],
+        implement: [candidate('implement')],
+        verify: [candidate('verify')],
+        exercise: [candidate('exercise')],
+        challenge: [candidate('challenge')],
+        release: [awaitHuman('release', 'pr-readiness')],
+      },
+      async (handle) => {
+        await waitForCondition(async () => {
+          const state = await handle.query(getCurrentStateQuery);
+          const gate = await handle.query(getPendingHumanGateQuery);
+          if (gate?.reason === 'repeated-failure-no-progress') sawRepeatedFailurePark = true;
+          return state.phase === 'release' && state.condition === 'awaiting-human';
+        });
+        await handle.signal(pullRequestMergedSignal, { mergeCommitSha: 'abc123' });
+      },
+    );
+    // Reached the pr-readiness gate (release) and never parked at a no-progress human gate.
+    expect(sawRepeatedFailurePark).toBe(false);
+    expect(result.phase).toBe('assimilate');
+    expect(result.deliveryState).toBe('merged');
   }, 30_000);
 
   it('marks the task cancelled on a cancel signal', async () => {
