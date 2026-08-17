@@ -58,7 +58,12 @@ export async function resolveDeliveryTarget(
 ): Promise<{ kind: 'github'; ref: RepoRef } | { kind: 'local-merge'; defaultBranch: string }> {
   const ref = await resolveRepoRef(worktreePath);
   if (ref) return { kind: 'github', ref };
-  const defaultBranch = await getDefaultBranch(worktreePath);
+  // Resolve the default branch from the REPOSITORY ROOT, never the worktree: a linked worktree's
+  // `git branch --show-current` returns the FEATURE branch, which would make local-merge try to
+  // check out (and merge into) the very branch it's delivering — a branch already checked out in
+  // the worktree, which git refuses. The root's current branch is the real default (main/master).
+  const repositoryRoot = await resolveRepositoryRoot(worktreePath);
+  const defaultBranch = await getDefaultBranch(repositoryRoot);
   return { kind: 'local-merge', defaultBranch };
 }
 

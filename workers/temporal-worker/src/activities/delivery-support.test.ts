@@ -61,6 +61,20 @@ describe('resolveDeliveryTarget (TASK-71: no-origin → local merge)', () => {
     const target = await resolveDeliveryTarget(repo);
     expect(target).toEqual({ kind: 'github', ref: { owner: 'owner', repo: 'repo' } });
   });
+
+  it('resolves the default branch from the REPO ROOT, not a linked worktree on a feature branch', async () => {
+    // Reproduces the local-merge delivery bug: called with the WORKTREE path, `git branch
+    // --show-current` there returns the feature branch — so local-merge would try to check out the
+    // very branch it is delivering. The target must be the root's default branch (master).
+    const wt = join(repo, '..', `wt-${Date.now()}`);
+    await git(repo, ['worktree', 'add', '-q', '-b', 'awb/feature', wt]);
+    try {
+      const target = await resolveDeliveryTarget(wt);
+      expect(target).toEqual({ kind: 'local-merge', defaultBranch: 'master' });
+    } finally {
+      await git(repo, ['worktree', 'remove', '--force', wt]);
+    }
+  });
 });
 
 describe('resolveRepositoryRoot', () => {
