@@ -428,7 +428,21 @@ the stuck task and confirm it reaches pr-readiness instead of parking at the
 
 ## Group M — Local-model driving & dogfooding
 
-### [ ] TASK-76: A prompt/skill that lets even a weak local model *drive* a task (not code it)
+### [x] TASK-76: A prompt/skill that lets even a weak local model *drive* a task (not code it)
+
+> **Done.** New skill `.claude/skills/run-workbench-task-simple/SKILL.md` — a
+> judgment-free driving loop sibling to `run-workbench-task`. It reduces driving to one poll
+> (`task show`), two fields (`state.condition`, `pendingHumanGate.reason`), and a
+> lookup table of `open gate → one copy-paste command`. Every command was verified
+> against the real CLI surface (`apps/cli/src/commands/task.ts`): notably there is
+> **no `reject-contract`** command, so the skill tells the driver to STOP on a
+> wrong contract rather than invent one. The known auto-resolutions
+> (`slice-diff-exceeds-cap` → `AWB_SLICE_DIFF_CAP=0` restart,
+> `repeated-failure-no-progress` → diagnose/park) are written as operator recipes,
+> not driver actions, because they require a stack restart that would otherwise
+> block the task. Model-agnostic per `external-tools-model-agnostic`. Manual
+> acceptance (a weak local model driving a real task end-to-end) remains to be run
+> live under TASK-77.
 
 **What's wrong.** Driving a task through the workbench (boot stack, register repo,
 create task, approve the contract gate, answer gates, drive to pr-readiness,
@@ -455,7 +469,7 @@ Relates to `flex-dash-run-autonomy` (the known auto-resolvable gates) and
 skill, drives a real task from registration to pr-readiness — answering each gate
 correctly — without the operator hand-holding it. Captured as a short transcript.
 
-### [ ] TASK-77: Dogfood the workbench on *this* repo (agent-workbench itself)
+### [~] TASK-77: Dogfood the workbench on *this* repo (agent-workbench itself)
 
 **What's wrong.** We dogfood on `browser-games` / `fender` / `app` but have never
 driven a task against *this* repo — the most honest test of whether the tool is
@@ -471,6 +485,15 @@ Relates to `implement-feature` (self-modification flow).
 
 **How we'll know it's done.** A branch + draft PR on this repo produced by the
 workbench, with a short writeup of what was awkward.
+
+> **Partial dogfood run (2026-08-15).** Registered `agent-workbench` and drove a
+> task (re-tighten TASK-78's worktree-dir tests). Discovery, contract, plan,
+> prepare, and **implement all succeeded on the real repo** — the agent correctly
+> recognized TASK-78 was already implemented on `main` and produced a genuinely
+> good test-only diff (+9 `branch.test.ts`, +24 `worktree.test.ts`, real
+> `createWorktree` slug-path assertion). Then it **stalled at `verify`** (see
+> TASK-104/105/106 below). Friction captured as new tickets. Not yet a delivered PR
+> because verify never converged — reopen once TASK-104 lands.
 
 ### [ ] TASK-88: A `dogfood` skill that ALWAYS boots an isolated stack — never prompts, never blocks an active task
 
@@ -528,6 +551,120 @@ actively RUNNING on a MAIN-checkout stack boots a second isolated stack (distinc
 port + `AWB_DATA_DIR`), drives a fresh task to pr-readiness, and tears down **only**
 the isolated stack — with the MAIN stack's running task untouched, and **without the
 skill ever asking whether to isolate**.
+
+### [ ] TASK-104: `verify` records NOTHING per-command, so a stalled 30-min verify is completely opaque — write incremental command timing so it's debuggable
+
+> **Re-investigated against `main` @ `320b2dd` (2026-08-17).** The premise
+> ("commands are slow") was wrong: measured on this repo, the root `pnpm test`
+> (`vitest run`, 132 files) finishes in **~21s** and `pnpm build` in **~13s**. The
+> real problem is a *hang* with **zero per-command observability**.
+
+**What's wrong.** The `verify` phase runs the repo's discovered `unit-test`+`build`
+commands through `runVerificationMatrix`
+(`packages/verification/src/verification-runner.ts:136-145`), **serially** (`for (const
+command of commands)`, each `await`ed). Each command's result is turned into `Evidence`
+**only after that command finishes**, and the whole batch is returned to the verify
+handler **only after ALL commands complete** (`run-phase.ts:985-988`). The
+`command_executions` table exists (`packages/database/src/schema/sessions.ts:57`) but
+**is never written by the verification runner** (verified: the only references in
+`src/` are the schema definition + a cascade-delete — no insert). So while verify is
+running there is **no durable, incremental record of which command is executing or how
+long it has taken**. When the first dogfood run's verify consumed its full 30-minute
+Temporal `startToCloseTimeout` (`packages/workflow/src/task-workflow.ts:22`) and the
+workflow failed, the DB held a single `verify-1` `phase_attempts` row with
+`ended_at`/`outcome` = null and **zero** `command_executions` — leaving no way to tell
+*which* of the ~49 serial commands (root suite + 24 per-package tests + ~24 builds)
+hung. Since the individual commands are fast, the 30 min was a **hang** — the prime
+suspect being a self-booting e2e test (`tasks-completion-e2e.test.ts` /
+`run-phase-e2e.test.ts`) blocking on a port already held by the running workbench stack
+— but we **cannot confirm it** precisely because nothing was recorded.
+
+**What to do.** Make verify **debuggable first**: write an incremental
+`command_executions` row per command (started_at on spawn, ended_at + exit_code on
+finish) as the matrix runs, so a live/failed verify shows exactly which command is in
+flight and how long it has taken. Then, with that visibility, **streamline** so a simple
+change's verify never approaches 30 min — most likely by making the self-booting e2e
+tests fail fast (or be excluded) rather than hang on a port conflict. Keep running every
+command (no diff-scoping, no per-command timeouts — explicitly out of scope per the
+owner); the goal is visibility + no-hang, not fewer commands.
+
+**Where.** `packages/verification/src/verification-runner.ts:74-145`
+(`runCommandAndRecordEvidence` / `runVerificationMatrix` — add incremental
+`command_executions` writes), `command_executions` schema
+(`packages/database/src/schema/sessions.ts:57`, currently write-only-in-tests), the
+self-booting e2e tests (`workers/temporal-worker/src/run-phase-e2e.test.ts`,
+`apps/daemon/src/routes/tasks-completion-e2e.test.ts` — make port-conflict fail fast).
+
+**How we'll know it's done.** During a verify run, `command_executions` shows a row per
+command with live timing; and a simple change's verify completes fast (no 30-min hang)
+because the e2e tests no longer block on a busy port.
+
+### [ ] TASK-105: `verify` can consume the whole 30-min activity budget in ONE `runPhase` invocation — revisit the timeout / heartbeat so a legitimately-long verify isn't a terminal failure
+
+> **Re-investigated against `main` @ `320b2dd` (2026-08-17).** Companion to TASK-104
+> (the timeout is only *reached* because verify hangs; this ticket is the ceiling
+> itself). Correction to earlier drafts: a timed-out phase does **not** persist
+> "nothing" — a `verify-1` `phase_attempts` row IS written at phase start (via the
+> `phase-started` semantic event → `ensureRunAndPhaseAttempt`); it just never gets an
+> `ended_at`/`outcome` because the phase never completes. (The `retry_of` lineage
+> column is **not on `main`** — it lives on the open `ui-roadmap` PR #18; the copy in
+> the live DB is a leftover from running that branch against the shared SQLite. Nothing
+> to wire or delete here.)
+
+**What's wrong.** The `runPhase` activity has a flat `startToCloseTimeout: '30 minutes'`
+with `maximumAttempts: 3` (`packages/workflow/src/task-workflow.ts:21-31`). A single
+verify pass that runs the full command matrix (TASK-104) can approach that ceiling; when
+it does, Temporal kills and **retries the activity**, but the workflow-held
+`attemptNumber` is fixed for that dispatch, so each retry re-emits `phase verify started
+(attempt 1)` (observed three times, 30 min apart) and the workbench's own no-progress
+accounting (`failureStreak` / `repeated-failure-no-progress`,
+`task-workflow.ts:252-258`) — which only counts workflow-level `repair` outcomes —
+**never sees the retries**. After 3 × 30 min the activity fails permanently and the whole
+workflow goes terminal. The RetryPolicy comment (`task-workflow.ts:24-27`) says retries
+are meant for *transient infrastructure* failures; a slow-but-progressing verify is
+misclassified as one.
+
+**What to do.** Make a long-but-live verify survivable and legible: **heartbeat** the
+activity (so Temporal sees liveness and a `heartbeatTimeout` replaces the coarse
+`startToClose`), and/or raise the verify budget for phases that legitimately run a full
+matrix. This is deliberately separate from TASK-104: even after verify stops hanging, the
+30-min-single-invocation ceiling is a latent cliff worth removing.
+
+**Where.** `packages/workflow/src/task-workflow.ts:21-31` (proxyActivities
+retry/timeout), `:215-217` (attempt bump vs. activity retry), `:252-258` (no-progress
+accounting); `workers/temporal-worker/src/activities/run-phase.ts` (verify heartbeat).
+Related to the cold-restart-on-retry gap (`observability-live-proof`, TASK-32).
+
+**How we'll know it's done.** A verify that legitimately runs long heartbeats and
+completes instead of being killed at 30 min, and a genuinely stuck phase is surfaced as
+a counted, recorded failure rather than a silent "attempt 1" replay.
+
+### [ ] TASK-106: Per-package `test` script (`vitest run --dir .`) finds zero tests when run from the package dir
+
+> **Re-verified LIVE against `main` @ `320b2dd` (2026-08-17):**
+> `pnpm --filter @awb/config test` → `No test files found, exiting with code 1`.
+> Still an issue.
+
+**What's wrong.** Each package's `test` script is `vitest run --dir .`
+(`packages/*/package.json`), but the root `vitest.config.ts:5` `include` glob is
+**repo-root-relative** (`['packages/**/*.test.ts', 'apps/**/*.test.ts',
+'workers/**/*.test.ts']`) and packages have no local vitest config. Run from inside
+e.g. `packages/config`, `--dir .` re-roots resolution there, so the glob becomes
+`packages/config/packages/**/*.test.ts` → matches nothing → `No test files found,
+exiting with code 1`. Confirmed real, not "a package with no tests": `packages/config`
+has 2 test files / **31 passing tests** when run correctly from the repo root — the
+per-package script simply can't find them. So `pnpm --filter @awb/<pkg> test` reports a
+false failure for every package.
+
+**What to do.** Make the per-package `test` script actually run that package's tests —
+either a per-package `vitest.config.ts` with a local `include`, or change the script to
+target the package's own test glob rather than `--dir .` against the root config.
+
+**Where.** `vitest.config.ts:5` (root `include` globs) vs the per-package `test`
+scripts (`packages/*/package.json`).
+
+**How we'll know it's done.** `pnpm --filter @awb/config test` runs that package's
+tests and passes.
 
 
 ## Group N — Worktree DX
