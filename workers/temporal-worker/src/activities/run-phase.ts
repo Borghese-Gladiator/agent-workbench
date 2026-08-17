@@ -359,6 +359,13 @@ const planHandler: PhaseHandler = {
       ? await loadProjectMemoryForContext(state.repositoryId).catch(() => [])
       : [];
 
+    // A challenge replan routed its open review findings here (requirements → plan). Consume them:
+    // seed the planner's first attempt so it re-plans knowing what review rejected, then clear so
+    // they do NOT leak to implement — a plan-level finding is fixed at the plan altitude, not by
+    // re-prompting the builder about a defect it can't structurally address.
+    const challengeSeed = runState.repairFindings ?? [];
+    runState.repairFindings = undefined;
+
     const loopResult = await runPlannerCriticLoop({
       taskId: state.taskId,
       cwd: planCwd,
@@ -370,7 +377,7 @@ const planHandler: PhaseHandler = {
           cwd: planCwd,
           contextPayload: {
             contract,
-            priorFindings,
+            priorFindings: [...challengeSeed, ...priorFindings],
             ...(projectMemory.length > 0 ? { memory: projectMemory } : {}),
           },
           allowedTools: allowedToolsForBrokerRole('planner', ctx.profile),
@@ -544,6 +551,12 @@ const programDesignHandler: PhaseHandler = {
       (realDesigner ? await resolveRepositoryPath(state.repositoryId) : undefined) ??
       process.cwd();
 
+    // A challenge replan routed its open review findings here (architecture → program-design on an L
+    // run). Consume them: feed the designer so it re-designs to address them, then clear so they do
+    // NOT leak to implement — a structural finding is fixed at the design altitude, not by the builder.
+    const challengeSeed = runState.repairFindings ?? [];
+    runState.repairFindings = undefined;
+
     // Mock path: a deterministic, bodyless design derived from the plan slices, so an L task under the
     // mock runtime produces a valid program-design artifact and clears the gate (every test stays green).
     // A slice with no declared likelyPaths still contributes a file-tree entry (keyed by its objective),
@@ -573,7 +586,7 @@ const programDesignHandler: PhaseHandler = {
         role: 'planner',
         taskId: state.taskId,
         cwd: designCwd,
-        contextPayload: { plan },
+        contextPayload: challengeSeed.length > 0 ? { plan, priorFindings: challengeSeed } : { plan },
         allowedTools: allowedToolsForBrokerRole('planner', ctx.profile),
         disallowedTools: deniedToolsForBrokerRole('planner', ctx.profile),
       });
