@@ -111,6 +111,53 @@ describe('runBrowserQa', () => {
   );
 
   it(
+    'expectVisible with a GROUPED selector passes via .first() when any match is visible, and yields a strong assertion',
+    async () => {
+      const result = await runBrowserQa(
+        {
+          baseUrl,
+          steps: [
+            { kind: 'navigate', url: '/' },
+            // A comma-grouped selector — the fixture has a <button> and <input> (no h1/header). This
+            // must NOT trip Playwright strict-mode on multiple matches; `.first()` checks "at least
+            // one is visible". Mirrors the exercise phase's structural landmark assertion.
+            { kind: 'expectVisible', selector: 'h1, header, nav, main, button, input' },
+          ],
+        },
+        makeQaEvidenceContext(),
+        store,
+      );
+
+      const a = result.assertions.find((x) => x.name.startsWith('expectVisible:'));
+      expect(a?.passed).toBe(true);
+      expect(scenarioStrength(result.assertions)).toBe('strong');
+    },
+    15_000,
+  );
+
+  it(
+    'expectVisible fails (real assertion failure) when NO element in a grouped selector is present',
+    async () => {
+      const result = await runBrowserQa(
+        {
+          baseUrl,
+          steps: [
+            { kind: 'navigate', url: '/' },
+            { kind: 'expectVisible', selector: 'h1, header, nav, main, article, [role="banner"]', timeoutMs: 1_000 },
+          ],
+        },
+        makeQaEvidenceContext(),
+        store,
+      );
+
+      const a = result.assertions.find((x) => x.name.startsWith('expectVisible:'));
+      expect(a?.passed).toBe(false);
+      expect(result.assertions.some((x) => !x.passed)).toBe(true);
+    },
+    15_000,
+  );
+
+  it(
     'fails with a real assertion failure when waiting on a selector that never appears',
     async () => {
       const result = await runBrowserQa(

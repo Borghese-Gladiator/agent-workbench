@@ -1051,7 +1051,17 @@ const exerciseHandler: PhaseHandler = {
           baseUrl,
           scenario: {
             baseUrl,
-            steps: [{ kind: 'navigate', url: '/' }, { kind: 'screenshot', name: 'landing' }],
+            // A navigate + screenshot are only liveness ("the page loaded"); the exercise gate
+            // requires a passing STRONG assertion (state-transition/value-match) to consider a
+            // behavioral claim covered. So we also assert the app actually rendered real, visible
+            // content: a served-but-blank/error page (root has no visible landmark/heading) fails
+            // this — a genuine QA failure that loops back to implement — while a real page passes it
+            // honestly. These are framework-agnostic (any rendered page has one of these landmarks).
+            steps: [
+              { kind: 'navigate', url: '/' },
+              { kind: 'expectVisible', selector: 'h1, h2, header, nav, main, [role="banner"], [role="main"]' },
+              { kind: 'screenshot', name: 'landing' },
+            ],
           },
           context,
           artifactStore: runState.artifactStore,

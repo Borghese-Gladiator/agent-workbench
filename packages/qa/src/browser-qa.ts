@@ -236,10 +236,12 @@ async function executeStep(
       return;
     }
     case 'expectVisible': {
-      // A genuine post-action state assertion — the element became visible.
+      // A genuine post-action state assertion — the element became visible. `.first()` so a grouped
+      // selector (e.g. `h1, header, main`) checks "at least one such element is visible" instead of
+      // tripping Playwright strict mode on multiple matches.
       let visible = false;
       try {
-        await page.locator(step.selector).waitFor({ state: 'visible', timeout: step.timeoutMs ?? 5000 });
+        await page.locator(step.selector).first().waitFor({ state: 'visible', timeout: step.timeoutMs ?? 5000 });
         visible = true;
       } catch {
         visible = false;
