@@ -51,6 +51,15 @@ describe('runtime-profile registry', () => {
     expect(runtimeProfile('opencode').createAdapter({ model: 'anthropic/claude-sonnet-4-5' })).toBeInstanceOf(OpenCodeAgentAdapter);
   });
 
+  it('only local-model runtimes (pi, opencode) need stringent candidate checks', () => {
+    for (const runtime of ['pi', 'opencode'] as const) {
+      expect(runtimeProfile(runtime).needsStringentCandidateChecks).toBe(true);
+    }
+    for (const runtime of ['mock', 'claude', 'codex'] as const) {
+      expect(runtimeProfile(runtime).needsStringentCandidateChecks).toBe(false);
+    }
+  });
+
   it('local-model runtimes get the recipes tool-doc tier; frontier ones get full', () => {
     expect(runtimeProfile('pi').toolDocTier).toBe('recipes');
     expect(runtimeProfile('mock').toolDocTier).toBe('recipes');

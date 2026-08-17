@@ -61,6 +61,7 @@ import {
   runHttpApiQa,
   runLibraryQa,
   evaluateBehavioralClaimCoverage,
+  behavioralClaimsWithUntouchedTarget,
   type QaEvidenceContext,
 } from '@awb/qa';
 import {
@@ -358,6 +359,13 @@ const planHandler: PhaseHandler = {
       ? await loadProjectMemoryForContext(state.repositoryId).catch(() => [])
       : [];
 
+    // A challenge replan routed its open review findings here (requirements → plan). Consume them:
+    // seed the planner's first attempt so it re-plans knowing what review rejected, then clear so
+    // they do NOT leak to implement — a plan-level finding is fixed at the plan altitude, not by
+    // re-prompting the builder about a defect it can't structurally address.
+    const challengeSeed = runState.repairFindings ?? [];
+    runState.repairFindings = undefined;
+
     const loopResult = await runPlannerCriticLoop({
       taskId: state.taskId,
       cwd: planCwd,
@@ -369,7 +377,7 @@ const planHandler: PhaseHandler = {
           cwd: planCwd,
           contextPayload: {
             contract,
-            priorFindings,
+            priorFindings: [...challengeSeed, ...priorFindings],
             ...(projectMemory.length > 0 ? { memory: projectMemory } : {}),
           },
           allowedTools: allowedToolsForBrokerRole('planner', ctx.profile),
@@ -543,6 +551,12 @@ const programDesignHandler: PhaseHandler = {
       (realDesigner ? await resolveRepositoryPath(state.repositoryId) : undefined) ??
       process.cwd();
 
+    // A challenge replan routed its open review findings here (architecture → program-design on an L
+    // run). Consume them: feed the designer so it re-designs to address them, then clear so they do
+    // NOT leak to implement — a structural finding is fixed at the design altitude, not by the builder.
+    const challengeSeed = runState.repairFindings ?? [];
+    runState.repairFindings = undefined;
+
     // Mock path: a deterministic, bodyless design derived from the plan slices, so an L task under the
     // mock runtime produces a valid program-design artifact and clears the gate (every test stays green).
     // A slice with no declared likelyPaths still contributes a file-tree entry (keyed by its objective),
@@ -572,7 +586,7 @@ const programDesignHandler: PhaseHandler = {
         role: 'planner',
         taskId: state.taskId,
         cwd: designCwd,
-        contextPayload: { plan },
+        contextPayload: challengeSeed.length > 0 ? { plan, priorFindings: challengeSeed } : { plan },
         allowedTools: allowedToolsForBrokerRole('planner', ctx.profile),
         disallowedTools: deniedToolsForBrokerRole('planner', ctx.profile),
       });
@@ -855,6 +869,10 @@ const implementHandler: PhaseHandler = {
             runtimeBudgetMs: assignment.runtimeBudgetMs,
             eventSink: sink,
             resumeSessionId: priorSessionId,
+            // On a repair loop-back, tell the builder which findings the last candidate failed on.
+            ...(runState.repairFindings && runState.repairFindings.length > 0
+              ? { priorFindings: runState.repairFindings }
+              : {}),
           });
           // Capture the provider session token so a later attempt resumes rather than cold-starts.
           if (attempt.sessionId) {
@@ -917,6 +935,10 @@ const implementHandler: PhaseHandler = {
         };
       }
     }
+
+    // Repair findings have now been fed to this attempt's builder sessions; clear them so a later
+    // clean pass (or an unrelated re-entry) never re-surfaces stale QA/review findings.
+    runState.repairFindings = undefined;
 
     // On the real path, a candidate commit exists when the builder advanced HEAD past the base SHA;
     // targeted checks passing is exactly what the per-slice builder loop already gated `success` on
@@ -1222,10 +1244,43 @@ const exerciseHandler: PhaseHandler = {
       },
     });
 
+    // A behavioral claim's committed diff must touch at least one path the plan associated with it.
+    // The plan links claims to files via each slice's claimIds + likelyPaths; a claim's target paths
+    // are the union of likelyPaths across every slice covering it. Gated on the runtime profile: only
+    // runtimes serving weaker/local models (pi, opencode) get this stringent check, since the
+    // likelyPaths prediction adds no signal for frontier models and risks false-blocking correct
+    // work whose files the planner mis-predicted. Requires a real worktree + candidate commit.
+    let untouchedTargetClaims: string[] = [];
+    if (
+      ctx.profile.needsStringentCandidateChecks &&
+      runState.worktreePath &&
+      runState.candidateSha
+    ) {
+      const claimTargetPaths = new Map<string, string[]>();
+      for (const slice of runState.plan?.slices ?? []) {
+        for (const claimId of slice.claimIds) {
+          const paths = claimTargetPaths.get(claimId) ?? [];
+          paths.push(...slice.likelyPaths);
+          claimTargetPaths.set(claimId, paths);
+        }
+      }
+      const { changedPaths } = await resolveReviewDiff({
+        worktreePath: runState.worktreePath,
+        baseSha: resolveBaseSha(runState),
+        candidateSha: resolveCandidateSha(runState),
+      });
+      untouchedTargetClaims = behavioralClaimsWithUntouchedTarget({
+        behavioralClaimIds,
+        claimTargetPaths,
+        changedPaths,
+      });
+    }
+
     const exercise = {
       everyRequiredScenarioHasResult: true,
       everyBehavioralClaimCovered: coverage.everyBehavioralClaimCovered,
       behavioralClaimsMissingStrongAssertion: coverage.missing,
+      behavioralClaimsWithUntouchedTarget: untouchedTargetClaims,
       structuredAssertionsPass,
       requiredRecordingExists: qaResult.artifacts.length > 0,
       // A browser run must have produced a real trace artifact; a CLI run has no browser scenarios.
@@ -1242,7 +1297,26 @@ const exerciseHandler: PhaseHandler = {
       candidateOverrides: { baseSha: context.baseSha, candidateSha: context.candidateSha },
       // See mapExerciseBlock: a real observed failure routes `repair → implement`; a pure evidence
       // deficiency escalates to a human `qa-inconclusive` gate instead of looping into implement.
-      onBlocked: (missing) => mapExerciseBlock(exercise, missing, state.taskId),
+      // On a code-fixable block, synthesize a finding per QA reason onto run state so the next
+      // implement attempt re-prompts the builder with what failed rather than re-running blind.
+      onBlocked: (missing) => {
+        if (classifyExerciseBlock(exercise) === 'code-fixable') {
+          const findings: Finding[] = missing.map((reason) => ({
+            id: randomUUID(),
+            taskId: state.taskId,
+            candidateSha: resolveCandidateSha(runState),
+            severity: 'high',
+            category: 'requirements',
+            claimIds: exercise.behavioralClaimsWithUntouchedTarget ?? [],
+            description: reason,
+            status: 'open',
+          }));
+          runState.repairFindings = findings;
+          // Best-effort: make the repair loop-back visible in the durable stream + metrics.
+          void ctx.controlPlane?.repairFindingsRaised(findings);
+        }
+        return mapExerciseBlock(exercise, missing, state.taskId);
+      },
     };
   },
 };
@@ -1454,6 +1528,11 @@ const challengeHandler: PhaseHandler = {
         // owns structure — `program-design` on an L run, else `plan`. Requirements outrank
         // architecture outrank everything else; the phase set decides plan-vs-program-design.
         const open = review.findings.filter((f) => f.status === 'open');
+        // Carry the open review findings onto run state so the phase they route to re-prompts its
+        // agent with the original findings (description, path/line, remediation) instead of blind.
+        runState.repairFindings = open;
+        // Best-effort: surface the review-driven repair in the durable stream + metrics.
+        void ctx.controlPlane?.repairFindingsRaised(open);
         const category = open.some((f) => f.category === 'requirements')
           ? 'requirements'
           : open.some((f) => f.category === 'architecture')

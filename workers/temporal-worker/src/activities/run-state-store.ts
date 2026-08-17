@@ -34,7 +34,28 @@ export interface TaskRunState {
   verificationEvidence: Evidence[];
   qaEvidence: Evidence[];
   reviewerSessionId?: string;
+  /**
+   * DURABLE RECORD of the adversarial review's findings. Contrast with `repairFindings` below —
+   * these two look alike (both `Finding[]`) but play opposite roles; do NOT merge them:
+   *   • lifecycle:  ACCUMULATED and kept — never auto-cleared.
+   *   • written by: the `challenge` phase only.
+   *   • read by:    the PR/evidence surface + audit trail (a permanent record of what review found).
+   *   • purpose:    "what the reviewer found," preserved for humans reading the PR later.
+   */
   reviewFindings: import('@awb/domain').Finding[];
+  /**
+   * CONSUME-ONCE MESSAGE to the next implement attempt. Same `Finding[]` type as `reviewFindings`
+   * above, opposite role — keep them separate:
+   *   • lifecycle:  set on a code-fixable block, then CLEARED the moment the builder consumes it, so
+   *                 a later clean pass never re-surfaces stale findings.
+   *   • written by: any code-fixable gate — `challenge` (its open review findings, verbatim) OR
+   *                 `exercise`/QA (findings synthesized from the gate's block reasons).
+   *   • read by:    the `implement` handler, which renders them into the builder's re-prompt
+   *                 (description + path/line + proposed remediation) so it re-implements knowing
+   *                 exactly what to fix instead of re-running blind.
+   *   • purpose:    "what the NEXT builder attempt must fix," a transient hand-off, not a record.
+   */
+  repairFindings?: import('@awb/domain').Finding[];
   artifactStore: ArtifactStore;
   artifactsDir?: string;
   /** Whether prepare successfully installed the worktree's dependencies (real path). */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateBehavioralClaimCoverage } from './coverage.js';
+import { evaluateBehavioralClaimCoverage, behavioralClaimsWithUntouchedTarget } from './coverage.js';
 import type { QaAssertionResult } from './shared.js';
 
 const liveness: QaAssertionResult = { name: 'navigate:/', passed: true, strength: 'liveness' };
@@ -60,5 +60,70 @@ describe('evaluateBehavioralClaimCoverage (TASK-42)', () => {
     expect(
       evaluateBehavioralClaimCoverage({ behavioralClaimIds: [], assertions: [liveness] }).everyBehavioralClaimCovered,
     ).toBe(true);
+  });
+});
+
+describe('behavioralClaimsWithUntouchedTarget (TASK-63)', () => {
+  it('reports a claim whose diff touched none of its target paths (no-op candidate)', () => {
+    // Pi's live failure: README claim, but the builder committed only package-lock.json.
+    const untouched = behavioralClaimsWithUntouchedTarget({
+      behavioralClaimIds: ['claim-1'],
+      claimTargetPaths: new Map([['claim-1', ['README.md']]]),
+      changedPaths: ['package-lock.json'],
+    });
+    expect(untouched).toEqual(['claim-1']);
+  });
+
+  it('does not report a claim whose target file was touched', () => {
+    const untouched = behavioralClaimsWithUntouchedTarget({
+      behavioralClaimIds: ['claim-1'],
+      claimTargetPaths: new Map([['claim-1', ['README.md']]]),
+      changedPaths: ['README.md', 'package-lock.json'],
+    });
+    expect(untouched).toEqual([]);
+  });
+
+  it('matches by path prefix in either direction (dir target vs file change, file target vs dir change)', () => {
+    expect(
+      behavioralClaimsWithUntouchedTarget({
+        behavioralClaimIds: ['claim-1'],
+        claimTargetPaths: new Map([['claim-1', ['src/games']]]),
+        changedPaths: ['src/games/rank.ts'],
+      }),
+    ).toEqual([]);
+    expect(
+      behavioralClaimsWithUntouchedTarget({
+        behavioralClaimIds: ['claim-1'],
+        claimTargetPaths: new Map([['claim-1', ['src/games/rank.ts']]]),
+        changedPaths: ['src/games'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('never reports a claim with no declared target paths (thin plan / fixture)', () => {
+    expect(
+      behavioralClaimsWithUntouchedTarget({
+        behavioralClaimIds: ['claim-1'],
+        claimTargetPaths: new Map([['claim-1', []]]),
+        changedPaths: ['unrelated.ts'],
+      }),
+    ).toEqual([]);
+    expect(
+      behavioralClaimsWithUntouchedTarget({
+        behavioralClaimIds: ['claim-1'],
+        claimTargetPaths: new Map(),
+        changedPaths: ['unrelated.ts'],
+      }),
+    ).toEqual([]);
+  });
+
+  it('normalizes ./ prefixes and trailing slashes before matching', () => {
+    expect(
+      behavioralClaimsWithUntouchedTarget({
+        behavioralClaimIds: ['claim-1'],
+        claimTargetPaths: new Map([['claim-1', ['./src/games/']]]),
+        changedPaths: ['src/games/rank.ts'],
+      }),
+    ).toEqual([]);
   });
 });

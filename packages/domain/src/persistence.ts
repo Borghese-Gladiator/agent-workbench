@@ -27,6 +27,11 @@ export const RunStateSnapshotSchema = z.object({
   lease: WorkspaceLeaseSchema.optional(),
   verificationEvidence: z.array(EvidenceSchema),
   qaEvidence: z.array(EvidenceSchema),
+  /**
+   * DURABLE RECORD of the adversarial review's findings — accumulated, kept, feeds the PR/audit
+   * trail. NOT the same as `repairFindings` below (a consume-once re-prompt message); same type,
+   * opposite role.
+   */
   reviewFindings: z.array(FindingSchema),
   artifacts: z.array(ArtifactRecordSchema),
   dependenciesInstalled: z.boolean().optional(),
@@ -37,5 +42,12 @@ export const RunStateSnapshotSchema = z.object({
    * field carries the reconstructed map back onto the worker's `TaskRunState`.
    */
   builderResumeSessions: z.record(z.string(), z.string()).optional(),
+  /**
+   * CONSUME-ONCE MESSAGE to the next implement attempt: the findings a code-fixable gate (challenge
+   * review or exercise/QA) last blocked on, carried forward so the builder re-prompt says exactly
+   * what to fix, then cleared once consumed. NOT the persisted `reviewFindings` record above — same
+   * `Finding[]` type, opposite role (transient hand-off vs. permanent record).
+   */
+  repairFindings: z.array(FindingSchema).optional(),
 });
 export type RunStateSnapshot = z.infer<typeof RunStateSnapshotSchema>;

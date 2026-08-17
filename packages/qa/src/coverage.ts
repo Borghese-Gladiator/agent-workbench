@@ -48,3 +48,39 @@ export function evaluateBehavioralClaimCoverage(
 
   return { everyBehavioralClaimCovered: missing.length === 0, missing };
 }
+
+export interface UntouchedTargetInput {
+  behavioralClaimIds: string[];
+  claimTargetPaths: Map<string, string[]>;
+  changedPaths: string[];
+}
+
+function normalizePath(p: string): string {
+  return p.replace(/^\.\//, '').replace(/\/+$/, '');
+}
+
+function pathMatchesTarget(changed: string, target: string): boolean {
+  const c = normalizePath(changed);
+  const t = normalizePath(target);
+  if (c === t) return true;
+  return c.startsWith(`${t}/`) || t.startsWith(`${c}/`);
+}
+
+/**
+ * Behavioral claim ids whose committed diff misses the mark: the plan associated the claim with
+ * at least one target path (`PlanSlice.likelyPaths` on a slice covering the claim), yet the
+ * committed `base..candidate` diff touches none of them. Non-empty ⇒ a no-op / off-target
+ * candidate (e.g. a builder that committed only `package-lock.json` for a README claim), which
+ * the exercise gate must reject. A claim with no declared target paths is never reported — the
+ * plan gave nothing to compare against, so blocking on it would be a false negative.
+ */
+export function behavioralClaimsWithUntouchedTarget(input: UntouchedTargetInput): string[] {
+  const untouched: string[] = [];
+  for (const claimId of input.behavioralClaimIds) {
+    const targets = (input.claimTargetPaths.get(claimId) ?? []).filter(Boolean);
+    if (targets.length === 0) continue;
+    const touched = targets.some((t) => input.changedPaths.some((c) => pathMatchesTarget(c, t)));
+    if (!touched) untouched.push(claimId);
+  }
+  return untouched;
+}

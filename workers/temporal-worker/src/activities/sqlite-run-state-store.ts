@@ -70,6 +70,7 @@ export class SqliteRunStateStore implements RunStateStore {
       verificationEvidence: snapshot?.verificationEvidence ?? [],
       qaEvidence: snapshot?.qaEvidence ?? [],
       reviewFindings: snapshot?.reviewFindings ?? [],
+      repairFindings: snapshot?.repairFindings,
       artifactStore,
       artifactsDir,
       dependenciesInstalled: snapshot?.dependenciesInstalled,
@@ -110,6 +111,7 @@ export function toSnapshot(taskId: string, state: TaskRunState): RunStateSnapsho
     verificationEvidence: state.verificationEvidence,
     qaEvidence: state.qaEvidence,
     reviewFindings: state.reviewFindings,
+    ...(state.repairFindings ? { repairFindings: state.repairFindings } : {}),
     artifacts: state.artifactStore.allRecords(),
     ...(state.dependenciesInstalled !== undefined
       ? { dependenciesInstalled: state.dependenciesInstalled }
