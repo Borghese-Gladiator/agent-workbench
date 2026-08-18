@@ -1,8 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { openEventStream } from '../api/events.js';
-
-// Coalesce bursts of events (a phase can emit several at once) into a single refresh.
-const REFRESH_DEBOUNCE_MS = 300;
+import { useDebouncedRefresh } from './useDebouncedRefresh.js';
 
 /**
  * Drives the tasks list live off the existing semantic-event stream. The daemon WebSocket
@@ -11,29 +9,15 @@ const REFRESH_DEBOUNCE_MS = 300;
  * NOT add a second realtime mechanism. `onChange` is called on the trailing edge of an event burst.
  */
 export function useTaskListLiveRefresh(onChange: () => void): void {
-  // Keep the latest callback without re-subscribing the socket on every render.
-  const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
+  const scheduleRefresh = useDebouncedRefresh(onChange);
 
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const scheduleRefresh = () => {
-      if (timer) return;
-      timer = setTimeout(() => {
-        timer = undefined;
-        onChangeRef.current();
-      }, REFRESH_DEBOUNCE_MS);
-    };
-
     const close = openEventStream({
       onEvent: scheduleRefresh,
       // A (re)connect can mean we were disconnected across a status change — refresh to catch up.
       onOpen: scheduleRefresh,
     });
 
-    return () => {
-      if (timer) clearTimeout(timer);
-      close();
-    };
-  }, []);
+    return close;
+  }, [scheduleRefresh]);
 }
