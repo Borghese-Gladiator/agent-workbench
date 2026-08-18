@@ -17,14 +17,16 @@ import {
 import type { WorkbenchDatabase } from '@awb/database';
 import {
   upsertTask,
-  listTasksWithRepository,
+  listTaskSummaries,
+  getTaskSummary,
   deleteTask,
   getTaskDeliveredBranch,
   getTokenBreakdown,
   getRuntimeAttribution,
   listFindingsByTask,
+  type TaskSummaryWithRepository,
 } from '@awb/database';
-import type { TaskSize } from '@awb/domain';
+import type { TaskSize, TaskFreshness } from '@awb/domain';
 import { validateTaskDag, TaskDagValidationError, type TaskDagSpec } from '@awb/domain';
 import { routeFeedback, NO_ROUTING_SIGNAL, type FeedbackRoutingSignal } from '@awb/github';
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
@@ -44,6 +46,50 @@ export interface CreatedTaskRecord {
   size: TaskSize | null;
   createdAt: string;
   updatedAt: string;
+  // Additive projection fields (TASK-81): the list now reads the durable task_summary projection, so
+  // it keeps moving after a task parks awaiting-human. The base shape above is preserved.
+  derivedStatus: string;
+  attemptCount: number;
+  openFindingCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number | null;
+  pendingGateReason: string | null;
+  candidateSha: string | null;
+  pullRequestUrl: string | null;
+  title: string | null;
+  retryOfTaskId: string | null;
+  rootTaskId: string | null;
+  indexedAt: string;
+}
+
+function toCreatedTaskRecord(t: TaskSummaryWithRepository): CreatedTaskRecord {
+  return {
+    taskId: t.taskId,
+    repositoryId: t.repositoryId,
+    repositoryName: t.repositoryName,
+    workflowId: workflowIdFor(t.repositoryId, t.taskId),
+    prompt: t.prompt,
+    phase: t.phase,
+    condition: t.condition,
+    deliveryState: t.deliveryState,
+    size: t.size ?? null,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt,
+    derivedStatus: t.derivedStatus,
+    attemptCount: t.attemptCount,
+    openFindingCount: t.openFindingCount,
+    inputTokens: t.inputTokens,
+    outputTokens: t.outputTokens,
+    costUsd: t.costUsd,
+    pendingGateReason: t.pendingGateReason,
+    candidateSha: t.candidateSha,
+    pullRequestUrl: t.pullRequestUrl,
+    title: t.title,
+    retryOfTaskId: t.retryOfTaskId,
+    rootTaskId: t.rootTaskId,
+    indexedAt: t.indexedAt,
+  };
 }
 
 export function registerTaskRoutes(
@@ -52,11 +98,24 @@ export function registerTaskRoutes(
   scheduler: TaskScheduler,
 ): void {
   app.post<{
-    Body: { repositoryId: string; prompt: string; size?: TaskSize; parentTaskId?: string; baseBranch?: string };
+    Body: {
+      repositoryId: string;
+      prompt: string;
+      size?: TaskSize;
+      parentTaskId?: string;
+      baseBranch?: string;
+      title?: string;
+      retryOfTaskId?: string;
+    };
   }>('/api/tasks', async (request, reply) => {
     const client = await getTemporalClient();
     const taskId = randomUUID();
-    const { repositoryId, prompt, size, parentTaskId } = request.body;
+    const { repositoryId, prompt, size, parentTaskId, title, retryOfTaskId } = request.body;
+
+    // Retry lineage (TASK-83/84): a retry task points at the task it retries and shares the retry
+    // chain's root. Resolve the root from the parent summary (its rootTaskId, or the parent itself);
+    // an original task's root defaults to its own id (set by upsertTask).
+    const rootTaskId = resolveRootTaskId(retryOfTaskId, getTaskSummary(database.db, retryOfTaskId ?? ''));
 
     // Stacked PRs (TASK-72): a child task branches off — and its PR opens against — its parent's
     // delivered branch. An explicit baseBranch wins; otherwise resolve it from the parent task's
@@ -89,10 +148,18 @@ export function registerTaskRoutes(
       ...(size ? { size } : {}),
       ...(parentTaskId ? { parentTaskId } : {}),
       ...(baseBranch ? { baseBranch } : {}),
+      ...(title ? { title } : {}),
+      ...(retryOfTaskId && rootTaskId ? { retryOfTaskId, rootTaskId } : {}),
     });
 
     reply.code(201);
-    return { taskId, repositoryId, workflowId, ...(baseBranch ? { baseBranch } : {}) };
+    return {
+      taskId,
+      repositoryId,
+      workflowId,
+      ...(baseBranch ? { baseBranch } : {}),
+      ...(retryOfTaskId && rootTaskId ? { retryOfTaskId, rootTaskId } : {}),
+    };
   });
 
   // Task DAG orchestration: declare a whole stacked-PR DAG atomically. Validates (unique keys,
@@ -139,21 +206,9 @@ export function registerTaskRoutes(
   });
 
   app.get('/api/tasks', async () => {
-    return listTasksWithRepository(database.db).map(
-      (t): CreatedTaskRecord => ({
-        taskId: t.id,
-        repositoryId: t.repositoryId,
-        repositoryName: t.repositoryName,
-        workflowId: workflowIdFor(t.repositoryId, t.id),
-        prompt: t.prompt,
-        phase: t.phase,
-        condition: t.condition,
-        deliveryState: t.deliveryState,
-        size: t.size ?? null,
-        createdAt: t.createdAt,
-        updatedAt: t.updatedAt,
-      }),
-    );
+    // Reads the durable task_summary projection (not the bare tasks row) so the list keeps advancing
+    // after a task parks awaiting-human, and carries the additive derived-status/rollup/lineage fields.
+    return listTaskSummaries(database.db).map(toCreatedTaskRecord);
   });
 
   app.get<{ Params: { repositoryId: string; taskId: string } }>(
@@ -161,19 +216,21 @@ export function registerTaskRoutes(
     async (request, reply) => {
       const client = await getTemporalClient();
       const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
+      // These read from SQLite regardless of Temporal's health and are safe to compute up-front.
+      const tokenBreakdown = getTokenBreakdown(database.db, request.params.taskId);
+      const runtimeAttribution = getRuntimeAttribution(database.db, request.params.taskId);
+      // Advisory maintainability annotations (category maintainability, severity note),
+      // read from persisted findings. Non-blocking — surfaced for the human, distinct from the
+      // blocking open findings above.
+      const maintainabilityFindings = listFindingsByTask(database.db, request.params.taskId)
+        .filter((f) => f.category === 'maintainability' && f.severity === 'note')
+        .map((f) => ({ id: f.id, path: f.path, line: f.line, description: f.description }));
+      const summary = getTaskSummary(database.db, request.params.taskId);
+
       try {
         const state = await handle.query(getCurrentStateQuery);
         const openFindings = await handle.query(getOpenFindingsQuery);
         const pendingHumanGate = await handle.query(getPendingHumanGateQuery);
-        // Token breakdown from SQLite (not Workflow state, which stays compact — docs/temporal-workflows).
-        const tokenBreakdown = getTokenBreakdown(database.db, request.params.taskId);
-        const runtimeAttribution = getRuntimeAttribution(database.db, request.params.taskId);
-        // Advisory maintainability annotations (category maintainability, severity note),
-        // read from persisted findings. Non-blocking — surfaced for the human, distinct from the
-        // blocking open findings above.
-        const maintainabilityFindings = listFindingsByTask(database.db, request.params.taskId)
-          .filter((f) => f.category === 'maintainability' && f.severity === 'note')
-          .map((f) => ({ id: f.id, path: f.path, line: f.line, description: f.description }));
         return {
           state,
           openFindings,
@@ -181,10 +238,32 @@ export function registerTaskRoutes(
           tokenBreakdown,
           runtimeAttribution,
           maintainabilityFindings,
+          freshness: buildTaskFreshness(true, summary?.updatedAt ?? null, summary?.indexedAt ?? null),
         };
       } catch (err) {
-        reply.code(404);
-        return { error: err instanceof Error ? err.message : String(err) };
+        // Temporal is degraded (unreachable/timed-out). Rather than 404, stay responsive from the
+        // durable projection so the detail page still renders — flagged liveUnavailable via freshness.
+        if (!summary) {
+          reply.code(404);
+          return { error: err instanceof Error ? err.message : String(err) };
+        }
+        return {
+          state: {
+            taskId: summary.taskId,
+            repositoryId: summary.repositoryId,
+            phase: summary.phase,
+            condition: summary.condition,
+            deliveryState: summary.deliveryState,
+          },
+          openFindings: [],
+          pendingHumanGate: summary.pendingGateReason
+            ? { taskId: summary.taskId, phase: summary.phase, reason: summary.pendingGateReason }
+            : undefined,
+          tokenBreakdown,
+          runtimeAttribution,
+          maintainabilityFindings,
+          freshness: buildTaskFreshness(false, null, summary.indexedAt),
+        };
       }
     },
   );
@@ -360,4 +439,38 @@ export function registerTaskRoutes(
     // human-gate: the caller (UI/poller) surfaces a gate for a human to resolve; no auto signal.
     return { category: decision.category, action: decision.action };
   });
+}
+
+/**
+ * Resolves the head of a retry chain for a newly-created retry task. When retrying task P, the new
+ * task's root is P's own root (so a retry-of-a-retry keeps pointing at the original), falling back to
+ * P itself when P is an original with no recorded root. Returns null when this is not a retry.
+ */
+export function resolveRootTaskId(
+  retryOfTaskId: string | undefined,
+  parentSummary: TaskSummaryWithRepository | undefined,
+): string | null {
+  if (!retryOfTaskId) return null;
+  return parentSummary?.rootTaskId ?? retryOfTaskId;
+}
+
+/**
+ * Computes the freshness envelope for the task-state route. `liveAvailable` reflects whether the live
+ * Temporal query succeeded; `isIndexBehind` is true only when we have a live workflow timestamp that
+ * is newer than the durable projection's indexedAt (the projection lags a live advance).
+ */
+export function buildTaskFreshness(
+  liveAvailable: boolean,
+  workflowUpdatedAt: string | null,
+  indexedAt: string | null,
+): TaskFreshness {
+  const resolvedIndexedAt = indexedAt ?? new Date(0).toISOString();
+  const isIndexBehind =
+    liveAvailable && workflowUpdatedAt != null && indexedAt != null && workflowUpdatedAt > indexedAt;
+  return {
+    liveWorkflowAvailable: liveAvailable,
+    workflowUpdatedAt,
+    indexedAt: resolvedIndexedAt,
+    isIndexBehind,
+  };
 }

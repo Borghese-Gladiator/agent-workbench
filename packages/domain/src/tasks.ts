@@ -40,3 +40,21 @@ export const PhaseAttemptSchema = z.object({
   outcome: z.string().optional(),
 });
 export type PhaseAttempt = z.infer<typeof PhaseAttemptSchema>;
+
+/**
+ * Freshness envelope for the task-state route: tells the UI whether the durable `task_summary`
+ * projection lags the live Temporal workflow. When Temporal is degraded the daemon still answers
+ * from the projection (`liveWorkflowAvailable: false`) so list/detail stay responsive — there is
+ * deliberately no Temporal fan-out on list pages.
+ */
+export const TaskFreshnessSchema = z.object({
+  /** True when the daemon read live workflow state; false when it fell back to the durable projection. */
+  liveWorkflowAvailable: z.boolean(),
+  /** When the live workflow last advanced (null when unavailable or unknown). */
+  workflowUpdatedAt: z.string().nullable(),
+  /** When the durable projection row was last recomputed. */
+  indexedAt: z.string(),
+  /** True when the projection is known to lag the live workflow. */
+  isIndexBehind: z.boolean(),
+});
+export type TaskFreshness = z.infer<typeof TaskFreshnessSchema>;
