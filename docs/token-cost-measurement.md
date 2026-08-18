@@ -106,3 +106,31 @@ confirm.
 `UsageAggregator` (`packages/agent-gateway`) is dead code (no production caller); the
 live path is `ObservabilityAccumulator` → `model_invocations`. Removing or wiring it
 is a separate cleanup, noted here so the next reader is not misled.
+
+## TASK-95: bounded output compression (shipped)
+
+`compressCommandOutput` (`packages/execution/src/command-runner.ts`) clips accumulated
+stdout/stderr before a `CommandResult` is returned into the agent's context, so a chatty
+child (a test run, `git`, a file dump) cannot flood the transcript. It applies, in order:
+repeated-line elision (a run of N identical lines collapses to one line plus a
+`… [k identical line(s) elided]` marker), a head/tail line-count cap, and a hard UTF-8
+byte cap (keep a head + tail slice around a truncation marker). Bounds are
+`OutputCompressionOptions { maxBytes?, maxLines?, elideRepeatedLines? }` with sensible
+defaults (256 KiB / 2000 lines / elide on); `runCommand` applies them by default and a
+caller can pass `compression: false` to opt out. Unit-asserted in
+`command-runner.test.ts`: a 2 MB single line is bounded to the byte cap, a 1000-line
+output is bounded to the line cap with a truncation marker, and a run of identical lines
+is elided.
+
+## TASK-98: cross-repo/cross-task token report (shipped)
+
+`getCrossRepoTokenReport` (`packages/database/src/data-access/observability.ts`) rolls up
+tokens **by repo / task / model / phase / outcome**, joining `model_invocations` →
+`agent_sessions` → `tasks` (for the repository and the retry-lineage parent
+`parent_task_id`) → `phase_attempts` (for the attempt outcome), and returns per-bucket
+rows plus grand totals (tokens-in / tokens-out / distinct sessions). An optional filter
+restricts to a set of repos and/or tasks. `scripts/token-usage-report.ts` is the external
+export over that same query — run `pnpm report:tokens [--db <path>] [--repo <id>]…
+[--task <id>]… [--json]` to print the cross-repo cost roll-up (text or JSON). Unit-asserted
+in `observability.test.ts`: totals across ≥2 repos/tasks, the retry-lineage parent on the
+rollup row, and a repo-scoped filter.

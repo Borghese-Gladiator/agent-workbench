@@ -32,9 +32,10 @@ export function compressCommandOutput(text: string, options?: OutputCompressionO
     const collapsed: string[] = [];
     let i = 0;
     while (i < lines.length) {
+      const line = lines[i] as string;
       let run = 1;
-      while (i + run < lines.length && lines[i + run] === lines[i]) run += 1;
-      collapsed.push(lines[i]);
+      while (i + run < lines.length && lines[i + run] === line) run += 1;
+      collapsed.push(line);
       if (run > 1) collapsed.push(`… [${run - 1} identical line(s) elided]`);
       i += run;
     }

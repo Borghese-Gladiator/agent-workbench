@@ -3,12 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { PhaseObservability } from '@awb/domain';
-import { createDatabase, repositories, upsertTask, type WorkbenchDatabase } from '../index.js';
+import { eq } from 'drizzle-orm';
+import { createDatabase, phaseAttempts, repositories, upsertTask, type WorkbenchDatabase } from '../index.js';
 import {
   persistPhaseObservability,
   getTokenBreakdown,
   getRuntimeAttribution,
   getBuilderResumeSessions,
+  getCrossRepoTokenReport,
 } from './observability.js';
 
 const REPO_ID = 'repo-1';
@@ -211,5 +213,137 @@ describe('phase observability persistence (§27)', () => {
 
     const resume = getBuilderResumeSessions(database.db, TASK_ID);
     expect(resume).toEqual({ 'slice-a': 'sdk-session-a2', 'slice-b': 'sdk-session-b1' });
+  });
+});
+
+describe('cross-repo token report (TASK-98)', () => {
+  let dbDir: string;
+  let database: WorkbenchDatabase;
+
+  const seedRepo = (id: string) => {
+    const now = new Date().toISOString();
+    database.db
+      .insert(repositories)
+      .values({
+        id,
+        canonicalPath: `/tmp/${id}`,
+        name: id,
+        remoteUrl: null,
+        defaultBranch: 'main',
+        trusted: true,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+  };
+
+  // One phase-attempt worth of tokens for (task, repo, phase, model), with an explicit outcome.
+  const seedTokens = (args: {
+    taskId: string;
+    repositoryId: string;
+    parentTaskId?: string;
+    phase: 'plan' | 'implement';
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    outcome: string;
+  }) => {
+    upsertTask(database.db, {
+      id: args.taskId,
+      repositoryId: args.repositoryId,
+      prompt: 'p',
+      ...(args.parentTaskId ? { parentTaskId: args.parentTaskId } : {}),
+    });
+    const phaseAttemptId = `${args.taskId}-${args.phase}-1`;
+    persistPhaseObservability(
+      database.db,
+      payload({
+        taskId: args.taskId,
+        runId: `${args.taskId}-run`,
+        phaseAttemptId,
+        phase: args.phase,
+        sessions: [
+          {
+            id: `${args.taskId}-${args.phase}-sess`,
+            taskId: args.taskId,
+            runId: `${args.taskId}-run`,
+            phaseAttemptId,
+            phase: args.phase,
+            role: 'planner',
+            runtime: 'claude',
+            model: args.model,
+            startedAt: new Date().toISOString(),
+            modelInvocations: [
+              {
+                id: `${args.taskId}-${args.phase}-mi`,
+                provider: 'anthropic',
+                model: args.model,
+                inputTokens: args.inputTokens,
+                outputTokens: args.outputTokens,
+                cachedInputTokens: 10,
+                cacheCreationInputTokens: 5,
+                startedAt: new Date().toISOString(),
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    database.db
+      .update(phaseAttempts)
+      .set({ outcome: args.outcome })
+      .where(eq(phaseAttempts.id, phaseAttemptId))
+      .run();
+  };
+
+  beforeEach(async () => {
+    dbDir = await mkdtemp(join(tmpdir(), 'awb-obs-xrepo-'));
+    database = createDatabase(join(dbDir, 'workbench.sqlite'));
+    seedRepo('repo-a');
+    seedRepo('repo-b');
+    // repo-a: task-a1, then task-a2 which is a retry of task-a1 (parentTaskId edge).
+    seedTokens({ taskId: 'task-a1', repositoryId: 'repo-a', phase: 'plan', model: 'claude-opus', inputTokens: 500, outputTokens: 100, outcome: 'failed' });
+    seedTokens({ taskId: 'task-a2', repositoryId: 'repo-a', parentTaskId: 'task-a1', phase: 'plan', model: 'claude-opus', inputTokens: 700, outputTokens: 150, outcome: 'succeeded' });
+    // repo-b: a single task.
+    seedTokens({ taskId: 'task-b1', repositoryId: 'repo-b', phase: 'implement', model: 'claude-haiku', inputTokens: 300, outputTokens: 40, outcome: 'succeeded' });
+  });
+
+  afterEach(async () => {
+    database.close();
+    await rm(dbDir, { recursive: true, force: true });
+  });
+
+  it('rolls up per repo/task/model/phase/outcome with grand totals', () => {
+    const report = getCrossRepoTokenReport(database.db);
+    expect(report.rows).toHaveLength(3);
+    expect(report.totals).toEqual({ tokensIn: 1500, tokensOut: 290, sessions: 3 });
+
+    const a1 = report.rows.find((r) => r.taskId === 'task-a1');
+    expect(a1).toMatchObject({
+      repositoryId: 'repo-a',
+      model: 'claude-opus',
+      phase: 'plan',
+      outcome: 'failed',
+      retryOfTaskId: null,
+      sessions: 1,
+      tokensIn: 500,
+      tokensOut: 100,
+      cacheReadTokens: 10,
+      cacheWriteTokens: 5,
+    });
+  });
+
+  it('carries the retry-lineage parent on the rollup row', () => {
+    const report = getCrossRepoTokenReport(database.db);
+    const a2 = report.rows.find((r) => r.taskId === 'task-a2');
+    expect(a2?.retryOfTaskId).toBe('task-a1');
+    expect(a2?.outcome).toBe('succeeded');
+  });
+
+  it('filters to a subset of repos', () => {
+    const report = getCrossRepoTokenReport(database.db, { repositoryIds: ['repo-b'] });
+    expect(report.rows).toHaveLength(1);
+    expect(report.rows[0]?.repositoryId).toBe('repo-b');
+    expect(report.totals.tokensIn).toBe(300);
   });
 });
