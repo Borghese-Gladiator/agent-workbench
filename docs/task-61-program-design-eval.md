@@ -48,13 +48,22 @@ forward.
 
 ## Metrics (observed, live DB)
 
-| metric | with program-design (9) | without (19–25) | delta |
+Cost/token averages are over the 28 invocation-bearing runs (9 with-pd, 19
+without). This is a live-DB snapshot, so absolute figures drift as new runs land
+— the ratios and directions are the signal.
+
+| metric | with program-design (9) | without (19) | delta |
 | --- | --- | --- | --- |
 | avg cost / run | $8.31 | $2.58 | **+3.2×** |
-| avg tokens / run | 60,003 | 64,666 | −7% |
+| avg tokens / run (fresh+output) | 60,003 | 64,666 | −7% |
 | phase-failed / run (loop-back) | 0.33 | 0.32 | ~0 |
 | attempt-retry / run (rework) | 0.33 | 0.24 | +38% (worse) |
-| challenge events (total) | 0 | 238 | see caveat |
+| challenge-phase events (total) | 0 | 238 | see caveat |
+
+(The exact `without`-arm cost is a live-DB read and drifts a little as cheap runs
+land — a later reproduction measured $2.17 / 3.8× on the same query; the ratio
+and direction are unchanged. Reproduction commands and the captured snapshot are
+in `docs/verify-group-h.md`.)
 
 The program-design phase itself accounts for **$5.05** and **~17k injected
 context tokens/run** across the 9 runs (per
@@ -71,8 +80,8 @@ this run did not have one, so they are omitted rather than reported misleadingly
 
 **Drop (or collapse into plan).** On the data available, program-design does
 **not** buy less rework: loop-back rate is flat (0.33 vs 0.32) and retries are
-actually *higher* on the with-pd arm (0.33 vs 0.24), while the phase roughly
-**triples per-run cost** ($8.31 vs $2.58) and adds ~17k injected context tokens
+actually *higher* on the with-pd arm (0.33 vs 0.24), while the phase runs
+**~3–4× the per-run cost** ($8.31 vs $2.58) and adds ~17k injected context tokens
 per run. There is no observed quality dividend to offset that cost.
 
 The conservative move is **collapse-into-plan**: fold the fileTreeDiff /
