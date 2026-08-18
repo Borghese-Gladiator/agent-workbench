@@ -7,7 +7,6 @@ import { cn } from '@/lib/utils';
 import { shortId } from '@/lib/format';
 import { tasksApi, type MaintainabilityFinding, type TaskWorkflowState } from '../api/tasks.js';
 import { useEventStream } from '../hooks/useEventStream.js';
-import { GatePanel } from './GatePanel.js';
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -238,41 +237,6 @@ export function TaskDetailPage() {
             </ul>
           </PanelBody>
         </Panel>
-      )}
-
-      {state.pendingHumanGate && (
-        <GatePanel
-          repositoryId={repositoryId}
-          taskId={taskId}
-          phase={state.phase}
-          gate={state.pendingHumanGate}
-          size={state.size}
-          busy={busy}
-          // TaskWorkflowState does not expose contractVersion/planVersion directly (only
-          // CompletionCandidate does, which isn't part of this response) — attemptNumber is used
-          // as the best available stand-in, defaulting to 1 for the first attempt.
-          onApproveContract={(sizeOverride) =>
-            void withBusy(() =>
-              tasksApi.approveContract(
-                repositoryId,
-                taskId,
-                state.attemptNumber || 1,
-                sizeOverride,
-              ),
-            )
-          }
-          onRejectContract={() =>
-            void withBusy(() => tasksApi.rejectContract(repositoryId, taskId, 'rejected from UI'))
-          }
-          onApprovePlan={() =>
-            void withBusy(() =>
-              tasksApi.approvePlan(repositoryId, taskId, state.attemptNumber || 1),
-            )
-          }
-          onRejectPlan={() =>
-            void withBusy(() => tasksApi.rejectPlan(repositoryId, taskId, 'rejected from UI'))
-          }
-        />
       )}
     </div>
   );

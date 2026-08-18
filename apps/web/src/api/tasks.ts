@@ -13,14 +13,6 @@ export interface TaskWorkflowState {
   phaseSet?: string[];
   latestCandidateEvidenceIds: string[];
   openFindingIds: string[];
-  pendingHumanGate?: {
-    id: string;
-    taskId: string;
-    phase: string;
-    reason: string;
-    summary: string;
-    createdAt: string;
-  };
   tokenUsageTotal: { inputTokens: number; outputTokens: number };
   runtimeMsByPhase: Record<string, number>;
 }
@@ -36,7 +28,6 @@ export interface MaintainabilityFinding {
 export interface TaskStateResponse {
   state: TaskWorkflowState;
   openFindings: string[];
-  pendingHumanGate: TaskWorkflowState['pendingHumanGate'];
   /** Advisory maintainability findings (category maintainability, severity note). */
   maintainabilityFindings?: MaintainabilityFinding[];
 }
@@ -95,14 +86,6 @@ export const tasksApi = {
     request<TaskStateResponse>('GET', `/tasks/${repositoryId}/${taskId}`),
   listMedia: (repositoryId: string, taskId: string) =>
     request<TaskMediaArtifact[]>('GET', `/tasks/${repositoryId}/${taskId}/media`),
-  approveContract: (repositoryId: string, taskId: string, contractVersion: number, size?: TaskSize) =>
-    request('POST', `/tasks/${repositoryId}/${taskId}/approve-contract`, { contractVersion, ...(size ? { size } : {}) }),
-  rejectContract: (repositoryId: string, taskId: string, reason: string) =>
-    request('POST', `/tasks/${repositoryId}/${taskId}/reject-contract`, { reason }),
-  approvePlan: (repositoryId: string, taskId: string, planVersion: number) =>
-    request('POST', `/tasks/${repositoryId}/${taskId}/approve-plan`, { planVersion }),
-  rejectPlan: (repositoryId: string, taskId: string, reason: string) =>
-    request('POST', `/tasks/${repositoryId}/${taskId}/reject-plan`, { reason }),
   cancel: (repositoryId: string, taskId: string) => request('POST', `/tasks/${repositoryId}/${taskId}/cancel`),
   remove: (repositoryId: string, taskId: string) =>
     request<{ removed: string }>('DELETE', `/tasks/${repositoryId}/${taskId}`),

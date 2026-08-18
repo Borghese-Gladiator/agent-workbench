@@ -4,7 +4,6 @@ import { RepositoriesPage } from './pages/RepositoriesPage.js';
 import { RepositoryDetailPage } from './pages/RepositoryDetailPage.js';
 import { TasksPage } from './pages/TasksPage.js';
 import { TaskDetailPage } from './pages/TaskDetailPage.js';
-import { ApprovalsPage } from './pages/ApprovalsPage.js';
 import { EvidenceViewerPage } from './pages/EvidenceViewerPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 
@@ -20,7 +19,6 @@ export function App() {
               <Route path="/repositories/:id" element={<RepositoryDetailPage />} />
               <Route path="/tasks" element={<TasksPage />} />
               <Route path="/tasks/:repositoryId/:taskId" element={<TaskDetailPage />} />
-              <Route path="/approvals" element={<ApprovalsPage />} />
               <Route path="/evidence" element={<EvidenceViewerPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Routes>

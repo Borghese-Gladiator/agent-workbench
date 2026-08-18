@@ -1,4 +1,4 @@
-import { Boxes, ClipboardCheck, FolderGit2, ListChecks, Settings } from 'lucide-react';
+import { Boxes, FolderGit2, ListChecks, Settings } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
@@ -14,7 +14,6 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Repositories', icon: FolderGit2, end: true },
   { to: '/tasks', label: 'Tasks', icon: ListChecks },
-  { to: '/approvals', label: 'Approvals', icon: ClipboardCheck },
   { to: '/evidence', label: 'Evidence', icon: Boxes },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
