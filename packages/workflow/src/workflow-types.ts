@@ -5,7 +5,10 @@ import type {
   DeliveryState,
   HumanGate,
   PhaseAttemptResult,
+  LoopBudget,
+  UnmetCriteria,
 } from '@awb/domain';
+import type { NoProgressState } from './no-progress.js';
 
 /** Compact coordination state the Workflow keeps in memory — never large logs/videos/transcripts. */
 export interface TaskWorkflowState {
@@ -44,6 +47,27 @@ export interface TaskWorkflowState {
    * delivered branch). Undefined for a root task, which uses the repository default branch.
    */
   baseBranch?: string;
+  /**
+   * Bounded-autonomy budget (TASK-105). The loop checks this each attempt; exhaustion terminates
+   * the task with a `budget-exhausted` UnmetCriteria rather than escalating to a human.
+   */
+  loopBudget?: LoopBudget;
+  /**
+   * Running no-progress tracker (TASK-105): folds each repair attempt's failure fingerprint so the
+   * loop can distinguish a `genuinely-stuck` edit/revert loop from real partial progress.
+   */
+  noProgress?: NoProgressState;
+  /**
+   * Terminal non-convergence record (TASK-105/106). Set when the loop stops without proving every
+   * acceptance claim; rendered into the draft PR body. Its presence means the task ended unmet.
+   */
+  unmetCriteria?: UnmetCriteria;
+  /**
+   * The last candidate commit SHA a phase produced, tracked so a terminal UnmetCriteria can cite it.
+   */
+  lastCandidateSha?: string;
+  /** Ids of acceptance claims the completion decision last reported as unproven (`missing`). */
+  lastMissingClaimIds?: string[];
 }
 
 export interface TaskWorkflowInput {
@@ -54,6 +78,8 @@ export interface TaskWorkflowInput {
   size?: TaskSize;
   /** Base branch override for stacked PRs (TASK-72); threaded into worktree + PR creation. */
   baseBranch?: string;
+  /** Bounded-autonomy budget (TASK-105); seeds `TaskWorkflowState.loopBudget` when present. */
+  loopBudget?: LoopBudget;
   /**
    * Present only on a continue-as-new re-seed: the full coordination state carried over
    * from the previous run so the new execution resumes exactly where the old one left off, with a

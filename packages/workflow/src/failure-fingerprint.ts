@@ -32,29 +32,13 @@ export function sameFailureFingerprint(a: FailureFingerprintInput, b: FailureFin
   return computeFailureFingerprint(a) === computeFailureFingerprint(b);
 }
 
-/**
- * No-progress detection (product spec §21): tracks consecutive identical fingerprints and other
- * no-progress signals across builder attempts.
- */
-export interface NoProgressState {
-  consecutiveIdenticalFingerprints: number;
-  lastFingerprint?: string;
-}
-
-export function initialNoProgressState(): NoProgressState {
-  return { consecutiveIdenticalFingerprints: 0 };
-}
-
-export function recordAttempt(state: NoProgressState, fingerprint: string): NoProgressState {
-  if (state.lastFingerprint === fingerprint) {
-    return {
-      lastFingerprint: fingerprint,
-      consecutiveIdenticalFingerprints: state.consecutiveIdenticalFingerprints + 1,
-    };
-  }
-  return { lastFingerprint: fingerprint, consecutiveIdenticalFingerprints: 1 };
-}
-
-export function isNoProgress(state: NoProgressState, threshold: number): boolean {
-  return state.consecutiveIdenticalFingerprints >= threshold;
-}
+// The no-progress tracker (NoProgressState/initialNoProgressState/recordAttempt/isNoProgress) is
+// crypto-free and lives in `no-progress.ts` so it can be imported into the Temporal Workflow
+// sandbox (this module's `node:crypto` use runs only inside Activities). Re-exported here so
+// existing `@awb/workflow` consumers keep their import site.
+export {
+  type NoProgressState,
+  initialNoProgressState,
+  recordAttempt,
+  isNoProgress,
+} from './no-progress.js';

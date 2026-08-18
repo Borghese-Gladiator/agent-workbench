@@ -8,6 +8,7 @@ import type {
   ProgramDesign,
   ValidatedCommand,
   Finding,
+  UnmetCriteria,
 } from '@awb/domain';
 import type { TaskWorkflowState } from '@awb/workflow';
 import { classifyExerciseBlock, evaluatePhaseCompletion, routeLoop, type CompletionContext } from '@awb/workflow';
@@ -31,7 +32,7 @@ import {
   installWorktreeDependencies,
 } from './command-support.js';
 import { runBrowserQaViaServer } from './browser-qa-support.js';
-import { draftContractInputFromPrompt, formatContractGateSummary } from './contract-support.js';
+import { draftContractInputFromPrompt } from './contract-support.js';
 import { classifyTaskSize, SIZE_CLASSIFIER_MODEL } from './classifier-support.js';
 import { programDesignInstruction, parseProgramDesignOutput } from './program-design-support.js';
 import { resolveRepoRef, resolveDeliveryTarget, resolveRepositoryRoot, createRealDelivery } from './delivery-support.js';
@@ -71,7 +72,14 @@ import {
   reviewerExaminedAllRequiredInputs,
   type ReviewInputs,
 } from '@awb/review';
-import { deliverToGitHub, deliverToLocalMerge, commitQaMediaToBranch } from '@awb/github';
+import {
+  deliverToGitHub,
+  deliverToLocalMerge,
+  commitQaMediaToBranch,
+  buildClaimChecklist,
+  type ClaimChecklistEntry,
+  type PrUnmetCriteriaSummary,
+} from '@awb/github';
 import { postQaMediaBriefs, qaMediaFileName } from './qa-media-support.js';
 import { FakeGitHubClient, FakeGitPushRunner } from '@awb/github/test-fakes';
 import {
@@ -216,91 +224,62 @@ function slugForId(text: string): string {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * SIMPLIFIED: the Activity has no direct signal from the Workflow's `approveContract` Update (the
- * Update only mutates Workflow-local state, which isn't passed into this Activity). We use
- * `state.attemptNumber` as an observable proxy instead: the Workflow only re-invokes `runPhase`
- * for the same phase after either a repair/replan loop-back or a human gate resuming it, so a
- * second attempt at "specify" is, in this Workflow's routing, only reachable after
- * `approveContractUpdate` fired and set `condition` back to `running`. Attempt 1 always drafts a
- * fresh contract and blocks on human approval; attempt >= 2 treats the contract as approved.
+ * Autonomy pivot (TASK-104): the specify phase no longer blocks on a human `task-contract-approval`
+ * gate. It drafts the contract from the prompt, classifies the size, and self-approves in a single
+ * attempt — the contract's problem statement + success criteria still gate PLANNING via
+ * `evaluateSpecify` (which requires an approved contract), but there is no human wait state. A human
+ * reviews the resulting criteria on the terminal draft PR, not before planning spend.
  */
 const specifyHandler: PhaseHandler = {
   phase: 'specify',
   async run(ctx): Promise<PhaseOutcome> {
     const { state, runState } = ctx;
 
-    if (state.attemptNumber <= 1) {
-      // On a real-agent runtime with a real prompt, draft a contract that reflects the actual request +
-      // a QA-required behavioral claim — the real plan phase produces QA scenarios that can
-      // cover it. The mock runtime keeps the generic single-correctness-claim stub, since its scripted
-      // plan cannot satisfy a QA-required behavioral claim (everyBehavioralClaimHasQaScenario).
-      const useRealContract = ctx.profile.usesRealAgent && Boolean(state.prompt);
-      const draftInput = useRealContract
-        ? draftContractInputFromPrompt(state.taskId, state.prompt as string)
-        : {
-            taskId: state.taskId,
-            objective: `Implement task ${state.taskId} in repository ${state.repositoryId}`,
-            constraints: [],
-            nonGoals: [],
-            claims: [
-              {
-                description: 'The task objective is satisfied and verified by passing checks.',
-                category: 'correctness' as const,
-                deterministicEvidenceRequired: true,
-                qaEvidenceRequired: false,
-                humanJudgmentRequired: false,
-              },
-            ],
-          };
-      // Classify task size before drafting the contract, so the contract carries the size a
-      // human reviews at the gate. The authoritative (Haiku) call is Claude-SDK-specific, so it runs
-      // only on a profile that uses SDK tool/model names; every other profile (mock + non-Claude CLI
-      // adapters) gets `undefined`, and the contract's `size ?? 'M'` default applies. An intake hint
-      // (state.size) takes precedence; a human can still override at the gate.
-      const classification = await classifyTaskSize({
-        adapter: createAgentAdapter(),
-        taskId: state.taskId,
-        phase: 'specify',
-        attemptNumber: state.attemptNumber,
-        cwd: ctx.profile.usesRealAgent ? (await resolveRepositoryPath(state.repositoryId)) ?? process.cwd() : process.cwd(),
-        useModel: ctx.profile.usesSdkToolNames,
-        model: ctx.profile.usesSdkToolNames ? SIZE_CLASSIFIER_MODEL : undefined,
-        input: { prompt: state.prompt ?? '' },
-        allowedTools: allowedToolsForBrokerRole('planner', ctx.profile),
-        disallowedTools: deniedToolsForBrokerRole('planner', ctx.profile),
-        daemon: ctx.daemon,
-      });
-      // Precedence: explicit intake hint → classifier → draftContract's `M` default (the one place
-      // "unclassified" becomes a concrete size). The classifier never invents a size.
-      const size = state.size ?? classification?.size;
-      runState.size = size;
-      const contract = markAwaitingApproval(draftContract({ ...draftInput, size }));
-      runState.contract = contract;
-      return {
-        kind: 'early',
-        result: {
-          outcome: 'await-human',
-          gate: {
-            id: `${state.taskId}-specify-gate`,
-            taskId: state.taskId,
-            phase: 'specify',
-            reason: 'task-contract-approval',
-            // Surface the problem statement + measurable success criteria in the gate
-            // summary so the human aligns on them before planning spend (no separate read route).
-            // The summary also carries the classified size the human can override here.
-            summary: formatContractGateSummary(contract),
-            createdAt: new Date().toISOString(),
-          },
-        },
-      };
-    }
-
-    if (!runState.contract) {
-      return { kind: 'early', result: blockedResult('specify', ['no contract was drafted before approval was expected']) };
-    }
-    runState.contract = markContractApproved(runState.contract);
-    // Report the classified size to the Workflow so it derives the run's phase set. The
-    // contract's size is authoritative — a gate-time human override rewrote it on the contract.
+    // On a real-agent runtime with a real prompt, draft a contract that reflects the actual request +
+    // a QA-required behavioral claim — the real plan phase produces QA scenarios that can cover it.
+    // The mock runtime keeps the generic single-correctness-claim stub, since its scripted plan
+    // cannot satisfy a QA-required behavioral claim (everyBehavioralClaimHasQaScenario).
+    const useRealContract = ctx.profile.usesRealAgent && Boolean(state.prompt);
+    const draftInput = useRealContract
+      ? draftContractInputFromPrompt(state.taskId, state.prompt as string)
+      : {
+          taskId: state.taskId,
+          objective: `Implement task ${state.taskId} in repository ${state.repositoryId}`,
+          constraints: [],
+          nonGoals: [],
+          claims: [
+            {
+              description: 'The task objective is satisfied and verified by passing checks.',
+              category: 'correctness' as const,
+              deterministicEvidenceRequired: true,
+              qaEvidenceRequired: false,
+              humanJudgmentRequired: false,
+            },
+          ],
+        };
+    // Classify task size before drafting the contract. The authoritative (Haiku) call is
+    // Claude-SDK-specific, so it runs only on a profile that uses SDK tool/model names; every other
+    // profile (mock + non-Claude CLI adapters) gets `undefined`, and the contract's `size ?? 'M'`
+    // default applies. An intake hint (state.size) takes precedence.
+    const classification = await classifyTaskSize({
+      adapter: createAgentAdapter(),
+      taskId: state.taskId,
+      phase: 'specify',
+      attemptNumber: state.attemptNumber,
+      cwd: ctx.profile.usesRealAgent ? (await resolveRepositoryPath(state.repositoryId)) ?? process.cwd() : process.cwd(),
+      useModel: ctx.profile.usesSdkToolNames,
+      model: ctx.profile.usesSdkToolNames ? SIZE_CLASSIFIER_MODEL : undefined,
+      input: { prompt: state.prompt ?? '' },
+      allowedTools: allowedToolsForBrokerRole('planner', ctx.profile),
+      disallowedTools: deniedToolsForBrokerRole('planner', ctx.profile),
+      daemon: ctx.daemon,
+    });
+    // Precedence: explicit intake hint → classifier → draftContract's `M` default (the one place
+    // "unclassified" becomes a concrete size). The classifier never invents a size.
+    const size = state.size ?? classification?.size;
+    runState.size = size;
+    // Draft then self-approve in one step — no human gate (autonomy pivot).
+    runState.contract = markContractApproved(markAwaitingApproval(draftContract({ ...draftInput, size })));
     const reportedSize = runState.contract.size;
     runState.size = reportedSize;
 
@@ -1555,6 +1534,71 @@ async function notifyReleasedBestEffort(ctx: PhaseContext, taskId: string): Prom
   }
 }
 
+/**
+ * PR-body inputs for the terminal draft PR (autonomy pivot, TASK-106): the per-claim met/unmet
+ * checklist sourced from evidence, plus — on non-convergence — the honest UnmetCriteria banner and
+ * any unmet upstream dependency (e.g. TASK-90 interactive QA when the success predicate needs it).
+ */
+interface ReleaseBodyInputs {
+  claimChecklist: ClaimChecklistEntry[];
+  unmetCriteria?: PrUnmetCriteriaSummary;
+  unmetDependencies?: string[];
+}
+
+function buildReleaseBodyInputs(
+  ctx: PhaseContext,
+  evidence: import('@awb/domain').Evidence[],
+  candidateSha: string,
+): ReleaseBodyInputs {
+  const { state, runState } = ctx;
+  const claims = runState.contract?.claims ?? [];
+  const claimIds = claims.map((c) => c.id);
+  const claimChecklist = buildClaimChecklist(evidence, claimIds, candidateSha);
+
+  // TASK-90 (interactive QA) is a HARD dependency of a truthful success predicate: any claim that
+  // requires QA evidence but has no PASSED qa evidence renders as an unmet dependency, so the draft
+  // PR never claims success on shallow navigate+screenshot evidence.
+  const qaRequiredClaimIds = claims.filter((c) => c.qaEvidenceRequired).map((c) => c.id);
+  const qaKinds = new Set(['qa-video', 'browser-trace', 'screenshot', 'terminal-recording']);
+  const qaProvenClaimIds = new Set(
+    evidence.filter((e) => e.status === 'passed' && qaKinds.has(e.kind)).flatMap((e) => e.claimIds),
+  );
+  const qaMissing = qaRequiredClaimIds.filter((id) => !qaProvenClaimIds.has(id));
+  const unmetDependencies =
+    qaMissing.length > 0 ? [`TASK-90 interactive QA for claim(s): ${qaMissing.join(', ')}`] : undefined;
+
+  const unmet = state.unmetCriteria;
+  const unmetCriteria: PrUnmetCriteriaSummary | undefined = unmet
+    ? {
+        stopReason: unmet.stopReason,
+        blockingFindings: unmet.blockingFindings.map((f) => ({ severity: f.severity, description: f.description })),
+      }
+    : undefined;
+
+  return { claimChecklist, unmetCriteria, unmetDependencies };
+}
+
+/**
+ * Assemble the terminal UnmetCriteria the release phase reports to the Workflow when the draft PR
+ * opened but not every acceptance claim is proven. Sources unproven claims from the per-claim
+ * checklist, cites the candidate SHA, and folds in any carried-in stop reason (budget/stuck).
+ */
+function buildReleaseUnmetCriteria(
+  ctx: PhaseContext,
+  body: ReleaseBodyInputs,
+  candidateSha: string,
+): UnmetCriteria {
+  const carried = ctx.state.unmetCriteria;
+  const unprovenClaimIds = body.claimChecklist.filter((c) => !c.met).map((c) => c.claimId);
+  return {
+    unprovenClaimIds,
+    lastCandidateSha: candidateSha,
+    blockingFindings: carried?.blockingFindings ?? [],
+    stopReason: carried?.stopReason ?? 'converged-unmet',
+    ...(body.unmetDependencies ? { unmetDependencies: body.unmetDependencies } : {}),
+  };
+}
+
 const releaseHandler: PhaseHandler = {
   phase: 'release',
   async run(ctx): Promise<PhaseOutcome> {
@@ -1587,18 +1631,27 @@ const releaseHandler: PhaseHandler = {
         // Task DAG orchestration: this task has delivered (branch landed) — unblock any stacked
         // children. Best-effort; the daemon's reconcile poll is the backstop.
         await notifyReleasedBestEffort(ctx, state.taskId);
+        // Autonomy pivot (TASK-104/106): landing locally is the terminal delivery action for a
+        // no-remote repo (the draft-PR analog). No human pr-readiness gate. When the loop carried in
+        // an UnmetCriteria (budget/stuck), report it terminally; otherwise this is a converged
+        // candidate.
+        if (state.unmetCriteria) {
+          const body = buildReleaseBodyInputs(ctx, evidence, candidateSha);
+          return {
+            kind: 'early',
+            result: { outcome: 'unmet-criteria', unmetCriteria: buildReleaseUnmetCriteria(ctx, body, candidateSha) },
+          };
+        }
         return {
           kind: 'early',
           result: {
-            outcome: 'await-human',
-            gate: {
-              id: `${state.taskId}-release-gate`,
-              taskId: state.taskId,
-              phase: 'release',
-              reason: 'pr-readiness',
-              summary: `Task ${state.taskId} landed locally: ${branchName} merged into ${merge.defaultBranch} (${merge.commitSha.slice(0, 8)}); no remote to open a PR against.`,
-              createdAt: new Date().toISOString(),
-            },
+            outcome: 'candidate',
+            candidate: buildPhaseAttempt(state, 'release', evidence.map((e) => e.id), [], {
+              contractVersion: runState.contract?.version ?? 1,
+              planVersion: runState.plan?.version ?? 1,
+              candidateSha: merge.commitSha,
+              baseSha: runState.baseSha,
+            }),
           },
         };
       }
@@ -1663,6 +1716,10 @@ const releaseHandler: PhaseHandler = {
       committedMedia = branchMedia.map((m, i) => ({ kind: m.record.kind, repoPath: commit.committedPaths[i] as string }));
     }
 
+    // PR-body inputs (autonomy pivot, TASK-106): the per-claim met/unmet checklist + any
+    // non-convergence banner / unmet dependency. The draft PR ALWAYS opens; it is never marked ready.
+    const bodyInputs = buildReleaseBodyInputs(ctx, evidence, candidateSha);
+
     const deliverResult = await ctx.observability.time('githubOperationMs', () =>
       deliverToGitHub(
         {
@@ -1675,6 +1732,9 @@ const releaseHandler: PhaseHandler = {
           changedPaths,
           candidateSha,
           evidence,
+          claimChecklist: bodyInputs.claimChecklist,
+          unmetCriteria: bodyInputs.unmetCriteria,
+          unmetDependencies: bodyInputs.unmetDependencies,
         },
         client,
         pushRunner,
@@ -1715,40 +1775,33 @@ const releaseHandler: PhaseHandler = {
         prReferencesFinalCandidateSha: true,
       },
     };
-    const decision = evaluatePhaseCompletion(
-      buildPhaseAttempt(state, 'release', evidence.map((e) => e.id), [], {
-        contractVersion: runState.contract?.version ?? 1,
-        planVersion: runState.plan?.version ?? 1,
-        candidateSha,
-        baseSha: runState.baseSha,
-      }),
-      completionContext,
-    );
-    if (!decision.complete) {
-      return { kind: 'early', result: blockedResult('release', decision.missing) };
-    }
+    const candidate = buildPhaseAttempt(state, 'release', evidence.map((e) => e.id), [], {
+      contractVersion: runState.contract?.version ?? 1,
+      planVersion: runState.plan?.version ?? 1,
+      candidateSha,
+      baseSha: runState.baseSha,
+    });
+    const decision = evaluatePhaseCompletion(candidate, completionContext);
 
     // Task DAG orchestration: the draft PR is open — this task has RELEASED. Notify the daemon so
     // the scheduler starts any blocked children stacked on this task's branch. Best-effort; the
     // daemon's reconcile poll is the correctness backstop.
     await notifyReleasedBestEffort(ctx, state.taskId);
 
-    // Per product spec, Release completing its own readiness checklist still gates on a human
-    // merge/close decision before the Workflow may proceed to Assimilate — the Workflow's
-    // `pullRequestMerged`/`pullRequestClosed` signal handlers own that transition (task-workflow.ts).
+    // Autonomy pivot (TASK-104/106): the draft PR is the TERMINAL state — never a human pr-readiness
+    // gate, never marked ready or merged here. On convergence (the release readiness checklist passes
+    // AND the loop carried no unmet criteria) the run succeeds via a `candidate`. Otherwise the run
+    // ends with a populated UnmetCriteria whose met/unmet checklist was just rendered into the draft
+    // PR body; a human decides merge out-of-band on GitHub. The per-claim checklist is honest status
+    // in the body; the terminal success predicate stays the existing release readiness decision so
+    // deterministic (mock) runs converge exactly as before.
+    const converged = decision.complete && !state.unmetCriteria;
+    if (converged) {
+      return { kind: 'early', result: { outcome: 'candidate', candidate } };
+    }
     return {
       kind: 'early',
-      result: {
-        outcome: 'await-human',
-        gate: {
-          id: `${state.taskId}-release-gate`,
-          taskId: state.taskId,
-          phase: 'release',
-          reason: 'pr-readiness',
-          summary: `Draft PR #${deliverResult.pr.number} for task ${state.taskId} is ready for human review/merge.`,
-          createdAt: new Date().toISOString(),
-        },
-      },
+      result: { outcome: 'unmet-criteria', unmetCriteria: buildReleaseUnmetCriteria(ctx, bodyInputs, candidateSha) },
     };
   },
 };

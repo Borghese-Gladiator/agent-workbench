@@ -55,9 +55,19 @@ function normalizeSize(size: string | undefined): 'S' | 'M' | 'L' | undefined {
   throw new Error(`Invalid --size "${size}": expected S, M, or L.`);
 }
 
-async function resolveRepo(repoOpt: string | undefined, fallback: string | undefined): Promise<string> {
-  if (repoOpt !== undefined) return resolveRepoRef(repoOpt);
-  return resolveRepositoryId(fallback);
+/**
+ * Resolve the repo a task will run against. `requireTrusted` (autonomy pivot, TASK-104): a task
+ * consumes the repo, so refuse an untrusted one UP FRONT rather than parking the run mid-flight.
+ */
+async function resolveRepo(
+  repoOpt: string | undefined,
+  fallback: string | undefined,
+  opts?: { requireTrusted?: boolean },
+): Promise<string> {
+  if (repoOpt !== undefined) return resolveRepoRef(repoOpt, opts);
+  const id = resolveRepositoryId(fallback);
+  // Route the fallback id through the same trust check when required.
+  return opts?.requireTrusted ? resolveRepoRef(id, opts) : id;
 }
 
 export function registerTaskCommands(program: Command): void {
@@ -78,7 +88,7 @@ export function registerTaskCommands(program: Command): void {
         opts: { repo?: string; prompt?: string; promptFile?: string; size?: string; parentTask?: string; baseBranch?: string },
       ) => {
         try {
-          const repoId = await resolveRepo(opts.repo, undefined);
+          const repoId = await resolveRepo(opts.repo, undefined, { requireTrusted: true });
           const prompt = readPromptFrom(opts.prompt ?? promptArg, opts.promptFile);
           const size = normalizeSize(opts.size);
           const result = await daemonClient.post<CreatedTask>('/api/tasks', {
@@ -127,7 +137,7 @@ export function registerTaskCommands(program: Command): void {
     )
     .action(async (opts: { repo?: string; node?: string[]; dep?: string[] }) => {
       try {
-        const repoId = await resolveRepo(opts.repo, undefined);
+        const repoId = await resolveRepo(opts.repo, undefined, { requireTrusted: true });
         const nodeSpecs = opts.node ?? [];
         if (nodeSpecs.length === 0) throw new Error('Provide at least one --node key=prompt.');
 

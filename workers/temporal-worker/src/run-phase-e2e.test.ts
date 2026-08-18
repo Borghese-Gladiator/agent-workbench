@@ -6,12 +6,7 @@ import { promisify } from 'node:util';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-  TaskWorkflow,
-  approveContractUpdate,
-  pullRequestMergedSignal,
-  getCurrentStateQuery,
-} from '@awb/workflow';
+import { TaskWorkflow, getCurrentStateQuery } from '@awb/workflow';
 import { runPhase } from './activities/run-phase.js';
 
 const execFileAsync = promisify(execFile);
@@ -64,7 +59,7 @@ beforeAll(async () => {
   repoDir = await makeTempRepo();
   await writeFileEnsuringDir(repoDir, 'README.md', '# fixture repo for runPhase e2e test\n');
   await commitAll(repoDir, 'initial commit');
-}, 60_000);
+}, 120_000);
 
 afterAll(async () => {
   await testEnv?.teardown();
@@ -90,6 +85,9 @@ describe('runPhase wired for real (E2E through TaskWorkflow)', () => {
       activities: { runPhase },
     });
 
+    // Autonomy pivot (TASK-104): no human gates. The run self-approves its contract at specify and
+    // opens a terminal draft PR at release — it drives to completion with NO awaiting-human stops.
+    let sawAwaitingHuman = false;
     const result = await worker.runUntil(async () => {
       const handle = await testEnv.client.workflow.start(TaskWorkflow, {
         taskQueue,
@@ -97,25 +95,24 @@ describe('runPhase wired for real (E2E through TaskWorkflow)', () => {
         args: [{ taskId, repositoryId }],
       });
 
+      // Poll until the workflow completes, recording whether it ever parked on a human.
       await waitForCondition(async () => {
-        const state = await handle.query(getCurrentStateQuery);
-        return state.phase === 'specify' && state.condition === 'awaiting-human';
-      });
-      await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion: 1 }] });
-
-      await waitForCondition(async () => {
-        const state = await handle.query(getCurrentStateQuery);
-        return state.phase === 'release' && state.condition === 'awaiting-human';
-      }, 30_000);
-      await handle.signal(pullRequestMergedSignal, { mergeCommitSha: 'e2e-merge-sha' });
+        try {
+          const state = await handle.query(getCurrentStateQuery);
+          if (state.condition === 'awaiting-human') sawAwaitingHuman = true;
+          return state.phase === 'assimilate';
+        } catch {
+          return true; // completed/terminated — query no longer available
+        }
+      }, 90_000);
 
       return handle.result();
     });
 
+    expect(sawAwaitingHuman).toBe(false);
     expect(result.phase).toBe('assimilate');
     expect(result.condition).toBe('completed');
-    expect(result.deliveryState).toBe('merged');
-  }, 60_000);
+  }, 120_000);
 
   it('runs the real program-design phase for an L task (size override at the gate) (TASK-51/52)', async () => {
     const taskId = `e2e-l-task-${Date.now()}`;
@@ -130,35 +127,31 @@ describe('runPhase wired for real (E2E through TaskWorkflow)', () => {
       activities: { runPhase },
     });
 
+    // Size is seeded via the intake hint (no gate to override at) so the run walks program-design.
     const result = await worker.runUntil(async () => {
       const handle = await testEnv.client.workflow.start(TaskWorkflow, {
         taskQueue,
         workflowId: `test-run-phase-l-${taskId}`,
-        args: [{ taskId, repositoryId }],
+        args: [{ taskId, repositoryId, size: 'L' }],
       });
 
       await waitForCondition(async () => {
-        const state = await handle.query(getCurrentStateQuery);
-        return state.phase === 'specify' && state.condition === 'awaiting-human';
-      });
-      // Force size L at the gate so the run walks the real program-design phase.
-      await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion: 1, size: 'L' }] });
-
-      await waitForCondition(async () => {
-        const state = await handle.query(getCurrentStateQuery);
-        return state.phase === 'release' && state.condition === 'awaiting-human';
-      }, 30_000);
-      await handle.signal(pullRequestMergedSignal, { mergeCommitSha: 'e2e-merge-sha' });
+        try {
+          const state = await handle.query(getCurrentStateQuery);
+          return state.phase === 'assimilate';
+        } catch {
+          return true;
+        }
+      }, 90_000);
       return handle.result();
     });
 
-    // The run reaching release/assimilate for an L phase set is itself proof the real program-design
-    // phase ran and cleared its gate: a program-design that never completed would block before release.
+    // The run reaching assimilate for an L phase set is itself proof the real program-design phase ran.
     expect(result.size).toBe('L');
     expect(result.phaseSet).toContain('program-design');
     expect(result.phase).toBe('assimilate');
     expect(result.condition).toBe('completed');
-  }, 60_000);
+  }, 120_000);
 
   it('single-shots an S task through the real implement phase with no plan phase (TASK-51)', async () => {
     const taskId = `e2e-s-task-${Date.now()}`;
@@ -173,34 +166,31 @@ describe('runPhase wired for real (E2E through TaskWorkflow)', () => {
       activities: { runPhase },
     });
 
+    // Seed S via the intake hint: the run must skip plan AND program-design and single-shot to implement.
     const result = await worker.runUntil(async () => {
       const handle = await testEnv.client.workflow.start(TaskWorkflow, {
         taskQueue,
         workflowId: `test-run-phase-s-${taskId}`,
-        args: [{ taskId, repositoryId }],
+        args: [{ taskId, repositoryId, size: 'S' }],
       });
 
       await waitForCondition(async () => {
-        const state = await handle.query(getCurrentStateQuery);
-        return state.phase === 'specify' && state.condition === 'awaiting-human';
-      });
-      // Force S: the run must skip plan AND program-design and single-shot straight to implement.
-      await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion: 1, size: 'S' }] });
-
-      await waitForCondition(async () => {
-        const state = await handle.query(getCurrentStateQuery);
-        return state.phase === 'release' && state.condition === 'awaiting-human';
-      }, 30_000);
-      await handle.signal(pullRequestMergedSignal, { mergeCommitSha: 'e2e-merge-sha' });
+        try {
+          const state = await handle.query(getCurrentStateQuery);
+          return state.phase === 'assimilate';
+        } catch {
+          return true;
+        }
+      }, 90_000);
       return handle.result();
     });
 
-    // Reaching release with an S phase set proves the synthesized single-shot plan let implement
+    // Reaching assimilate with an S phase set proves the synthesized single-shot plan let implement
     // complete WITHOUT a plan phase — the S single-shot bug (implement blocking on a missing plan) is fixed.
     expect(result.size).toBe('S');
     expect(result.phaseSet).not.toContain('plan');
     expect(result.phaseSet).not.toContain('program-design');
     expect(result.phase).toBe('assimilate');
     expect(result.condition).toBe('completed');
-  }, 60_000);
+  }, 120_000);
 });

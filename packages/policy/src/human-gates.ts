@@ -39,19 +39,6 @@ export function flakyBaselineBlocksCompletion(sameCommandDifferentResultCount: n
   return sameCommandDifferentResultCount >= threshold;
 }
 
-export function repeatedFailureNoProgress(consecutiveIdenticalFingerprints: number, threshold = 3): boolean {
-  return consecutiveIdenticalFingerprints >= threshold;
-}
-
-export function tokenOrRuntimeBudgetExceeded(
-  usedTokens: number,
-  tokenBudget: number,
-  usedRuntimeMs: number,
-  runtimeBudgetMs: number,
-): boolean {
-  return usedTokens >= tokenBudget || usedRuntimeMs >= runtimeBudgetMs;
-}
-
 export function qaRemainsInconclusive(anyScenarioInconclusive: boolean): boolean {
   return anyScenarioInconclusive;
 }
@@ -62,22 +49,6 @@ export function reviewerFindingRequiresProductDecision(findingCategory: string):
 
 export function waiverRequested(waiverRequestPresent: boolean): boolean {
   return waiverRequestPresent;
-}
-
-/**
- * The mandatory gates (product spec §14): first-time repository trust, task-contract approval,
- * and PR readiness/final merge. These are not "conditions to check" the way the ones above are —
- * they always require a human, every time, for every task. Modeled as a fixed list so callers
- * can assert none of them were skipped.
- */
-export const MANDATORY_GATE_REASONS: readonly HumanGateReason[] = [
-  'first-time-repository-trust',
-  'task-contract-approval',
-  'pr-readiness',
-];
-
-export function isMandatoryGate(reason: HumanGateReason): boolean {
-  return (MANDATORY_GATE_REASONS as readonly string[]).includes(reason);
 }
 
 /**

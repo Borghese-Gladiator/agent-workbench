@@ -56,20 +56,3 @@ function routeChallengeFinding(category: FindingCategory, phaseSet: TaskPhase[] 
       return 'implement';
   }
 }
-
-/**
- * Escalation triggers that must produce a HumanGate rather than another loop iteration, even
- * though the phase itself hasn't reached a terminal outcome.
- */
-export type EscalationTrigger =
-  | { kind: 'repeated-identical-failure'; occurrences: number; threshold: number }
-  | { kind: 'budget-exhaustion' };
-
-export function shouldEscalateToHuman(trigger: EscalationTrigger): boolean {
-  switch (trigger.kind) {
-    case 'repeated-identical-failure':
-      return trigger.occurrences >= trigger.threshold;
-    case 'budget-exhaustion':
-      return true;
-  }
-}

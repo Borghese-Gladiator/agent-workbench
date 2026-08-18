@@ -29,17 +29,36 @@ export function gitTopLevel(path: string): string | undefined {
 /**
  * Resolves a repo reference to an id. A path-like ref (".", "./x", absolute) is matched against the
  * registry by its git top-level; anything else is treated as an id, falling back to the last used.
+ *
+ * `requireTrusted` (autonomy pivot, TASK-104): repository trust is a one-time config flag, not a
+ * per-run human gate. When a task/run is about to CONSUME a repo, pass `requireTrusted` so an
+ * untrusted repo is refused UP FRONT with an actionable message, rather than the workflow parking
+ * mid-run. Trust it once with `awb repo trust <repo>` (or `awb repo add --trust`).
  */
-export async function resolveRepoRef(ref: string | undefined): Promise<string> {
+export async function resolveRepoRef(ref: string | undefined, opts?: { requireTrusted?: boolean }): Promise<string> {
   const db = openWorkbenchDatabase().db;
+  let id: string;
   if (ref === '.' || ref?.startsWith('./') || ref?.startsWith('/') || ref?.startsWith('../')) {
     const top = gitTopLevel(resolve(ref));
     if (!top) throw new Error(`${ref} is not inside a Git repository`);
     const found = await findRepositoryByCanonicalPath(db, top);
     if (!found) throw new Error(`No registered repository at ${top}. Run \`awb repo add .\` first.`);
-    return found.id;
+    id = found.id;
+  } else {
+    id = resolveRepositoryId(ref);
   }
-  return resolveRepositoryId(ref);
+
+  if (opts?.requireTrusted) {
+    const repository = await getRepository(db, id);
+    if (!repository) throw new Error(`No repository with id ${id}`);
+    if (!repository.trusted) {
+      throw new Error(
+        `Repository ${id} (${repository.name}) is not trusted. A task cannot run against an untrusted ` +
+          `repository. Trust it first: \`awb repo trust ${id}\`.`,
+      );
+    }
+  }
+  return id;
 }
 
 function printRepoLine(r: Repository): void {
@@ -53,19 +72,28 @@ export function registerRepoCommands(program: Command): void {
     .command('add [path]')
     .description('Register a local Git repository (defaults to the current directory)')
     .option('--name <name>', 'Display name for the repository')
-    .action(async (path: string | undefined, opts: { name?: string }) => {
+    .option('--trust', 'Mark the repository trusted immediately (skips the separate approve step)')
+    .action(async (path: string | undefined, opts: { name?: string; trust?: boolean }) => {
       const db = openWorkbenchDatabase().db;
       const target = resolve(path ?? '.');
       const canonicalPath = gitTopLevel(target) ?? target;
       const repository = await registerRepository(db, { canonicalPath, name: opts.name });
       rememberRepositoryId(repository.id);
+      // Repository trust is a one-time config flag (autonomy pivot, TASK-104). `--trust` registers
+      // and approves in a single step so the repo is immediately usable by a task.
+      if (opts.trust) await approveRepository(db, repository.id);
       if (outputOptions().json) {
-        emitJson(repository);
+        emitJson({ ...repository, trusted: opts.trust ? true : repository.trusted });
         return;
       }
       printResult(repository.id);
-      printInfo(`Registered ${repository.name} — untrusted until approved.`);
-      printInfo(`Next: awb repo sync ${repository.id} && awb repo approve ${repository.id}`);
+      if (opts.trust) {
+        printInfo(`Registered ${repository.name} — trusted.`);
+        printInfo(`Next: awb repo sync ${repository.id}`);
+      } else {
+        printInfo(`Registered ${repository.name} — untrusted until approved.`);
+        printInfo(`Next: awb repo sync ${repository.id} && awb repo trust ${repository.id}`);
+      }
     });
 
   repo
@@ -147,7 +175,8 @@ export function registerRepoCommands(program: Command): void {
 
   repo
     .command('approve [repo]')
-    .description('Mark a discovered repository profile as trusted')
+    .alias('trust')
+    .description('Mark a repository as trusted (one-time; required before a task can run against it)')
     .action(async (ref: string | undefined) => {
       const db = openWorkbenchDatabase().db;
       const id = await resolveRepoRef(ref);

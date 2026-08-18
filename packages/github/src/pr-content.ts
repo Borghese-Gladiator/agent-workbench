@@ -1,4 +1,15 @@
 import type { Evidence } from '@awb/domain';
+import { renderClaimChecklist, type ClaimChecklistEntry } from './evidence-matrix.js';
+
+/**
+ * Non-convergence summary threaded into the PR body (autonomy pivot, TASK-106): the honest reason
+ * the loop stopped without proving every claim, plus any blocking findings. The draft PR opens
+ * regardless — it is never marked ready or merged here.
+ */
+export interface PrUnmetCriteriaSummary {
+  stopReason: string;
+  blockingFindings: { severity: string; description: string }[];
+}
 
 /**
  * Structured inputs for a PR's title + body. Kept provider-neutral (plain data), so the same
@@ -15,6 +26,21 @@ export interface PrContentInput {
   evidence: Evidence[];
   /** Short candidate SHA, surfaced in the body footer. */
   candidateSha: string;
+  /**
+   * Per-claim met/unmet checklist (autonomy pivot, TASK-106). Rendered as an Acceptance criteria
+   * section so a reviewer sees exactly which acceptance claims are proven before merging.
+   */
+  claimChecklist?: ClaimChecklistEntry[];
+  /**
+   * Present only when the loop terminated WITHOUT proving every claim: an honest non-convergence
+   * banner. The draft PR still opens — merge remains a human decision out-of-band.
+   */
+  unmetCriteria?: PrUnmetCriteriaSummary;
+  /**
+   * Upstream dependencies the success predicate needed but could not satisfy (e.g. TASK-90
+   * interactive QA), rendered as unmet dependencies.
+   */
+  unmetDependencies?: string[];
 }
 
 const TITLE_MAX = 72;
@@ -147,24 +173,66 @@ export function renderPrBody(input: PrContentInput): string {
   }
   if (changes.length === 0) changes.push('_No structured change summary was recorded._');
 
-  return withClaudeCodeSignature(
-    [
-      '## Background',
-      '',
-      input.objective.trim() || '_No objective recorded._',
-      '',
-      '## Changes',
-      '',
-      ...changes,
-      '',
-      '## Test plan',
-      '',
-      renderTestPlan(input.evidence),
-      '',
-      '---',
-      `<sub>Delivered by the Agentic Workbench · candidate \`${input.candidateSha.slice(0, 12)}\`</sub>`,
-    ].join('\n'),
+  const sections: string[] = [
+    '## Background',
+    '',
+    input.objective.trim() || '_No objective recorded._',
+    '',
+    '## Changes',
+    '',
+    ...changes,
+    '',
+    '## Test plan',
+    '',
+    renderTestPlan(input.evidence),
+  ];
+
+  // Per-claim met/unmet acceptance checklist (autonomy pivot, TASK-106).
+  const checklist = renderClaimChecklist(input.claimChecklist ?? []);
+  if (checklist) sections.push('', checklist);
+
+  // Non-convergence banner: rendered ONLY when the loop stopped without proving every claim. The
+  // draft PR still opens — this is an honest status, never a "ready to merge" signal.
+  const nonConvergence = renderNonConvergence(input.unmetCriteria, input.unmetDependencies);
+  if (nonConvergence) sections.push('', nonConvergence);
+
+  sections.push(
+    '',
+    '---',
+    `<sub>Delivered by the Agentic Workbench · candidate \`${input.candidateSha.slice(0, 12)}\`</sub>`,
   );
+
+  return withClaudeCodeSignature(sections.join('\n'));
+}
+
+/**
+ * The "Unmet acceptance criteria" section (autonomy pivot, TASK-106). Summarizes why the loop
+ * stopped short, lists blocking findings, and renders any unmet upstream dependency (e.g. TASK-90
+ * interactive QA) so a reviewer knows the draft is intentionally not ready. Returns '' when the run
+ * converged (no unmet criteria and no unmet dependencies).
+ */
+function renderNonConvergence(
+  unmet: PrUnmetCriteriaSummary | undefined,
+  unmetDependencies: string[] | undefined,
+): string {
+  const deps = unmetDependencies ?? [];
+  if (!unmet && deps.length === 0) return '';
+
+  const lines: string[] = ['## Unmet acceptance criteria', ''];
+  if (unmet) {
+    lines.push(
+      `> ⚠️ This draft did not fully converge (stop reason: \`${unmet.stopReason}\`). It is intentionally left as a draft — do not merge until the items below are resolved.`,
+    );
+    if (unmet.blockingFindings.length > 0) {
+      lines.push('', '**Blocking findings**');
+      for (const f of unmet.blockingFindings) lines.push(`- **${f.severity}** — ${f.description}`);
+    }
+  }
+  if (deps.length > 0) {
+    lines.push('', '**Unmet dependencies**');
+    for (const d of deps) lines.push(`- [ ] ${d}`);
+  }
+  return lines.join('\n');
 }
 
 /** The Test plan section: one readable line per evidence record, grouped pass/fail, no raw claim ids. */

@@ -2,7 +2,8 @@ import type { Evidence } from '@awb/domain';
 import type { GitHubClient } from './github-client.js';
 import type { GitPushRunner } from './push.js';
 import type { RepoRef, PushBranchInput, DraftPrRecord } from './types.js';
-import { derivePrTitle, renderPrBody } from './pr-content.js';
+import { derivePrTitle, renderPrBody, type PrUnmetCriteriaSummary } from './pr-content.js';
+import type { ClaimChecklistEntry } from './evidence-matrix.js';
 
 export interface DeliverInput {
   ref: RepoRef;
@@ -19,6 +20,12 @@ export interface DeliverInput {
   evidence: Evidence[];
   /** Existing PR number if this is an update to an already-open draft PR, rather than a first delivery. */
   existingPrNumber?: number;
+  /** Per-claim met/unmet checklist for the PR body's Acceptance criteria section (TASK-106). */
+  claimChecklist?: ClaimChecklistEntry[];
+  /** Non-convergence banner when the loop stopped without proving every claim (TASK-106). */
+  unmetCriteria?: PrUnmetCriteriaSummary;
+  /** Unmet upstream dependencies (e.g. TASK-90 interactive QA) rendered in the PR body. */
+  unmetDependencies?: string[];
 }
 
 export interface DeliverResult {
@@ -56,6 +63,9 @@ export async function deliverToGitHub(
     changedPaths: input.changedPaths,
     evidence: input.evidence,
     candidateSha: input.candidateSha,
+    claimChecklist: input.claimChecklist,
+    unmetCriteria: input.unmetCriteria,
+    unmetDependencies: input.unmetDependencies,
   });
 
   let pr: DraftPrRecord | { number: number };

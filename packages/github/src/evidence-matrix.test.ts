@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderEvidenceMatrix } from './evidence-matrix.js';
+import { renderEvidenceMatrix, buildClaimChecklist, renderClaimChecklist } from './evidence-matrix.js';
 import type { Evidence } from '@awb/domain';
 
 function makeEvidence(overrides: Partial<Evidence> = {}): Evidence {
@@ -48,5 +48,51 @@ describe('renderEvidenceMatrix', () => {
 
     const withoutClaims = renderEvidenceMatrix([makeEvidence({ claimIds: [] })], 'd'.repeat(40));
     expect(withoutClaims).toMatch(/\| — \|/);
+  });
+});
+
+describe('buildClaimChecklist', () => {
+  const sha = 'a'.repeat(40);
+
+  it('marks a claim met when passing evidence references it', () => {
+    const entries = buildClaimChecklist(
+      [makeEvidence({ claimIds: ['c1'], status: 'passed', kind: 'unit-test', summary: 'ok' })],
+      ['c1'],
+      sha,
+    );
+    expect(entries[0]).toMatchObject({ claimId: 'c1', met: true });
+    expect(entries[0]?.evidenceSummary).toContain('unit-test');
+  });
+
+  it('marks a claim unmet with a reason + last SHA when only failing evidence references it', () => {
+    const entries = buildClaimChecklist(
+      [makeEvidence({ claimIds: ['c1'], status: 'failed', kind: 'qa-video', summary: 'assertion failed' })],
+      ['c1'],
+      sha,
+    );
+    expect(entries[0]).toMatchObject({ claimId: 'c1', met: false, lastCandidateSha: sha });
+    expect(entries[0]?.reason).toContain('qa-video failed');
+  });
+
+  it('marks a claim unmet when no evidence references it at all', () => {
+    const entries = buildClaimChecklist([], ['c1'], sha);
+    expect(entries[0]).toMatchObject({ claimId: 'c1', met: false });
+    expect(entries[0]?.reason).toContain('no passing evidence');
+  });
+});
+
+describe('renderClaimChecklist', () => {
+  it('renders met rows checked with evidence and unmet rows unchecked with reason + SHA', () => {
+    const md = renderClaimChecklist([
+      { claimId: 'c1', met: true, evidenceSummary: 'unit-test: ok' },
+      { claimId: 'c2', met: false, reason: 'qa-video failed', lastCandidateSha: 'b'.repeat(40) },
+    ]);
+    expect(md).toContain('- [x] `c1` — unit-test: ok');
+    expect(md).toContain('- [ ] `c2` — qa-video failed (last candidate `bbbbbbbbbbbb`)');
+    expect(md).toContain('### Acceptance criteria');
+  });
+
+  it('returns empty for no entries', () => {
+    expect(renderClaimChecklist([])).toBe('');
   });
 });

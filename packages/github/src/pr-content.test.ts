@@ -107,6 +107,63 @@ describe('renderPrBody', () => {
     expect(body).toContain('❌ **unit-test** — boom');
   });
 
+  it('renders a per-claim met/unmet Acceptance criteria checklist sourced from evidence', () => {
+    const body = renderPrBody({
+      objective: 'x',
+      changedPaths: [],
+      candidateSha: 'a'.repeat(40),
+      evidence: [ev()],
+      claimChecklist: [
+        { claimId: 'c1', met: true, evidenceSummary: 'unit-test: passed' },
+        { claimId: 'c2', met: false, reason: 'no passing evidence', lastCandidateSha: 'a'.repeat(40) },
+      ],
+    });
+    expect(body).toContain('### Acceptance criteria');
+    expect(body).toContain('- [x] `c1` — unit-test: passed');
+    expect(body).toContain('- [ ] `c2` — no passing evidence (last candidate `aaaaaaaaaaaa`)');
+  });
+
+  it('renders a non-convergence banner + blocking findings when the loop did not fully converge', () => {
+    const body = renderPrBody({
+      objective: 'x',
+      changedPaths: [],
+      candidateSha: 'a'.repeat(40),
+      evidence: [ev()],
+      unmetCriteria: {
+        stopReason: 'converged-unmet',
+        blockingFindings: [{ severity: 'blocker', description: 'data leak across tenants' }],
+      },
+    });
+    expect(body).toContain('## Unmet acceptance criteria');
+    expect(body).toContain('stop reason: `converged-unmet`');
+    expect(body).toContain('do not merge');
+    expect(body).toContain('**blocker** — data leak across tenants');
+  });
+
+  it('renders an unmet dependency (e.g. TASK-90 interactive QA) as an unchecked item', () => {
+    const body = renderPrBody({
+      objective: 'x',
+      changedPaths: [],
+      candidateSha: 'a'.repeat(40),
+      evidence: [ev()],
+      unmetDependencies: ['TASK-90 (interactive QA)'],
+    });
+    expect(body).toContain('## Unmet acceptance criteria');
+    expect(body).toContain('**Unmet dependencies**');
+    expect(body).toContain('- [ ] TASK-90 (interactive QA)');
+  });
+
+  it('omits the non-convergence section entirely on a converged run', () => {
+    const body = renderPrBody({
+      objective: 'x',
+      changedPaths: [],
+      candidateSha: 'a'.repeat(40),
+      evidence: [ev()],
+      claimChecklist: [{ claimId: 'c1', met: true, evidenceSummary: 'unit-test: passed' }],
+    });
+    expect(body).not.toContain('## Unmet acceptance criteria');
+  });
+
   // The objective lives in Background; Changes must NOT re-narrate the whole prompt.
   it('does not echo the whole objective inside the Changes section', () => {
     const objective =

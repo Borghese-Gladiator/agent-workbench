@@ -31,6 +31,21 @@ function runCli(args: string[], dataDir: string): string {
   });
 }
 
+/** Runs the CLI and returns combined stdout/stderr + exit code, without throwing on non-zero. */
+function runCliCapture(args: string[], dataDir: string): { code: number; output: string } {
+  try {
+    const output = execFileSync('node', [cliEntry, ...args], {
+      env: { ...process.env, AWB_DATA_DIR: dataDir },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { code: 0, output };
+  } catch (err) {
+    const e = err as { status?: number; stdout?: string; stderr?: string };
+    return { code: e.status ?? 1, output: `${e.stdout ?? ''}${e.stderr ?? ''}` };
+  }
+}
+
 describe('awb repo CLI', () => {
   let dataDir: string;
   let fixtureRepo: string;
@@ -90,5 +105,37 @@ describe('awb repo CLI', () => {
 
   it('reports a clear error for an unregistered repository id', () => {
     expect(() => runCli(['repo', 'show', 'not-a-real-id'], dataDir)).toThrow();
+  });
+
+  // Autonomy pivot (TASK-104): repo trust is a one-time config flag.
+  it('add --trust registers the repository already trusted', () => {
+    const addOutput = runCli(['repo', 'add', fixtureRepo, '--trust'], dataDir);
+    expect(addOutput).toContain('trusted');
+    const listJson = runCli(['repo', 'list', '--json'], dataDir);
+    const parsed = JSON.parse(listJson) as { trusted: boolean }[];
+    expect(parsed[0]?.trusted).toBe(true);
+  });
+
+  it('exposes `trust` as an alias of `approve`', () => {
+    const addOutput = runCli(['repo', 'add', fixtureRepo], dataDir);
+    const repositoryId = addOutput.split('\n')[0]?.trim() as string;
+    const trustOutput = runCli(['repo', 'trust', repositoryId], dataDir);
+    expect(trustOutput).toContain('is now trusted');
+    const listJson = runCli(['repo', 'list', '--json'], dataDir);
+    const parsed = JSON.parse(listJson) as { id: string; trusted: boolean }[];
+    expect(parsed.find((r) => r.id === repositoryId)?.trusted).toBe(true);
+  });
+
+  it('refuses to create a task against an untrusted repository, up front', () => {
+    const addOutput = runCli(['repo', 'add', fixtureRepo], dataDir);
+    const repositoryId = addOutput.split('\n')[0]?.trim() as string;
+    // The trust check fires BEFORE any daemon call, so this fails fast without a running daemon.
+    const { code, output } = runCliCapture(
+      ['task', 'create', 'do a thing', '--repo', repositoryId],
+      dataDir,
+    );
+    expect(code).not.toBe(0);
+    expect(output).toContain('not trusted');
+    expect(output).toContain(`awb repo trust ${repositoryId}`);
   });
 });

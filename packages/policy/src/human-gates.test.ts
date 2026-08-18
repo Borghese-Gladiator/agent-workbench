@@ -3,14 +3,10 @@ import {
   conditionalPlanGateReasons,
   plannerCriticNonConvergence,
   flakyBaselineBlocksCompletion,
-  repeatedFailureNoProgress,
-  tokenOrRuntimeBudgetExceeded,
   qaRemainsInconclusive,
   reviewerFindingRequiresProductDecision,
   waiverRequested,
-  isMandatoryGate,
   requiresPlanApprovalGate,
-  MANDATORY_GATE_REASONS,
   type PlanGateInputs,
 } from './human-gates.js';
 
@@ -105,30 +101,6 @@ describe('flakyBaselineBlocksCompletion', () => {
   });
 });
 
-describe('repeatedFailureNoProgress', () => {
-  it('does not trigger below the default threshold of 3', () => {
-    expect(repeatedFailureNoProgress(2)).toBe(false);
-  });
-
-  it('triggers at the default threshold of 3', () => {
-    expect(repeatedFailureNoProgress(3)).toBe(true);
-  });
-});
-
-describe('tokenOrRuntimeBudgetExceeded', () => {
-  it('does not trigger when both budgets have headroom', () => {
-    expect(tokenOrRuntimeBudgetExceeded(500, 1000, 1000, 5000)).toBe(false);
-  });
-
-  it('triggers when the token budget is exceeded', () => {
-    expect(tokenOrRuntimeBudgetExceeded(1000, 1000, 100, 5000)).toBe(true);
-  });
-
-  it('triggers when the runtime budget is exceeded', () => {
-    expect(tokenOrRuntimeBudgetExceeded(100, 1000, 5000, 5000)).toBe(true);
-  });
-});
-
 describe('qaRemainsInconclusive', () => {
   it('triggers when any scenario is inconclusive', () => {
     expect(qaRemainsInconclusive(true)).toBe(true);
@@ -150,20 +122,6 @@ describe('waiverRequested', () => {
   it('always requires a human gate when a waiver is requested', () => {
     expect(waiverRequested(true)).toBe(true);
     expect(waiverRequested(false)).toBe(false);
-  });
-});
-
-describe('mandatory gates', () => {
-  it('classifies exactly the three mandatory reasons as mandatory', () => {
-    expect(MANDATORY_GATE_REASONS).toHaveLength(3);
-    for (const reason of MANDATORY_GATE_REASONS) {
-      expect(isMandatoryGate(reason)).toBe(true);
-    }
-  });
-
-  it('does not classify a conditional reason as mandatory', () => {
-    expect(isMandatoryGate('new-dependency')).toBe(false);
-    expect(isMandatoryGate('scope-expansion')).toBe(false);
   });
 });
 
