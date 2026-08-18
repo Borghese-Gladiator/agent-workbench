@@ -20,35 +20,27 @@ export function plannerInstruction(contract: TaskContract, hasMemory = false): s
   // When project memory was injected into the context payload, point the
   // planner at it so accumulated pitfalls/conventions/commands actually inform the plan.
   const memoryLine = hasMemory
-    ? 'The context includes a "memory" array of facts prior runs learned about this repository ' +
-      '(pitfalls, invariants, conventions, build/test commands). Use it: avoid known pitfalls, respect ' +
-      'invariants/conventions, and prefer the recorded commands over guessing.'
+    ? 'The context has a "memory" array of facts prior runs learned (pitfalls, invariants, conventions, ' +
+      'build/test commands). Respect it and prefer recorded commands over guessing.'
     : '';
   const behavioralClaimIds = contract.claims
     .filter((c) => c.category === 'behavior' && c.qaEvidenceRequired)
     .map((c) => c.id);
   const qaLine =
     behavioralClaimIds.length > 0
-      ? [
-          `The contract has behavioral claim(s) requiring QA evidence: ${behavioralClaimIds.join(', ')}.`,
-          'At least one slice that lists such a claim in its "claimIds" MUST also declare a non-empty',
-          '"qaScenarioIds" naming the QA scenario(s) that exercise it, or the plan will be rejected.',
-        ].join(' ')
+      ? `Behavioral claim(s) needing QA evidence: ${behavioralClaimIds.join(', ')}. At least one slice ` +
+        'listing such a claim in "claimIds" MUST also declare a non-empty "qaScenarioIds", or the plan is rejected.'
       : '';
   return [
     `Produce an implementation plan for this contract objective: ${contract.objective}.`,
-    'Decompose the work into ordered slices. Respond with a JSON object of the form',
+    'Respond with a fenced ```json code block of the form',
     '{"summary": string, "slices": [{"objective": string, "likelyPaths": string[],',
     '"requiredTargetedChecks": string[] (non-empty), "claimIds": string[], "dependencies": string[],',
-    '"qaScenarioIds": string[]}]}',
-    'as a fenced ```json code block. Each slice must have at least one targeted check.',
-    // Bias toward the smallest plan that covers the work: each slice is executed as a
-    // separate, cold builder session, so extra slices multiply runtime and token cost. Investigation
-    // is not its own slice — fold discovery and verification into the slice that makes the change.
-    'IMPORTANT: use as FEW slices as possible — prefer a SINGLE slice unless the work spans genuinely',
-    'independent units (e.g. separate packages/files that can be built and checked on their own).',
-    'Do NOT create separate "investigate/discover" or "verify/validate" slices: exploring the repo',
-    'and running the checks are part of implementing the change, so put them in the same slice.',
+    '"qaScenarioIds": string[]}]}.',
+    // Each slice is a separate cold builder session, so extra slices multiply runtime and token cost.
+    'Use as FEW slices as possible — prefer ONE unless the work spans genuinely independent units.',
+    'Do NOT make separate "investigate" or "verify" slices; folding exploration and checks into the',
+    'implementing slice is expected.',
     memoryLine,
     qaLine,
   ]

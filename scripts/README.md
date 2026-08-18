@@ -21,6 +21,40 @@ holds. Exit 0 when clean, nonzero on drift.
   is local git config and doesn't travel with the branch, so the `prepare`
   step is what wires it up for each clone/checkout.
 
+## `measure-token-cost.mjs`
+
+Reads the live workbench SQLite and prints, per agent session, the full token
+breakdown (fresh / cache-read / cache-write / output) with a recomputed cost
+validated against the SDK-reported `cost_usd`. Read-only.
+
+- `node scripts/measure-token-cost.mjs [path-to-workbench.sqlite]`
+
+## `token-spend-by-phase.mjs` (TASK-79)
+
+Ranks per-phase token spend so the top-offender phases for prompt/context
+reduction surface first. Joins `model_invocations` → `agent_sessions` for the
+cache split (fresh / cache-read / cache-write / output / cost) and
+`context_composition` for the static-vs-injected context split. Read-only;
+mirrors `getTokenSpendByPhase` in `packages/database`.
+
+- `node scripts/token-spend-by-phase.mjs [path-to-workbench.sqlite] [--task <taskId>]`
+- `node scripts/token-spend-by-phase.mjs --help`
+
+## `size-classifier-eval.mjs` + `docs/task-62-corpus.json` (TASK-62)
+
+Evaluates the local size classifier against the curated corpus
+(`docs/task-62-corpus.json`: ~40 prompts — clear-S, clear-L, borderline S–M and
+M–L, each with an expected label + rationale). For each model it runs every
+prompt N times and reports accuracy, agreement (self-consistency), and a
+cost-weighted error where under-sizing is penalized more than over-sizing (the
+same scoring the shadow trace records). Read-only: it POSTs to a local Ollama,
+never writing the workbench DB.
+
+- `node scripts/size-classifier-eval.mjs [--models a,b,c] [--runs N] [--host URL] [--corpus PATH]`
+- `node scripts/size-classifier-eval.mjs --help`
+- Larger candidates to pull and compare: `qwen3:30b`, `gemma`, `qwen3-coder:30b`
+  (`AWB_SHADOW_CLASSIFIER_MODEL` selects the live shadow model).
+
 ## other operations
 
 The day-to-day workbench operations are exposed as first-class CLI commands

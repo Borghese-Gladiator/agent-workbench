@@ -28,6 +28,7 @@ import {
 import type { TaskSize } from '@awb/domain';
 import { validateTaskDag, TaskDagValidationError, TaskDagSpecSchema, type TaskDagSpec } from '@awb/domain';
 import { routeFeedback, NO_ROUTING_SIGNAL, type FeedbackRoutingSignal } from '@awb/github';
+import { resolveLayout, resolvePlanningConfig } from '@awb/config';
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
 import { taskQueueName } from '../temporal-worker-constants.js';
 import type { TaskScheduler } from '../scheduler.js';
@@ -72,11 +73,23 @@ export function registerTaskRoutes(
     }
 
     const workflowId = workflowIdFor(repositoryId, taskId);
+    // TASK-61 A/B: read the program-design toggle from config here (daemon has fs access) and thread
+    // it into the input so the deterministic workflow never reads config live.
+    const disableProgramDesign = resolvePlanningConfig(resolveLayout()).disableProgramDesign;
     await client.workflow.start(TaskWorkflow, {
       taskQueue: taskQueueName(),
       workflowId,
       // An optional intake size hint (CLI --size) seeds the classifier; it still decides.
-      args: [{ taskId, repositoryId, prompt, ...(size ? { size } : {}), ...(baseBranch ? { baseBranch } : {}) }],
+      args: [
+        {
+          taskId,
+          repositoryId,
+          prompt,
+          ...(size ? { size } : {}),
+          ...(baseBranch ? { baseBranch } : {}),
+          ...(disableProgramDesign ? { disableProgramDesign } : {}),
+        },
+      ],
     });
 
     // Persist the task row so it survives a daemon restart and `task show` reads lifecycle state

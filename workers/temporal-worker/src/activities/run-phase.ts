@@ -1836,6 +1836,12 @@ export async function runPhase(input: {
     phase: input.phase,
     attemptNumber: input.state.attemptNumber,
     daemon,
+    // TASK-61 A/B: stamp whether program-design is in this run's phase set onto every control-plane
+    // event so program-design vs no-program-design runs are distinguishable in the run tables. Before
+    // the phase set is derived (specify), fall back to the input flag (true unless explicitly disabled).
+    programDesignEnabled: input.state.phaseSet
+      ? input.state.phaseSet.includes('program-design')
+      : !input.state.disableProgramDesign,
   });
 
   const ctx: PhaseContext = {

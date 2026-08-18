@@ -97,6 +97,9 @@ function initialState(input: TaskWorkflowInput): TaskWorkflowState {
     size: input.size,
     // Stacked-PR base override (TASK-72); prepare/release read it off the coordination state.
     baseBranch: input.baseBranch,
+    // A/B knob (TASK-61): threaded from config at start so the deterministic workflow can shape the
+    // phase set without reading config live; drops program-design from the derived phaseSet.
+    disableProgramDesign: input.disableProgramDesign,
   };
 }
 
@@ -140,7 +143,13 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
       ...state,
       condition: 'running',
       pendingHumanGate: undefined,
-      ...(override ? { size: override, phaseSet: phaseSetForSize(override), sizeHumanOverridden: true } : {}),
+      ...(override
+        ? {
+            size: override,
+            phaseSet: phaseSetForSize(override, { disableProgramDesign: state.disableProgramDesign }),
+            sizeHumanOverridden: true,
+          }
+        : {}),
     };
   });
   setHandler(rejectContractUpdate, () => {
@@ -244,7 +253,11 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
         // The specify candidate reports the classified size. Adopt it to derive the run's
         // phase set — UNLESS a human already overrode it at the contract gate, which wins.
         if (phaseThatRan === 'specify' && result.size && !state.sizeHumanOverridden) {
-          state = { ...state, size: result.size, phaseSet: phaseSetForSize(result.size) };
+          state = {
+            ...state,
+            size: result.size,
+            phaseSet: phaseSetForSize(result.size, { disableProgramDesign: state.disableProgramDesign }),
+          };
         }
         failureStreak.delete(state.phase);
         state = { ...state, phase: nextPhase(state.phase, state.phaseSet), attemptNumber: 0 };

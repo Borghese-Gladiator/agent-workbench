@@ -44,6 +44,13 @@ export interface TaskWorkflowState {
    * delivered branch). Undefined for a root task, which uses the repository default branch.
    */
   baseBranch?: string;
+  /**
+   * A/B knob (TASK-61): when true this run omits the separate `program-design` phase from its phase
+   * set, even at size L. Threaded from config at workflow-start so the deterministic workflow never
+   * reads config live. Recorded on a semantic event so program-design vs no-program-design runs are
+   * distinguishable for the rework/loop-back and reviewed-ratio comparison.
+   */
+  disableProgramDesign?: boolean;
 }
 
 export interface TaskWorkflowInput {
@@ -54,6 +61,8 @@ export interface TaskWorkflowInput {
   size?: TaskSize;
   /** Base branch override for stacked PRs (TASK-72); threaded into worktree + PR creation. */
   baseBranch?: string;
+  /** A/B knob (TASK-61): drop the program-design phase for this run. Read from config at start. */
+  disableProgramDesign?: boolean;
   /**
    * Present only on a continue-as-new re-seed: the full coordination state carried over
    * from the previous run so the new execution resumes exactly where the old one left off, with a

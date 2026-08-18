@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { SemanticEvent, TaskPhase } from '@awb/domain';
+import type { SemanticEvent, TaskPhase, TaskSize } from '@awb/domain';
 import type { SizingInput, SizeClassification } from '@awb/planning';
 import { runIdForTask } from '@awb/database';
 import type { CodingAgentAdapter } from '@awb/agent-gateway';
@@ -64,6 +64,29 @@ export async function classifyTaskSize(input: ClassifySizeInput): Promise<SizeCl
   return authoritative;
 }
 
+/** Ordinal rank of a size, so we can tell "under-sized" (predicted smaller) from "over-sized". */
+const SIZE_RANK: Record<TaskSize, number> = { S: 0, M: 1, L: 2 };
+
+/**
+ * Scores a predicted size against an expected/authoritative one for the shadow + eval corpus (TASK-62).
+ * Under-sizing (predicting a SMALLER size than expected) is penalized more heavily than over-sizing:
+ * an under-sized L that skips program-design/plan ships risky work, whereas an over-sized S merely
+ * wastes some ceremony. `costWeight` is 0 when correct, 1 per rank of over-sizing, and 2 per rank of
+ * under-sizing; an unavailable prediction counts as a max under-size miss.
+ */
+export function scoreSizeComparison(
+  expected: TaskSize,
+  predicted: TaskSize | undefined,
+): { correct: boolean; underSized: boolean; costWeight: number } {
+  if (predicted === undefined) {
+    return { correct: false, underSized: true, costWeight: 2 * (SIZE_RANK[expected] + 1) };
+  }
+  const delta = SIZE_RANK[predicted] - SIZE_RANK[expected];
+  if (delta === 0) return { correct: true, underSized: false, costWeight: 0 };
+  const underSized = delta < 0;
+  return { correct: false, underSized, costWeight: underSized ? -delta * 2 : delta };
+}
+
 /**
  * Records the Claude-vs-local comparison BOTH as a durable semantic event (queryable per-run) and a
  * daemon.log line (quick eyeballing). Best-effort — never throws.
@@ -76,9 +99,13 @@ async function recordShadowComparison(
   const haiku = authoritative ? authoritative.size : 'unavailable';
   const localSize = local ? local.size : 'unavailable';
   const agree = authoritative !== undefined && local !== undefined && authoritative.size === local.size;
+  // Cost-weighted scoring against the authoritative size as the reference (TASK-62): only meaningful
+  // when the authoritative call produced a size — otherwise there is nothing to compare against.
+  const score = authoritative ? scoreSizeComparison(authoritative.size, local?.size) : undefined;
 
   console.error(
-    `[classifier-shadow] task=${input.taskId} haiku=${haiku} local=${localSize} (${shadowClassifierModel()}) agree=${agree}`,
+    `[classifier-shadow] task=${input.taskId} haiku=${haiku} local=${localSize} (${shadowClassifierModel()}) ` +
+      `agree=${agree}${score ? ` underSized=${score.underSized} costWeight=${score.costWeight}` : ''}`,
   );
 
   if (!input.daemon) return;
@@ -98,6 +125,10 @@ async function recordShadowComparison(
       local: local ?? null,
       localModel: shadowClassifierModel(),
       agree,
+      // Cost-weighted comparison of the local (shadow) size vs the authoritative one, so the eval
+      // corpus and the shadow trace collection share one scoring definition (TASK-62).
+      underSized: score?.underSized ?? null,
+      costWeight: score?.costWeight ?? null,
     },
   };
   try {

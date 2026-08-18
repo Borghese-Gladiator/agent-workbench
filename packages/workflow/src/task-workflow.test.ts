@@ -173,6 +173,19 @@ describe('TaskWorkflow', () => {
     expect(result.phaseSet).toContain('program-design');
   }, 30_000);
 
+  it('omits program-design on an L run when disableProgramDesign is threaded (TASK-61)', async () => {
+    const { result } = await runWithActivities(
+      {
+        specify: [sizedSpecifyCandidate('L')],
+      },
+      async () => {},
+      { taskId: 'task-1', repositoryId: 'repo-1', disableProgramDesign: true },
+    );
+    expect(result.phase).toBe('assimilate');
+    expect(result.size).toBe('L');
+    expect(result.phaseSet).not.toContain('program-design');
+  }, 30_000);
+
   it('a human size override at the contract gate wins over the classifier (TASK-51)', async () => {
     // Classifier says L, but the human approves with size S — the run must skip plan/program-design.
     const { result } = await runWithActivities(

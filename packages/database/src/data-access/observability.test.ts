@@ -7,6 +7,7 @@ import { createDatabase, repositories, upsertTask, type WorkbenchDatabase } from
 import {
   persistPhaseObservability,
   getTokenBreakdown,
+  getTokenSpendByPhase,
   getRuntimeAttribution,
   getBuilderResumeSessions,
 } from './observability.js';
@@ -177,6 +178,96 @@ describe('phase observability persistence (§27)', () => {
     expect(b.totals.inputTokens).toBe(800);
     expect(Object.keys(b.byModel).sort()).toEqual(['claude-haiku', 'claude-opus']);
     expect(b.byModel['claude-haiku']?.outputTokens).toBe(60);
+  });
+
+  it('getTokenSpendByPhase splits cache + static/injected context and ranks phases by spend (TASK-79)', () => {
+    // plan: fresh 500, cache-read 50, cache-write 30, static 40, injected 200 (from the base payload).
+    persistPhaseObservability(database.db, payload());
+    // challenge: a smaller spend so plan ranks first; distinct static/injected split.
+    persistPhaseObservability(
+      database.db,
+      payload({
+        phaseAttemptId: `${TASK_ID}-challenge-1`,
+        phase: 'challenge',
+        sessions: [
+          {
+            id: 'sess-2',
+            taskId: TASK_ID,
+            runId: `${TASK_ID}-run`,
+            phaseAttemptId: `${TASK_ID}-challenge-1`,
+            phase: 'challenge',
+            role: 'adversarial-reviewer',
+            runtime: 'claude',
+            model: 'claude-haiku',
+            startedAt: new Date().toISOString(),
+            modelInvocations: [
+              {
+                id: 'mi-2',
+                provider: 'anthropic',
+                model: 'claude-haiku',
+                inputTokens: 100,
+                outputTokens: 20,
+                cachedInputTokens: 10,
+                cacheCreationInputTokens: 5,
+                costUsd: 0.002,
+                startedAt: new Date().toISOString(),
+              },
+            ],
+            contextComposition: {
+              contractTokens: 0,
+              planTokens: 90,
+              diffTokens: 60,
+              evidenceTokens: 0,
+              findingsTokens: 0,
+              repositoryMapTokens: 0,
+              memoryTokens: 0,
+              instructionTokens: 25,
+            },
+          },
+        ],
+      }),
+    );
+
+    const spend = getTokenSpendByPhase(database.db, TASK_ID);
+    // Ranked by total input spend (fresh + cache) descending: plan (580) before challenge (115).
+    expect(spend.byPhase.map((r) => r.phase)).toEqual(['plan', 'challenge']);
+
+    const plan = spend.byPhase.find((r) => r.phase === 'plan')!;
+    expect(plan).toMatchObject({
+      freshInputTokens: 500,
+      cacheReadTokens: 50,
+      cacheCreationTokens: 30,
+      outputTokens: 120,
+      staticContextTokens: 40,
+      injectedContextTokens: 200,
+    });
+
+    const challenge = spend.byPhase.find((r) => r.phase === 'challenge')!;
+    expect(challenge).toMatchObject({
+      freshInputTokens: 100,
+      cacheReadTokens: 10,
+      cacheCreationTokens: 5,
+      staticContextTokens: 25,
+      injectedContextTokens: 150,
+    });
+
+    expect(spend.totals).toMatchObject({
+      phase: '(totals)',
+      freshInputTokens: 600,
+      cacheReadTokens: 60,
+      cacheCreationTokens: 35,
+      outputTokens: 140,
+      staticContextTokens: 65,
+      injectedContextTokens: 350,
+    });
+    expect(spend.totals.costUsd).toBeCloseTo(0.012, 6);
+  });
+
+  it('getTokenSpendByPhase returns empty rows and zero totals for a task with no observability', () => {
+    const spend = getTokenSpendByPhase(database.db, TASK_ID);
+    expect(spend.byPhase).toEqual([]);
+    expect(spend.totals.freshInputTokens).toBe(0);
+    expect(spend.totals.injectedContextTokens).toBe(0);
   });
 
   // The durable resume round-trip. An implement-phase session persists its resume token; the

@@ -24,6 +24,13 @@ export interface ControlPlaneEmitterInput {
   phase: TaskPhase;
   attemptNumber: number;
   daemon?: DaemonClient;
+  /**
+   * TASK-61 A/B: whether this run's phase set includes the `program-design` phase. Stamped onto
+   * every control-plane event's payload so a run that omitted program-design is distinguishable in
+   * the run tables (semantic_events) for the rework/loop-back and reviewed-vs-total ratio comparison.
+   * Omitted before the phase set is derived (specify), when it defaults to `true` in the payload.
+   */
+  programDesignEnabled?: boolean;
 }
 
 export interface ControlPlaneEmitter {
@@ -59,7 +66,11 @@ export function createControlPlaneEmitter(input: ControlPlaneEmitterInput): Cont
       producer: 'workbench',
       type,
       summary,
-      payloadJson: { attemptNumber: input.attemptNumber, ...payload },
+      payloadJson: {
+        attemptNumber: input.attemptNumber,
+        programDesignEnabled: input.programDesignEnabled ?? true,
+        ...payload,
+      },
     };
     try {
       await input.daemon.postEvent(event);

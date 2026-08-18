@@ -1,4 +1,5 @@
 import { TaskWorkflow, getCurrentStateQuery, TASK_PHASE_ORDER } from '@awb/workflow';
+import { resolveLayout, resolvePlanningConfig } from '@awb/config';
 import type { WorkbenchDatabase } from '@awb/database';
 import { getTemporalClient, workflowIdFor } from './temporal-client.js';
 import { taskQueueName } from './temporal-worker-constants.js';
@@ -10,6 +11,8 @@ import { TaskScheduler, type StartTaskFn, type HasReleasedFn } from './scheduler
  */
 const realStartTask: StartTaskFn = async (input) => {
   const client = await getTemporalClient();
+  // TASK-61 A/B: thread the program-design toggle from config into the deterministic workflow input.
+  const disableProgramDesign = resolvePlanningConfig(resolveLayout()).disableProgramDesign;
   await client.workflow.start(TaskWorkflow, {
     taskQueue: taskQueueName(),
     workflowId: workflowIdFor(input.repositoryId, input.taskId),
@@ -19,6 +22,7 @@ const realStartTask: StartTaskFn = async (input) => {
         repositoryId: input.repositoryId,
         prompt: input.prompt,
         ...(input.baseBranch ? { baseBranch: input.baseBranch } : {}),
+        ...(disableProgramDesign ? { disableProgramDesign } : {}),
       },
     ],
   });
