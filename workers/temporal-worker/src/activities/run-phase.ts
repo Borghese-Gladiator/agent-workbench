@@ -221,7 +221,11 @@ function slugForId(text: string): string {
  *  that relies on it alone scores `weak` at the exercise gate and cannot cover a behavior claim. */
 const LANDMARK_FALLBACK_STEPS: BrowserQaStep[] = [
   { kind: 'navigate', url: '/' },
-  { kind: 'expectVisible', selector: 'h1, h2, header, nav, main, [role="banner"], [role="main"]' },
+  {
+    kind: 'expectVisible',
+    selector: 'h1, h2, header, nav, main, [role="banner"], [role="main"]',
+    livenessOnly: true,
+  },
   { kind: 'screenshot', name: 'landing' },
 ];
 

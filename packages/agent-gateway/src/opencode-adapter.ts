@@ -53,6 +53,23 @@ export interface OpenCodeAdapterOptions {
   stallTimeoutMs?: number;
   /** Injectable agent-file writer (tests capture the materialized agent instead of touching ~/.config). */
   writeAgent?: (name: string, contents: string) => void;
+  /**
+   * A named persona/agent to run under (`opencode run --agent <persona>`) instead of the SHA1
+   * capability-hash agent. Either a user-authored agent OpenCode already discovers, or the name of a
+   * persona file this adapter materializes (with {@link rolePrompt} layered over the capability
+   * permission block). Omit to keep the capability-hash agent.
+   */
+  persona?: string;
+  /**
+   * When a {@link persona} is set, the role prompt to layer over the capability permission block in
+   * the materialized persona file. Omit to select a user-authored agent by name (no file written).
+   */
+  rolePrompt?: string;
+  /**
+   * A credential-free provider base URL (a self-hosted/proxy endpoint). Threaded from
+   * {@link RuntimeConfig.providerBaseUrl} for the runtimes that honor it; never a credential.
+   */
+  providerBaseUrl?: string;
 }
 
 /**
@@ -68,10 +85,17 @@ export class OpenCodeAgentAdapter extends CliStreamAdapter {
   readonly id = 'opencode';
   protected readonly defaultBin = 'opencode';
   private readonly writeAgent?: (name: string, contents: string) => void;
+  private readonly persona?: string;
+  private readonly rolePrompt?: string;
+  /** Exposed for the agent-factory seam / tests; OpenCode reads its base URL from provider config, not a run flag. */
+  readonly providerBaseUrl?: string;
 
   constructor(opts: OpenCodeAdapterOptions = {}) {
     super(opts);
     this.writeAgent = opts.writeAgent;
+    this.persona = opts.persona;
+    this.rolePrompt = opts.rolePrompt;
+    this.providerBaseUrl = opts.providerBaseUrl;
   }
 
   protected buildArgv(ctx: CliArgvContext): string[] {
@@ -80,13 +104,35 @@ export class OpenCodeAgentAdapter extends CliStreamAdapter {
     // runs (the workbench repo), editing the wrong repository (TASK-31; observed live: builder read/
     // wrote agent-workbench instead of the target, so QA never converged). Verified: `run --dir` scopes
     // its bash/read/edit tools to that directory.
-    const agent = materializeOpenCodeAgent(ctx.allowedTools, this.writeAgent);
+    //
+    // A named persona (per-call `ctx.persona` or the adapter-level default) selects `--agent
+    // <persona>` instead of the SHA1 capability-hash agent. When a `rolePrompt` is set, the persona
+    // file is materialized with that role prompt layered over the SAME capability permission block, so
+    // the tool boundary still holds; otherwise the persona is assumed user-authored (already
+    // discovered by OpenCode) and no file is written.
+    const persona = ctx.persona ?? this.persona;
+    const agent = persona
+      ? this.materializePersona(persona, ctx.allowedTools)
+      : materializeOpenCodeAgent(ctx.allowedTools, this.writeAgent);
     const args = ['run', '--format', 'json', '--dir', ctx.cwd, '--agent', agent];
     if (this.model) args.push('--model', this.model);
     if (ctx.resumeSessionId) args.push('--session', ctx.resumeSessionId);
     // The prompt is a positional message argument; pass it last so flags aren't swallowed.
     args.push(ctx.prompt);
     return args;
+  }
+
+  /**
+   * Resolve a named persona to the `--agent` name. With a `rolePrompt`, materialize a persona file
+   * that layers the role prompt over the role's capability permission block (still bounded); without
+   * one, treat the persona as a user-authored agent OpenCode already discovers (return the name as-is,
+   * no file written).
+   */
+  private materializePersona(persona: string, capabilities: readonly string[]): string {
+    if (!this.rolePrompt) return persona;
+    const write = this.writeAgent ?? defaultWriteAgent;
+    write(persona, renderOpenCodeAgentFile(persona, capabilities, this.rolePrompt));
+    return persona;
   }
 
   protected consumeLine(line: string, acc: CliStreamAccumulator, eventSink: AgentEventSink): void {

@@ -24,7 +24,10 @@ export type BrowserQaStep =
   // State-transition / value-match steps that observe real behaviour rather than
   // "the action did not throw". `expectVisible`/`expectHidden` assert a post-action DOM state;
   // `expectText` compares an element's text to an expected value.
-  | { kind: 'expectVisible'; selector: string; timeoutMs?: number }
+  // `livenessOnly` downgrades an `expectVisible` to a `liveness` assertion — used for the landmark
+  // "the page rendered *some* structural element" check, which proves the page is alive but is NOT
+  // a behavioral state transition and so must not be able to cover a behavior claim on its own.
+  | { kind: 'expectVisible'; selector: string; timeoutMs?: number; livenessOnly?: boolean }
   | { kind: 'expectHidden'; selector: string; timeoutMs?: number }
   | { kind: 'expectText'; selector: string; equals: string }
   // Repeatable-click socket-idempotency step: click a socket-opening control twice and assert the
@@ -280,7 +283,11 @@ async function executeStep(
       } catch {
         visible = false;
       }
-      assertions.push({ name: `expectVisible:${step.selector}`, passed: visible, strength: 'state-transition' });
+      assertions.push({
+        name: `expectVisible:${step.selector}`,
+        passed: visible,
+        strength: step.livenessOnly ? 'liveness' : 'state-transition',
+      });
       return;
     }
     case 'expectHidden': {

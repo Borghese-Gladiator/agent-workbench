@@ -31,15 +31,19 @@ export function resolveRuntimeProfile(runtime: AgentRuntime = resolveAgentRuntim
 /**
  * The runtime config assembled from the environment. Per-project config isn't persisted yet (runtime
  * is global via `AWB_AGENT_RUNTIME`), so the model/binary come from env vars: `AWB_AGENT_MODEL`
- * (a runtime-native model id, e.g. `ollama/qwen3-coder:30b` for opencode) and `AWB_AGENT_BINARY`.
- * Unset → empty config → the profile/adapter default. This is the seam per-project config slots into.
+ * (a runtime-native model id, e.g. `ollama/qwen3-coder:30b` for opencode), `AWB_AGENT_BINARY`, and
+ * `AWB_AGENT_PROVIDER_BASE_URL` (a credential-free self-hosted/proxy endpoint the CLI runtimes that
+ * honor it target; the Claude SDK reads `ANTHROPIC_BASE_URL` directly and ignores this). Unset →
+ * empty config → the profile/adapter default. This is the seam per-project config slots into.
  */
 export function resolveRuntimeConfig(): RuntimeConfig {
   const config: RuntimeConfig = {};
   const model = process.env.AWB_AGENT_MODEL;
   const binary = process.env.AWB_AGENT_BINARY;
+  const providerBaseUrl = process.env.AWB_AGENT_PROVIDER_BASE_URL;
   if (model) config.model = model;
   if (binary) config.binary = binary;
+  if (providerBaseUrl) config.providerBaseUrl = providerBaseUrl;
   return config;
 }
 
