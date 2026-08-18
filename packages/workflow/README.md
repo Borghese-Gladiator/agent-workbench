@@ -10,10 +10,16 @@ it depends on — the core of the whole system's lifecycle enforcement.
 - `evaluate-completion.ts` — `evaluatePhaseCompletion(candidate, context)`,
   the only function permitted to decide a `TaskPhase` is complete. Pure,
   exhaustively tested per-phase.
-- `loop-routing.ts` — `routeLoop`/`shouldEscalateToHuman`, the loop-routing
-  table and human-gate escalation policy.
-- `failure-fingerprint.ts` — deterministic failure fingerprinting and
-  no-progress detection for the builder loop.
+- `loop-routing.ts` — `routeLoop`, the per-finding-category loop-routing table.
+  (Human-gate escalation was removed in the autonomy pivot; TASK-104.)
+- `loop-budget.ts` — `evaluateLoopBudget`/`buildUnmetCriteria`, the pure
+  bounded-autonomy stop-decision: exhaustion or a genuinely-stuck loop
+  terminates as `UnmetCriteria` (a draft PR), never a human escalation.
+- `no-progress.ts` — the crypto-free no-progress tracker
+  (`NoProgressState`/`recordAttempt`/`isNoProgress`) the Workflow folds each
+  repair attempt into; safe to import into the Temporal Workflow sandbox.
+- `failure-fingerprint.ts` — deterministic failure fingerprinting (uses
+  `node:crypto`, so Activity-only) plus a re-export of the no-progress tracker.
 - `invalidation.ts` — the evidence invalidation cascade:
   which phases' evidence goes stale when contract/plan/candidate-SHA/QA
   scenario versions change.

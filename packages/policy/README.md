@@ -12,13 +12,15 @@ of Temporal/database/agent concerns.
   change, scope expansion, unvalidated/privileged command, host-access
   request, external-network request) and returns which ones fired.
 - `plannerCriticNonConvergence`, `flakyBaselineBlocksCompletion`,
-  `repeatedFailureNoProgress`, `tokenOrRuntimeBudgetExceeded`,
   `qaRemainsInconclusive`, `reviewerFindingRequiresProductDecision`,
   `waiverRequested` — the remaining conditional triggers, each a small pure
-  function so every condition is independently unit-tested.
-- `MANDATORY_GATE_REASONS` / `isMandatoryGate` — the three gates that are
-  never conditional (first-time repository trust, task-contract approval,
-  PR readiness) — always required, not evaluated against a condition.
+  function so every condition is independently unit-tested. (The
+  `repeatedFailureNoProgress` / `tokenOrRuntimeBudgetExceeded` predicates and
+  the `MANDATORY_GATE_REASONS` / `isMandatoryGate` mandatory-gate list were
+  removed in the autonomy pivot, TASK-104/105: the loop no longer blocks on a
+  human — budget exhaustion and no-progress now terminate as `UnmetCriteria`
+  via `packages/workflow`'s `evaluateLoopBudget`, and repository trust is a
+  one-time config flag, not a per-run gate.)
 - `requiresPlanApprovalGate` — encodes "do not require routine human plan
   approval for ordinary low-risk tasks": only high risk or an
   actual conditional trigger forces a gate.
@@ -28,10 +30,10 @@ of Temporal/database/agent concerns.
 - Create or persist `HumanGate` rows — callers (phase Activities in
   `workers/temporal-worker`) use these predicates to decide whether to
   construct one.
-- Duplicate `packages/workflow`'s `shouldEscalateToHuman` (repeated-failure/
-  budget-exhaustion routing during the phase loop) — this package covers
-  the broader conditional-gate table; `packages/workflow`'s
-  version is scoped specifically to the loop-routing escalation path.
+- Decide loop termination. Budget exhaustion / no-progress routing lives in
+  `packages/workflow`'s `evaluateLoopBudget`, which terminates the loop as
+  `UnmetCriteria` (a draft PR) rather than escalating to a human; this package
+  covers only the conditional plan-gate table.
 
 ## Dependencies
 
