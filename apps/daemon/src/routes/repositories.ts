@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import {
   registerRepository,
@@ -8,8 +9,16 @@ import {
 } from '@awb/repository';
 import type { WorkbenchDatabase } from '@awb/database';
 import { RepositoryDiscoveryWorkflow, discoveryWorkflowIdFor } from '@awb/workflow';
+import { loadConfig, resolveLayout } from '@awb/config';
 import { getTemporalClient } from '../temporal-client.js';
 import { taskQueueName } from '../temporal-worker-constants.js';
+
+/** `[]` when `awb init` hasn't run yet — registration itself doesn't require a config.yaml. */
+function loadEnterpriseRepoRoots(): string[] {
+  const layout = resolveLayout();
+  if (!existsSync(layout.configFile)) return [];
+  return loadConfig(layout).enterpriseRepoRoots;
+}
 
 export function registerRepositoryRoutes(app: FastifyInstance, database: WorkbenchDatabase): void {
   app.post<{ Body: { canonicalPath: string; name?: string } }>('/api/repositories', async (request, reply) => {
@@ -17,6 +26,7 @@ export function registerRepositoryRoutes(app: FastifyInstance, database: Workben
       const repository = await registerRepository(database.db, {
         canonicalPath: request.body.canonicalPath,
         name: request.body.name,
+        enterpriseRepoRoots: loadEnterpriseRepoRoots(),
       });
       reply.code(201);
       return repository;

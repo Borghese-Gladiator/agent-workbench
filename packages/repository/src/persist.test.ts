@@ -14,6 +14,7 @@ import {
   refreshRepositorySnapshot,
   getLatestSnapshot,
   persistDiscoveryFacts,
+  isEnterpriseCanonicalPath,
 } from './persist.js';
 import { makeTempRepo, writeFileEnsuringDir, commitAll } from './test-helpers.js';
 
@@ -48,6 +49,36 @@ describe('repository persistence', () => {
 
   it('rejects registering a non-git directory', async () => {
     await expect(registerRepository(database.db, { canonicalPath: dbDir })).rejects.toThrow();
+  });
+
+  it('classifies a repo under a configured enterprise root as isEnterpriseRepo', async () => {
+    await writeFileEnsuringDir(repoDir, 'package.json', JSON.stringify({ name: 'demo' }));
+    await commitAll(repoDir, 'init');
+
+    const repo = await registerRepository(database.db, {
+      canonicalPath: repoDir,
+      enterpriseRepoRoots: [join(repoDir, '..')],
+    });
+    expect(repo.isEnterpriseRepo).toBe(true);
+  });
+
+  it('does not classify a repo outside any configured enterprise root', async () => {
+    await writeFileEnsuringDir(repoDir, 'package.json', JSON.stringify({ name: 'demo' }));
+    await commitAll(repoDir, 'init');
+
+    const repo = await registerRepository(database.db, {
+      canonicalPath: repoDir,
+      enterpriseRepoRoots: ['/some/unrelated/root'],
+    });
+    expect(repo.isEnterpriseRepo).toBe(false);
+  });
+
+  it('defaults isEnterpriseRepo to false when no roots are configured', async () => {
+    await writeFileEnsuringDir(repoDir, 'package.json', JSON.stringify({ name: 'demo' }));
+    await commitAll(repoDir, 'init');
+
+    const repo = await registerRepository(database.db, { canonicalPath: repoDir });
+    expect(repo.isEnterpriseRepo).toBe(false);
   });
 
   it('lists all registered repositories', async () => {
@@ -114,5 +145,17 @@ describe('repository persistence', () => {
     const rows = await database.db.select().from(repositoryFacts).where(eq(repositoryFacts.repositoryId, repo.id));
     const ids = rows.map((r) => r.id).sort();
     expect(ids).toEqual(['c1', 'd2']);
+  });
+});
+
+describe('isEnterpriseCanonicalPath', () => {
+  it.each([
+    ['/Users/x/Klaviyo/Repos/fender', ['/Users/x/Klaviyo/Repos'], true],
+    ['/Users/x/Klaviyo/Repos', ['/Users/x/Klaviyo/Repos'], true],
+    ['/Users/x/GitHub/agent-workbench', ['/Users/x/Klaviyo/Repos'], false],
+    ['/Users/x/Klaviyo/ReposOther/fender', ['/Users/x/Klaviyo/Repos'], false],
+    ['/Users/x/Klaviyo/Repos/fender', [], false],
+  ])('isEnterpriseCanonicalPath(%s, %j) -> %s', (canonicalPath, roots, expected) => {
+    expect(isEnterpriseCanonicalPath(canonicalPath, roots)).toBe(expected);
   });
 });

@@ -221,4 +221,34 @@ describe('buildRepositorySnapshot', () => {
     const cmdFact = snapshot.facts.find((f) => f.kind === 'command');
     expect(cmdFact?.sourcePaths.every((p) => !p.startsWith('/'))).toBe(true);
   });
+
+  it('sets hasExistingFrontend true when a web unit is detected', async () => {
+    await writeFileEnsuringDir(
+      dir,
+      'package.json',
+      JSON.stringify({ name: 'web-app', dependencies: { react: '^18.0.0' } }),
+    );
+    await writeFileEnsuringDir(dir, 'index.html', '<html></html>');
+    await commitAll(dir, 'init');
+
+    const snapshot = await buildRepositorySnapshot({ rootDir: dir, repositoryId: 'repo-web' });
+    expect(snapshot.hasExistingFrontend).toBe(true);
+  });
+
+  it('sets hasExistingFrontend false for a non-frontend repo', async () => {
+    await writeFileEnsuringDir(dir, 'package.json', JSON.stringify({ name: 'cli-tool' }));
+    await commitAll(dir, 'init');
+
+    const snapshot = await buildRepositorySnapshot({ rootDir: dir, repositoryId: 'repo-cli' });
+    expect(snapshot.hasExistingFrontend).toBe(false);
+  });
+
+  it('enterprise repos short-circuit hasExistingFrontend to true and skip command discovery', async () => {
+    await writeFileEnsuringDir(dir, 'package.json', JSON.stringify({ name: 'cli-tool', scripts: { test: 'vitest run' } }));
+    await commitAll(dir, 'init');
+
+    const snapshot = await buildRepositorySnapshot({ rootDir: dir, repositoryId: 'repo-ent', isEnterpriseRepo: true });
+    expect(snapshot.hasExistingFrontend).toBe(true);
+    expect(snapshot.commands).toEqual([]);
+  });
 });

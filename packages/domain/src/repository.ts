@@ -7,6 +7,13 @@ export const RepositorySchema = z.object({
   remoteUrl: z.string().optional(),
   defaultBranch: z.string(),
   trusted: z.boolean(),
+  /**
+   * True when `canonicalPath` matches a configured enterprise repo root (see
+   * `WorkbenchConfig.enterpriseRepoRoots`). Enterprise repos always have an established
+   * frontend and internal tooling, so snapshot discovery skips checks that would be pointless
+   * for them (e.g. command discovery, the `hasExistingFrontend` heuristic).
+   */
+  isEnterpriseRepo: z.boolean(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -161,6 +168,12 @@ export const RepositorySnapshotSchema = z.object({
   services: z.array(ServiceDefinitionSchema),
   qaSurfaces: z.array(QaSurfaceSchema),
   facts: z.array(RepositoryFactSchema),
+  /**
+   * Whether the repository already has an established frontend (a unit with `kind: 'web'`).
+   * Computed once at snapshot time so the planner can decide, without re-scanning, whether a
+   * from-scratch UI slice should be pointed at the `build-ui` skill.
+   */
+  hasExistingFrontend: z.boolean(),
   repositoryMapArtifactId: z.string().optional(),
 });
 export type RepositorySnapshot = z.infer<typeof RepositorySnapshotSchema>;

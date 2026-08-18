@@ -12,11 +12,16 @@ interface PlannerPlanJson {
     requiredTargetedChecks?: string[];
     dependencies?: string[];
     qaScenarioIds?: string[];
+    usesSkill?: string;
   }>;
 }
 
 /** The instruction handed to the planner session, telling it exactly what JSON to emit. */
-export function plannerInstruction(contract: TaskContract, hasMemory = false): string {
+export function plannerInstruction(
+  contract: TaskContract,
+  hasMemory = false,
+  hasExistingFrontend = true,
+): string {
   // When project memory was injected into the context payload, point the
   // planner at it so accumulated pitfalls/conventions/commands actually inform the plan.
   const memoryLine = hasMemory
@@ -35,12 +40,26 @@ export function plannerInstruction(contract: TaskContract, hasMemory = false): s
           '"qaScenarioIds" naming the QA scenario(s) that exercise it, or the plan will be rejected.',
         ].join(' ')
       : '';
+  // hasExistingFrontend is false only for a genuinely un-styled repo (no `web` unit detected,
+  // and not an enterprise repo, which is always assumed to have one). Point such a slice at the
+  // `build-ui` skill so its from-scratch UI follows a deliberate house style instead of an
+  // ad-hoc one; a repo that already has a frontend must never get this hint — it should match
+  // what's there instead.
+  const skillLine = !hasExistingFrontend
+    ? [
+        'This repository has no existing frontend/UI (no web-capable unit was detected). If any slice',
+        'builds a new, from-scratch UI (a page, app, dashboard, or standalone view with no established',
+        'visual style to match), set that slice\'s "usesSkill" field to "build-ui" so it follows the',
+        'agent-workbench build-ui skill\'s design system. Do NOT set "usesSkill" on a slice that only',
+        'edits non-UI code, and do not set it at all if no slice builds a from-scratch UI.',
+      ].join(' ')
+    : '';
   return [
     `Produce an implementation plan for this contract objective: ${contract.objective}.`,
     'Decompose the work into ordered slices. Respond with a JSON object of the form',
     '{"summary": string, "slices": [{"objective": string, "likelyPaths": string[],',
     '"requiredTargetedChecks": string[] (non-empty), "claimIds": string[], "dependencies": string[],',
-    '"qaScenarioIds": string[]}]}',
+    '"qaScenarioIds": string[], "usesSkill": string (optional)}]}',
     'as a fenced ```json code block. Each slice must have at least one targeted check.',
     // Bias toward the smallest plan that covers the work: each slice is executed as a
     // separate, cold builder session, so extra slices multiply runtime and token cost. Investigation
@@ -51,6 +70,7 @@ export function plannerInstruction(contract: TaskContract, hasMemory = false): s
     'and running the checks are part of implementing the change, so put them in the same slice.',
     memoryLine,
     qaLine,
+    skillLine,
   ]
     .filter(Boolean)
     .join(' ');
@@ -110,6 +130,7 @@ export function parsePlannerOutput(
         requiredTargetedChecks: s.requiredTargetedChecks?.length ? s.requiredTargetedChecks : ['test'],
         dependencies: s.dependencies ?? [],
         qaScenarioIds,
+        ...(s.usesSkill ? { usesSkill: s.usesSkill } : {}),
       };
     });
 

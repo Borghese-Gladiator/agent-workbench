@@ -29,6 +29,14 @@ export const PlanSliceSchema = z.object({
   qaScenarioIds: z.array(z.string()).optional(),
   /** Expected per-claim QA assertions this slice's scenarios must observe. */
   expectedAssertions: z.array(ExpectedAssertionSchema).optional(),
+  /**
+   * Name of an agent-workbench `.claude/skills/<name>/SKILL.md` the planner determined this
+   * slice should follow (e.g. `"build-ui"` for a from-scratch UI slice). The builder activity
+   * resolves this against agent-workbench's own repo (never the target repo) and inlines the
+   * skill file's content into the slice instruction, since the builder agent's cwd is the
+   * target repo and can never see agent-workbench's own skills via native discovery.
+   */
+  usesSkill: z.string().optional(),
 });
 export type PlanSlice = z.infer<typeof PlanSliceSchema>;
 

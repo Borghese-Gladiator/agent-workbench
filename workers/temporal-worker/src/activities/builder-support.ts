@@ -1,9 +1,41 @@
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { runGit, getHeadSha, getStatus } from '@awb/repository';
 import { runIdForTask } from '@awb/database';
 import { withSpan } from '@awb/telemetry';
 import type { CodingAgentAdapter, AgentEventSink } from '@awb/agent-gateway';
 import type { PlanSlice, ProgramDesign, ModelUsage, Finding } from '@awb/domain';
 import type { SliceAttemptOutcome } from '@awb/planning';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * agent-workbench's OWN repo root, reached the same way `workers/temporal-worker/src/index.ts`
+ * reaches `packages/workflow/dist` — walking up from this compiled activity's location. Needed
+ * because the builder agent's `cwd` is always the TARGET repo (see `runBuilderSession`), so it
+ * can never see agent-workbench's own `.claude/skills/*` via native discovery; this lets the
+ * activity read the skill file itself and inline its content into the instruction instead.
+ */
+function workbenchRepoRoot(): string {
+  return join(__dirname, '..', '..', '..', '..');
+}
+
+/**
+ * Reads an agent-workbench `.claude/skills/<name>/SKILL.md` file's content (minus its
+ * frontmatter, which is Claude-Code-specific metadata, not builder guidance). Returns undefined
+ * when the skill doesn't exist rather than throwing — a planner-named skill that was renamed or
+ * removed degrades to "no extra guidance" instead of failing the whole slice.
+ */
+export async function readSkillContent(skillName: string): Promise<string | undefined> {
+  const path = join(workbenchRepoRoot(), '.claude', 'skills', skillName, 'SKILL.md');
+  try {
+    const raw = await readFile(path, 'utf8');
+    return raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
+  } catch {
+    return undefined;
+  }
+}
 
 export interface RealBuilderAttemptInput {
   adapter: CodingAgentAdapter;
@@ -63,18 +95,27 @@ export async function runRealBuilderAttempt(input: RealBuilderAttemptInput): Pro
 
 /**
  * Render a builder instruction, appending a repair block when a prior code-fixable gate left open
- * findings. Each finding contributes its description, its `path:line` when known, and its proposed
- * remediation, so the builder re-implements against the specific defects rather than the bare
- * objective. Exported for unit testing the rendering without a live session.
+ * findings, and inlining a skill's content when the plan slice named one via `usesSkill`. The
+ * skill content is inlined (not referenced by path) because the builder agent's `cwd` is the
+ * target repo, not agent-workbench's own — it has no other way to see the skill file. Exported
+ * for unit testing the rendering without a live session.
  */
-export function buildBuilderInstruction(objective: string, priorFindings?: Finding[]): string {
-  if (!priorFindings || priorFindings.length === 0) return objective;
+export function buildBuilderInstruction(
+  objective: string,
+  priorFindings?: Finding[],
+  skillContent?: string,
+): string {
+  let instruction = objective;
+  if (skillContent) {
+    instruction = `${instruction}\n\nFollow this skill's guidance while implementing this slice:\n\n${skillContent}`;
+  }
+  if (!priorFindings || priorFindings.length === 0) return instruction;
   const lines = priorFindings.map((f) => {
     const where = f.path ? ` (${f.path}${f.line !== undefined ? `:${f.line}` : ''})` : '';
     const fix = f.proposedRemediation ? ` — fix: ${f.proposedRemediation}` : '';
     return `- [${f.severity}] ${f.description}${where}${fix}`;
   });
-  return `${objective}\n\nA prior attempt failed QA/review. Address these findings before finishing:\n${lines.join('\n')}`;
+  return `${instruction}\n\nA prior attempt failed QA/review. Address these findings before finishing:\n${lines.join('\n')}`;
 }
 
 async function runBuilderSession(input: RealBuilderAttemptInput): Promise<RealBuilderAttemptResult> {
@@ -92,7 +133,8 @@ async function runBuilderSession(input: RealBuilderAttemptInput): Promise<RealBu
 
   try {
     const startedAt = Date.now();
-    const instruction = buildBuilderInstruction(input.slice.objective, input.priorFindings);
+    const skillContent = input.slice.usesSkill ? await readSkillContent(input.slice.usesSkill) : undefined;
+    const instruction = buildBuilderInstruction(input.slice.objective, input.priorFindings, skillContent);
     const execution = await input.adapter.execute(
       session,
       {
