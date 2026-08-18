@@ -262,6 +262,196 @@ real consumers in worker/daemon and app logs carry `run_id`/`task_id`, **or** `c
 is gone and the doc no longer claims a structured-log channel. No third "defined but unused"
 state.
 
+### [ ] TASK-111: A network partition wedges the whole stack and corrupts the daemon write path — no clean recovery
+
+**What's wrong (observed live 2026-08-17→18).** A WiFi/router outage mid-run left the stack
+in a degraded state from which neither the stack nor the in-flight tasks recovered cleanly,
+surfacing several distinct defects:
+
+1. **Worker stops polling after a network partition and never resumes on its own.** The
+   Claude agent SDK activities failed with `API Error: Connection closed mid-response`
+   (durationMs ~14.8 min — they hung on the dead socket until the activity neared timeout).
+   After the failures the temporal-worker went **idle for ~3 h** — Temporal task-queue
+   backlog was 0 and pollers looked alive, but no workflow tasks were being executed. Only an
+   explicit `awb restart worker` got it polling again.
+2. **`awb restart worker` is not sufficient.** After the worker restart, the workflow layer
+   accepted human-gate updates (Temporal recorded `WorkflowExecutionUpdateAccepted` +
+   `...UpdateCompleted` for `approve-contract`) but tasks **did not advance past `specify`**,
+   and the daemon `POST /api/tasks/:r/:t/approve-contract` returned `{"ok":true}` while having
+   no effect — the approval was a no-op from the operator's point of view.
+3. **A stale daemon from a DIFFERENT worktree crash-looped on port 4417.** `daemon.log` showed
+   ~70 repeated `daemon listening on http://127.0.0.1:4417` lines interleaved with
+   `EADDRINUSE` from `.../LOCAL_worktrees/agent-workbench/timothyshee-group-b-planning/apps/daemon`
+   running `tsx watch` — i.e. an old worktree's dev-mode daemon was fighting the MAIN daemon
+   for the port. Nothing detects or refuses a second daemon binding the same port.
+4. **The worker→daemon→SQLite persistence path silently drops writes when degraded.** After the
+   partition, the Temporal workflow history advanced (activities completing post-approval) but
+   SQLite stayed frozen at the pre-approval snapshot: `phase_attempts` still `specify|1|open`,
+   `semantic_events` maxseq still 0, `task_contracts.status` stuck at `awaiting_approval`. So
+   **SQLite could not be trusted as ground truth** and the CLI/`task show` reported stale or
+   empty state — while Temporal was the only accurate source.
+5. **Temporal retries cold-restart the agent turn (no resume).** The interrupted implement/verify
+   turns re-explored from scratch on retry and, combined with the 3-strike counter, several tasks
+   parked at `repeated-failure-no-progress` purely because of the outage, not bad code — even
+   though real work sat committed/uncommitted in their worktrees. (Re-confirms the standing
+   `observability-live-proof` / TASK-32 cold-restart gap.)
+
+**What to do.** Make a network partition survivable and recovery legible:
+- The worker should **detect a dropped/again-available connection and resume polling** without a
+  manual `restart` (health-check + backoff reconnect), and a transport-drop failure (`Connection
+  closed mid-response`) should **fail fast** instead of hanging ~15 min on the dead socket.
+- **Refuse to boot / warn when the configured port is already held by another daemon** (esp. a
+  stale `tsx watch` daemon from a different worktree) rather than crash-looping on `EADDRINUSE`.
+- Make the **persistence path resilient**: either buffer+retry the worker→daemon→SQLite writes
+  across a daemon restart, or on daemon recovery **reconcile SQLite from Temporal history** so the
+  DB is not left permanently behind the workflow. A `{"ok":true}` from `approve-contract` must mean
+  the workflow actually consumed it (verify the update landed, don't ack optimistically).
+- Provide a **recovery command** (`awb reconcile` / `awb doctor --repair`) that, after a partition,
+  re-syncs durable state from Temporal and surfaces which tasks are genuinely stuck vs. merely
+  behind — instead of leaving the operator to read Temporal history by hand.
+- Ties to the autonomy pivot (Group AA): a partition should degrade toward the bounded loop /
+  draft-PR terminal, not a silent wedge.
+
+**Where.** `workers/temporal-worker/src/` (worker lifecycle + activity transport-drop handling +
+heartbeat/reconnect), `apps/cli/src/commands/lifecycle.ts` (port-in-use detection on `up`;
+`restart` semantics), the worker→daemon write path (`apps/daemon/src/routes/internal.ts` +
+`observability-accumulator.ts` + run-lifecycle persistence), a new reconcile-from-Temporal path.
+Relates to `observability-live-proof` (cold-restart-on-retry), `boot-stale-dist-symlink`,
+`awb-worktree-multistack-blockers` (port collisions across worktrees), and TASK-104/105 (verify
+timeout/heartbeat).
+
+**How we'll know it's done.** *Manual:* kill the network mid-run, restore it, and the stack
+resumes executing tasks with no manual `restart` and no permanently-behind SQLite; a second daemon
+on the same port is refused with a clear message, not a crash-loop; and after a forced partition
+`awb reconcile` (or equivalent) brings SQLite back in line with Temporal and correctly labels each
+task's real state.
+
+
+## Group AC — Dogfooding-at-scale resilience (found driving 10 groups at once, 2026-08-18)
+
+Filed after driving all 10 remaining backlog groups through the workbench on `agent-workbench`
+itself in one batch. The features worked; the *operating envelope* did not. Each item below is a
+concrete failure observed in that run (companion to the network-partition ticket, TASK-111).
+
+### [ ] TASK-112: No concurrency cap — N parallel tasks each spawn a `vitest` worker pool and thrash the box to load ~377
+
+**What's wrong.** Running ~10 tasks concurrently on one machine drove the load average to **377**
+(normal ~8) and made the box unusable — `ps`, and even `awb task cancel`, timed out (>3 min) because
+the OS couldn't fork. Root cause: every task runs `npx vitest run` in its worktree during
+`implement`/`verify`, and vitest spawns a **tinypool worker pool per run**; ~10 concurrent runs →
+~150+ node processes → "Worker exited unexpectedly (resource exhaustion — too many processes)", after
+which every task that reached `verify` **hung at `verify/phase-started` with no further events**. The
+only recovery was `pkill -9 -f tinypool; pkill -9 -f vitest` (load 377→8 instantly). There is **no
+workbench-level cap** on how many tasks run heavy phases at once, and **no bound on vitest's own worker
+pool** during verify.
+
+**What to do.** Bound concurrency at two levels: (1) a **task-scheduler concurrency limit** (max N
+tasks in a resource-heavy phase — implement/verify — at once; queue the rest), defaulting to a safe
+small N (≈4–5 on a laptop) and configurable; (2) cap the **per-verify vitest pool** (e.g. run vitest
+with `--pool=threads`/`--poolOptions.*.maxThreads` or a `--maxWorkers` bound) so a single verify can't
+fan out unboundedly, and so N concurrent verifies don't multiply into hundreds of processes. Consider a
+global process/OS-load guard that defers dispatching a new heavy phase when load is already high.
+
+**Where.** `apps/daemon/src/scheduler.ts` (dispatch concurrency limit), the verify command assembly in
+`packages/verification/src/verification-runner.ts` + the discovered `unit-test` command (bound the
+vitest pool), and `packages/config` for the configurable cap. Relates to TASK-104/105 (verify
+timing/heartbeat — a bounded verify is also a faster verify) and TASK-74 (blast-radius scoping reduces
+per-task cost).
+
+**How we'll know it's done.** *Manual:* dispatch 10 tasks against one machine and confirm no more than
+N run a heavy phase at once, load stays bounded, and no task hangs at `verify` from resource
+exhaustion. *Unit:* the scheduler admits at most N concurrent heavy-phase tasks and queues the rest.
+
+### [ ] TASK-113: A run can commit a catastrophic over-reach (726 files, `archive/` + `packages/` swept) with no guard
+
+**What's wrong.** One dogfood run (the TASK-88 dogfood-skill task, whose intended change was a **single
+182-line** `.claude/skills/dogfood/SKILL.md`) produced a commit touching **726 files, +27190/−10165** —
+it swept all of `archive/` (467 files) plus `packages/`/`workers/`, and **embedded the entire task
+prompt as the commit message**. Nothing in the pipeline flagged that the diff was three orders of
+magnitude larger than the contract implied, or that it touched `archive/` (a retired, off-limits tree),
+or that the commit message was a pasted prompt. The change only did not land because a human inspected
+`git diff --stat` and salvaged the one intended file by hand. On the autonomy path (Group AA:
+draft-PR-terminal, no human gate) this would have opened a PR proposing to rewrite the repo.
+
+**What to do.** Add a **blast-radius / over-reach guard** between implement and delivery: compare the
+actual diff against the contract's expected scope (files/paths/size) and **block or flag** a diff that
+is wildly larger than the contract implies (e.g. N× the planned file count, or touching paths the
+contract never mentioned). Treat writes to protected/off-limits trees (`archive/`, generated `dist/`,
+lockfiles, `node_modules`) as a hard stop unless the contract explicitly names them. Sanity-check the
+**commit message** (reject a message that is verbatim the prompt / absurdly long). This is the
+implement-phase sibling of the existing `slice-diff-exceeds-cap` velocity guard, but keyed to
+*contract scope and protected paths*, not just raw line count. On the autonomy path it should mark the
+task `UnmetCriteria` (scope violation) rather than deliver.
+
+**Where.** The implement→verify/delivery boundary in
+`workers/temporal-worker/src/activities/run-phase.ts` (diff assembly + a new scope/over-reach check),
+the contract's expected-scope fields in `packages/domain` (specify contract already carries
+objective/constraints — extend with touched-path expectations), the protected-path policy in
+`packages/policy`, and the commit path in `packages/github`/`packages/workspace`. Relates to
+`slice-diff-exceeds-cap` (TASK-68), TASK-74 (blast radius), and the Group-AA `UnmetCriteria` terminal.
+
+**How we'll know it's done.** *Unit:* an implement diff that touches `archive/` or is N× the contract's
+expected file count is flagged/blocked (not silently committed), and a commit message equal to the raw
+prompt is rejected. *Manual:* re-run the TASK-88 dogfood task and confirm it produces the ~1-file change
+its contract implies — or is stopped with a clear scope-violation reason — never a 726-file sweep.
+
+### [ ] TASK-114: "Recover-and-land past a broken verify" is a hand-run rescue — make it a first-class command
+
+**What's wrong.** When `verify`/`exercise` can't complete (resource exhaustion per TASK-112, a hung
+self-booting e2e test per TASK-104, or the stack being torn down), the **implementation is already
+complete and committed in the worktree** — but the task never reaches `release`, so there is no
+delivery. Recovering it today is a manual sequence a human runs by hand: find the isolated worktree
+(`$AWB_DATA_DIR/worktrees/<repoId>/<slug>-<short>`), `git push -u origin <branch>`, `gh pr create
+--draft`, and hand-write a body noting verification did not run. That rescue was needed for **8 of 10**
+tasks in this batch, so it is not an edge case — it is the common outcome when verify is fragile.
+
+**What to do.** Make it a first-class action: `awb task deliver-worktree <task>` (or a `--force-draft`
+option on the existing delivery path) that opens the draft PR **from the committed worktree branch as-is**,
+with an auto-generated body that honestly states which phases completed and that verification did **not**
+run (met/unmet, per the Group-AA report format). This is squarely the autonomy-pivot terminal (TASK-106:
+every task ends at a draft PR, even on non-convergence) — wire the "verify could not complete" path to the
+same draft-PR terminal with an unmet-criteria note, instead of leaving delivery stranded and the operator
+pushing by hand.
+
+**Where.** `workers/temporal-worker/src/activities/run-phase.ts` (release/delivery — allow a
+verify-incomplete → draft-PR-with-unmet-report path), `apps/cli/src/commands/task.ts` (a
+`deliver-worktree`/`--force-draft` command), reusing the PR-body evidence-matrix + met/unmet checklist
+from TASK-106. Depends on / merges with Group AA (TASK-105 `UnmetCriteria`, TASK-106 draft-PR terminal).
+
+**How we'll know it's done.** *Manual:* a task whose verify cannot complete still ends at a draft PR whose
+body says implement done / verify not run, produced by one command — no hand-run `git push` + `gh pr
+create`. *Unit:* the delivery path, given a completed implement + an incomplete verify, produces a draft PR
+with an unmet-criteria (verification-incomplete) report.
+
+### [ ] TASK-115: Driving a fleet via context-inheriting forks bleeds context and self-stalls — the driver needs isolation + a real poll loop
+
+**What's wrong.** To drive many tasks' gates in parallel, one-fork-per-task was tried (a `fork` subagent
+per task). Two failures: (1) **context bleed** — each fork inherited the coordinator's full conversation,
+so it believed it was the coordinator, re-narrated the entire fleet's status, and claimed to be driving
+*other* groups' tasks (risking double-driving); (2) **self-stall** — each fork queued a single timed poll
+and then ended its turn instead of looping, so with no external scheduler to wake it, it went idle and
+its watchdog reported it "stalled: no progress for 600s". The reliable approach turned out to be driving
+**directly from one session** with a small background poll script that surfaces only tasks at a gate.
+
+**What to do.** If fleet-driving is worth supporting as a feature (vs. the current one-session +
+poll-script pattern, which works), the driver unit must: run a **bounded poll loop inside its own turn**
+(not a fire-once-then-idle), receive **only its own task id + the minimal gate-decision table** (not the
+whole conversation), and never touch another task. Simplest: a small `awb task drive <task>` /
+`awb fleet drive <ids...>` helper that mechanically answers the known gates (contract→approve,
+plan→approve, slice-cap→known override, pr-readiness→record) on an interval — the `run-workbench-task-simple`
+decision table as an executable, not a subagent that inherits an entire session. Model-agnostic per the
+`external-tools-model-agnostic` learning.
+
+**Where.** A new `apps/cli` driver command (or a documented poll-script pattern under
+`.claude/skills/run-workbench-task-simple/`), reusing the gate-decision table already written there. Do
+**not** rely on context-inheriting subagents for per-task driving. Relates to `run-workbench-task-simple`,
+`flex-dash-run-autonomy`, and the Group-AA autonomy work (with all gates removed, "driving" collapses to
+watching for the draft-PR terminal, which makes this much smaller).
+
+**How we'll know it's done.** *Manual:* drive ≥5 tasks to their terminal state with no context-inheriting
+subagent, no cross-task interference, and no "stalled 600s" idle — either via one session + poll script or
+a dedicated `drive` command that loops internally.
+
 
 ## Group H — Measure before expanding (evaluation & token spend)
 
