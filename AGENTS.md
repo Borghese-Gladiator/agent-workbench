@@ -125,6 +125,12 @@ so agents and CI can boot the minimum they need cheaply.
 - Do NOT follow logs continuously. Use bounded logs: `awb logs daemon --tail 50`.
 - For noninteractive task execution use `awb task wait`, not `awb task watch`.
   Create with `--quiet` to get just the id: `id=$(awb task create "…" --repo . --quiet)`.
+- To MONITOR many tasks at once, use `awb fleet` — one composed, legible row per task
+  (phase, condition, current activity + age, bounce-back signal `#N ↩<phase>`, open
+  findings, PR) read in a single call from SQLite. `awb fleet --md` emits an
+  agent-legible markdown table (the default for an LLM monitoring loop); `awb fleet
+  --json` a stable named-field contract; `awb fleet --watch` a live human TUI. Prefer
+  this over `awb task list` (which shows no rollups) for a status overview.
 
 Normal agent sequence:
 

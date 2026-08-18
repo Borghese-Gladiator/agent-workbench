@@ -28,6 +28,7 @@ async function main(argv: string[]): Promise<void> {
   const { registerRepoCommands } = await import('./commands/repo.js');
   const { registerDaemonCommands } = await import('./commands/daemon.js');
   const { registerTaskCommands } = await import('./commands/task.js');
+  const { registerFleetCommand } = await import('./commands/fleet.js');
   const { registerLifecycleCommands } = await import('./commands/lifecycle.js');
   const { registerDoctorCommand } = await import('./commands/doctor.js');
   const { registerUiCommands } = await import('./commands/ui.js');
@@ -69,6 +70,7 @@ async function main(argv: string[]): Promise<void> {
   registerDaemonCommands(program);
   registerRepoCommands(program);
   registerTaskCommands(program);
+  registerFleetCommand(program);
   registerConfigCommands(program);
   registerCompletionCommand(program);
   registerResetCommands(program);
