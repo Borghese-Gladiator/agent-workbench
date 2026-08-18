@@ -1,5 +1,61 @@
+import type { ExpectedAssertion } from '@awb/domain';
 import type { QaAssertionResult } from './shared.js';
 import { isStrongAssertion } from './shared.js';
+import type { BrowserQaStep } from './browser-qa.js';
+
+/**
+ * Optional per-claim control/assertion selector hints so `buildInteractiveScenarioSteps` can
+ * resolve a real control + assertion target from an otherwise prose `ExpectedAssertion.observes`.
+ * Keyed in the caller by claimId. When a hint is absent, the helper still emits a step whose
+ * selectors are derived from `observes` text so the scenario is grounded in the declared transition.
+ */
+export interface InteractiveStepHint {
+  observes: string;
+  /** CSS/text selector of the control to click to trigger the transition. */
+  controlSelector?: string;
+  /** CSS/text selector whose post-action state/text is asserted. */
+  assertionSelector?: string;
+  /** Text the assertion element should contain (produces an `expectText` value-match). */
+  assertionText?: string;
+  /** When the control opens a WebSocket, also emit a repeated-click `expectNoDuplicateSocket`. */
+  socketOpening?: boolean;
+}
+
+/**
+ * Translate each planner-declared `ExpectedAssertion` into real browser steps so the exercise
+ * scenario actually observes the claimed transition instead of only navigating. Each assertion
+ * yields a click on its control followed by a strong assertion:
+ *  - `state-transition` → `expectVisible`/`expectHidden` on the assertion target
+ *  - `value-match`      → `expectText` when a target value is hinted, else `expectVisible`
+ * A socket-opening control additionally gets a repeated-click `expectNoDuplicateSocket` step.
+ *
+ * Selectors come from the per-claim `hints` when provided; otherwise they fall back to a
+ * text-selector derived from the `observes` prose so the step is at least grounded in the claim.
+ */
+export function buildInteractiveScenarioSteps(
+  expectedAssertions: ExpectedAssertion[],
+  hints?: Record<string, InteractiveStepHint>,
+): BrowserQaStep[] {
+  const steps: BrowserQaStep[] = [];
+  for (const ea of expectedAssertions) {
+    const hint = hints?.[ea.claimId];
+    const controlSelector = hint?.controlSelector ?? `text=${ea.observes}`;
+    const assertionSelector = hint?.assertionSelector ?? controlSelector;
+
+    steps.push({ kind: 'click', selector: controlSelector });
+
+    if (ea.kind === 'value-match' && hint?.assertionText !== undefined) {
+      steps.push({ kind: 'expectText', selector: assertionSelector, equals: hint.assertionText });
+    } else {
+      steps.push({ kind: 'expectVisible', selector: assertionSelector });
+    }
+
+    if (hint?.socketOpening) {
+      steps.push({ kind: 'expectNoDuplicateSocket', selector: controlSelector });
+    }
+  }
+  return steps;
+}
 
 /**
  * Check that QA actually exercises each behavioral claim's observable behaviour, not

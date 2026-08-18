@@ -45,8 +45,10 @@ export function scenarioStrength(assertions: QaAssertionResult[]): 'weak' | 'str
  * Whether a browser QA run hit a frontend-observable policy-blocking signal — an
  * unhandled console error or a failed/4xx+ network request. Feeds the exercise gate's
  * `policyBlockingErrorsPresent` (was hard-coded false), so a page that throws errors no longer
- * passes QA. We deliberately do NOT inspect the transport (WebSocket/SSE/polling): QA validates
- * the frontend's observable behaviour and lets the app make whatever connections it makes.
+ * passes QA. This predicate stays scoped to the console/network surface; transport-level
+ * (WebSocket) duplicate-connection defects are detected separately — `runBrowserQa` registers a
+ * `page.on('websocket')` listener and emits a dedicated failing `no-duplicate-socket` assertion
+ * when a socket-opening control opens a second socket on repeat click.
  */
 export function policyBlockingErrorsPresent(input: {
   consoleErrors: string[];

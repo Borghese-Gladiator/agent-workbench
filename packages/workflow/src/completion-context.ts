@@ -83,6 +83,13 @@ export interface CompletionContext {
      */
     behavioralClaimsWithUntouchedTarget?: string[];
     structuredAssertionsPass: boolean;
+    /**
+     * Whether the QA scenario was `strong` (had at least one passing state-transition/value-match
+     * assertion) rather than all-liveness, WHEN a behavioral claim required coverage. `false` ⇒ the
+     * gate does not clear: an all-liveness (navigate/landmark-only) scenario can no longer cover a
+     * behavior claim, even if a recording exists. Optional/`true` for the mock/CLI path and for
+     * fixtures with no behavioral claims (nothing to over-claim). */
+    scenarioStrengthSufficient?: boolean;
     requiredRecordingExists: boolean;
     browserScenariosHaveTraces: boolean;
     evidenceTiedToCandidateSha: boolean;
