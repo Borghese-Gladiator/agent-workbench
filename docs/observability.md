@@ -54,7 +54,10 @@ The runtime-diagnostics layer added under TASK-34, per ADR-008. Emitted via the
   (`awb.attempt.retry_scheduled`), transport-drop frequency (`awb.transport.drop`),
   p95 phase duration (`awb.phase.duration_ms`).
 - **App logs:** a leveled, structured logger (`createLogger`) stamped with
-  `run_id`/`task_id`, replacing raw stdout diagnostics.
+  `run_id`/`task_id`, replacing raw stdout diagnostics. Live in the daemon and worker
+  bootstrap sinks and the size-classifier shadow line (child logger bound to
+  `run_id`/`task_id`); it writes one JSON record per line to stdout/stderr, which the
+  collector's stdout scraper and `awb logs <service>` both consume.
 - **Lossy by design and NOT product data.** Sampling/dropping telemetry is fine;
   applying that to `semantic_events` would reintroduce the "lifecycle advanced on a
   lie" failure [ADR-003](decisions/003-deterministic-completion-not-agent-selfreport.md)

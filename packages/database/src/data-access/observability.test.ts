@@ -8,6 +8,7 @@ import {
   persistPhaseObservability,
   getTokenBreakdown,
   getRuntimeAttribution,
+  getContextComposition,
   getBuilderResumeSessions,
 } from './observability.js';
 
@@ -86,6 +87,7 @@ const payload = (over: Partial<PhaseObservability> = {}): PhaseObservability => 
         repositoryMapTokens: 0,
         memoryTokens: 0,
         instructionTokens: 40,
+        estimated: false,
       },
     },
   ],
@@ -130,6 +132,48 @@ describe('phase observability persistence (§27)', () => {
       cacheCreationInputTokens: 30,
       costUsd: 0.01,
     });
+  });
+
+  it('round-trips the context-composition estimated provenance flag as a boolean', () => {
+    persistPhaseObservability(database.db, payload());
+    const cc = getContextComposition(database.db, TASK_ID);
+    expect(cc).toHaveLength(1);
+    expect(cc[0]?.estimated).toBe(false);
+    expect(cc[0]?.contractTokens).toBe(200);
+
+    persistPhaseObservability(
+      database.db,
+      payload({
+        phaseAttemptId: `${TASK_ID}-implement-1`,
+        phase: 'implement',
+        sessions: [
+          {
+            id: 'sess-est',
+            taskId: TASK_ID,
+            runId: `${TASK_ID}-run`,
+            phaseAttemptId: `${TASK_ID}-implement-1`,
+            phase: 'implement',
+            role: 'builder',
+            runtime: 'mock',
+            startedAt: new Date().toISOString(),
+            modelInvocations: [],
+            contextComposition: {
+              contractTokens: 10,
+              planTokens: 0,
+              diffTokens: 0,
+              evidenceTokens: 0,
+              findingsTokens: 0,
+              repositoryMapTokens: 0,
+              memoryTokens: 0,
+              instructionTokens: 0,
+              estimated: true,
+            },
+          },
+        ],
+      }),
+    );
+    const est = getContextComposition(database.db, TASK_ID).find((c) => c.agentSessionId === 'sess-est');
+    expect(est?.estimated).toBe(true);
   });
 
   it('is idempotent per phase attempt (no duplicate attribution/session rows on re-run)', () => {

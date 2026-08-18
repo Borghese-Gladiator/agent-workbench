@@ -50,5 +50,7 @@ export const contextComposition = sqliteTable('context_composition', {
   repositoryMapTokens: integer('repository_map_tokens').notNull().default(0),
   memoryTokens: integer('memory_tokens').notNull().default(0),
   instructionTokens: integer('instruction_tokens').notNull().default(0),
+  /** Provenance: 1 = chars/4 estimate, 0 = reconciled to the invocation's measured input tokens. */
+  estimated: integer('estimated').notNull().default(1),
   createdAt: text('created_at').notNull(),
 });

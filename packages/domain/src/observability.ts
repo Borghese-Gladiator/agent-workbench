@@ -28,6 +28,12 @@ export const ContextCompositionSchema = z.object({
   repositoryMapTokens: z.number().int().nonnegative().default(0),
   memoryTokens: z.number().int().nonnegative().default(0),
   instructionTokens: z.number().int().nonnegative().default(0),
+  /**
+   * Provenance flag: `true` when the buckets are a chars/4 heuristic (no provider usage to
+   * reconcile against), `false` when they were scaled to sum to the invocation's measured
+   * `inputTokens`. Downstream (TASK-79, any Usage view) must not present an estimate as measured.
+   */
+  estimated: z.boolean().default(true),
 });
 export type ContextComposition = z.infer<typeof ContextCompositionSchema>;
 

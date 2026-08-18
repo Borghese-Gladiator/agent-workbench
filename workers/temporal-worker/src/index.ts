@@ -1,7 +1,7 @@
 import { Worker, NativeConnection } from '@temporalio/worker';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { initTelemetry } from '@awb/telemetry';
+import { initTelemetry, createLogger } from '@awb/telemetry';
 import { resolveRuntimeConfig } from '@awb/config';
 import * as activities from './activities/index.js';
 
@@ -42,7 +42,9 @@ export async function startWorker(): Promise<Worker> {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   startWorker().catch((err: unknown) => {
-    console.error(err);
+    createLogger('awb-worker').error('worker boot failed', {
+      error: err instanceof Error ? err.stack ?? err.message : String(err),
+    });
     process.exitCode = 1;
   });
 }
