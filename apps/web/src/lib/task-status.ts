@@ -1,22 +1,71 @@
 import type { BadgeProps } from '@/components/ui/badge';
-import {
-  deriveTaskStatus as deriveDomainStatus,
-  DERIVED_STATUS_LABEL,
-  ATTENTION_STATUSES,
-  type DerivedTaskStatus,
-} from '@awb/domain';
 
 export type BadgeVariant = NonNullable<BadgeProps['variant']>;
 
 /**
- * The daemon is the single source of truth for derived status: `deriveTaskStatus` lives in
- * `@awb/domain` and the projection surfaces it as `derivedStatus`. This module re-exports that one
- * canonical derivation (so a live-workflow response carrying only condition + phase can be mapped
- * IDENTICALLY) and keeps ONLY the presentation concern the browser owns — the Badge-variant + label
- * per canonical status. It must never re-derive status with its own rules.
+ * The canonical closed set of derived task statuses. Mirrors `@awb/domain`'s `DerivedTaskStatus`
+ * union — the browser cannot import `packages/*` (the "browser never touches fs/git/shell / imports
+ * a package module" invariant from AGENTS.md), so this is a hand-kept mirror rather than an import.
+ * The daemon is the source of truth: the task_summary projection surfaces `derivedStatus` computed by
+ * the domain function; the web only maps that string to presentation and, for the ONE response that
+ * still carries just condition + phase (live workflow state), mirrors the derivation exactly.
  */
-export { deriveDomainStatus as deriveTaskStatus, DERIVED_STATUS_LABEL, ATTENTION_STATUSES };
-export type { DerivedTaskStatus };
+export type DerivedTaskStatus =
+  | 'queued'
+  | 'planning'
+  | 'running'
+  | 'awaiting-human'
+  | 'awaiting-external'
+  | 'blocked'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+/** Display label per derived status. Mirror of domain `DERIVED_STATUS_LABEL`. */
+export const DERIVED_STATUS_LABEL: Record<DerivedTaskStatus, string> = {
+  queued: 'Queued',
+  planning: 'Planning',
+  running: 'Running',
+  'awaiting-human': 'Awaiting Human',
+  'awaiting-external': 'Awaiting External',
+  blocked: 'Blocked',
+  completed: 'Completed',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+};
+
+/** Statuses that mean "a human needs to look at this". Mirror of domain `ATTENTION_STATUSES`. */
+export const ATTENTION_STATUSES: ReadonlySet<DerivedTaskStatus> = new Set<DerivedTaskStatus>([
+  'awaiting-human',
+  'blocked',
+  'failed',
+]);
+
+/**
+ * Mirror of the domain `deriveTaskStatus` — used only for the live-workflow-state response that
+ * still carries condition + phase instead of a precomputed `derivedStatus`. Kept byte-for-byte in
+ * sync with `packages/domain/src/task-status.ts`.
+ */
+export function deriveTaskStatus(condition: string, phase: string): DerivedTaskStatus {
+  switch (condition) {
+    case 'completed':
+      return 'completed';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'cancelled';
+    case 'blocked':
+      return 'blocked';
+    case 'awaiting-human':
+      return 'awaiting-human';
+    case 'awaiting-external':
+      return 'awaiting-external';
+    default:
+      if (phase === 'specify') return 'queued';
+      if (phase === 'plan') return 'planning';
+      return 'running';
+  }
+}
 
 const BADGE_VARIANT: Record<DerivedTaskStatus, BadgeVariant> = {
   queued: 'outline',
@@ -35,7 +84,10 @@ export interface StatusPresentation {
   badgeVariant: BadgeVariant;
 }
 
-/** Web-only mapping from a canonical derived status to a display label + Badge variant. */
+/**
+ * Web-only mapping from a canonical derived status to a display label + Badge variant. This is the
+ * ONLY status logic the browser owns; everything else defers to the daemon's `derivedStatus`.
+ */
 export function statusPresentation(status: string): StatusPresentation {
   const known = status as DerivedTaskStatus;
   const label = DERIVED_STATUS_LABEL[known];
@@ -43,9 +95,9 @@ export function statusPresentation(status: string): StatusPresentation {
   return { label, badgeVariant: BADGE_VARIANT[known] };
 }
 
-/** Presentation for the one response that still only carries condition + phase (live workflow state). */
+/** Presentation for the live-workflow-state case (condition + phase only). */
 export function presentationFromLifecycle(condition: string, phase: string): StatusPresentation {
-  return statusPresentation(deriveDomainStatus(condition as never, phase as never));
+  return statusPresentation(deriveTaskStatus(condition, phase));
 }
 
 export const STATUS_FILTER_OPTIONS = [

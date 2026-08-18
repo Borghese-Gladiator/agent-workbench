@@ -1,4 +1,4 @@
-import { Boxes, ClipboardCheck, FolderGit2, ListChecks, Settings } from 'lucide-react';
+import { Boxes, FolderGit2, LayoutDashboard, ListChecks, Settings, SquareKanban } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 
@@ -12,10 +12,10 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/', label: 'Repositories', icon: FolderGit2, end: true },
+  { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/board', label: 'Task Board', icon: SquareKanban },
   { to: '/tasks', label: 'Tasks', icon: ListChecks },
-  { to: '/approvals', label: 'Approvals', icon: ClipboardCheck },
-  { to: '/evidence', label: 'Evidence', icon: Boxes },
+  { to: '/repositories', label: 'Repositories', icon: FolderGit2 },
   { to: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -27,10 +27,8 @@ export function AppSidebar() {
           <Boxes className="h-4 w-4" />
         </span>
         <div className="leading-tight">
-          <div className="text-sm font-semibold tracking-tight text-foreground">
-            Agent Workbench
-          </div>
-          <div className="text-[11px] text-muted-foreground">Developer Control Plane</div>
+          <div className="text-sm font-semibold tracking-tight text-foreground">Factory</div>
+          <div className="text-[11px] text-muted-foreground">Agent Workbench</div>
         </div>
       </div>
       <nav className="flex flex-col gap-0.5 px-2 py-2">

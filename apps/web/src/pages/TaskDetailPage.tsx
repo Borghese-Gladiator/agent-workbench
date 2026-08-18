@@ -1,13 +1,28 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Panel, PanelBody, PanelHeader, StatTile } from '@/components/ui/panel';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { cn } from '@/lib/utils';
 import { shortId } from '@/lib/format';
-import { tasksApi, type MaintainabilityFinding, type TaskWorkflowState } from '../api/tasks.js';
+import { presentationFromLifecycle } from '@/lib/task-status';
+import { Badge } from '@/components/ui/badge';
+import {
+  tasksApi,
+  type ExecutionTreeResponse,
+  type MaintainabilityFinding,
+  type RuntimeAttributionRow,
+  type TaskFreshness,
+  type TaskMediaArtifact,
+  type TaskStateResponse,
+  type TaskWorkflowState,
+  type TokenBreakdown,
+} from '../api/tasks.js';
 import { useEventStream } from '../hooks/useEventStream.js';
 import { GatePanel } from './GatePanel.js';
+import { ExecutionTree } from '../components/tasks/ExecutionTree.js';
+import { VerificationTab } from '../components/tasks/VerificationTab.js';
+import { UsageAndTime } from '../components/tasks/UsageAndTime.js';
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -19,11 +34,6 @@ const EVENT_STREAM_LABEL: Record<string, string> = {
   reconnecting: '(reconnecting…)',
 };
 
-/**
- * Control-plane lifecycle event types, rendered distinctly from agent-produced events so a
- * phase failing / retrying / a transport drop stands out on the timeline. The value is a Tailwind
- * left-border tone; anything not listed renders with the default (muted) style.
- */
 const CONTROL_PLANE_EVENT_TONE: Record<string, string> = {
   'phase-started': 'border-l-primary',
   'phase-failed': 'border-l-danger',
@@ -33,35 +43,86 @@ const CONTROL_PLANE_EVENT_TONE: Record<string, string> = {
   'session-resumed': 'border-l-primary/60',
 };
 
+/** The canonical phase order for the rail. The active phase highlights; passed phases are muted-done. */
+const PHASE_RAIL = ['specify', 'plan', 'implement', 'verify', 'qa', 'review', 'deliver'];
+
+type Tab = 'execution' | 'verification' | 'usage';
+
 export function TaskDetailPage() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { repositoryId, taskId } = useParams<{ repositoryId: string; taskId: string }>();
+  const initialTab: Tab =
+    searchParams.get('tab') === 'verification'
+      ? 'verification'
+      : searchParams.get('tab') === 'usage'
+        ? 'usage'
+        : 'execution';
   const [state, setState] = useState<TaskWorkflowState | undefined>();
-  const [maintainabilityFindings, setMaintainabilityFindings] = useState<MaintainabilityFinding[]>(
-    [],
-  );
+  const [maintainabilityFindings, setMaintainabilityFindings] = useState<MaintainabilityFinding[]>([]);
+  const [tokenBreakdown, setTokenBreakdown] = useState<TokenBreakdown | undefined>();
+  const [runtimeAttribution, setRuntimeAttribution] = useState<RuntimeAttributionRow[] | undefined>();
+  const [freshness, setFreshness] = useState<TaskFreshness | undefined>();
+  const [tree, setTree] = useState<ExecutionTreeResponse | undefined>();
+  const [candidateSha, setCandidateSha] = useState<string | null>(null);
+  const [title, setTitle] = useState<string | null>(null);
+  const [prompt, setPrompt] = useState<string>('');
+  const [media, setMedia] = useState<TaskMediaArtifact[]>([]);
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
-  // Live semantic-event timeline over the WebSocket, with reconnect catch-up.
+  const [tab, setTab] = useState<Tab>(initialTab);
   const { events, status } = useEventStream(taskId);
 
   async function refresh(): Promise<void> {
     if (!repositoryId || !taskId) return;
     try {
-      const result = await tasksApi.getState(repositoryId, taskId);
+      const result: TaskStateResponse = await tasksApi.getState(repositoryId, taskId);
       setState(result.state);
       setMaintainabilityFindings(result.maintainabilityFindings ?? []);
+      setTokenBreakdown(result.tokenBreakdown);
+      setRuntimeAttribution(result.runtimeAttribution);
+      setFreshness(result.freshness);
       setError(undefined);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
   }
 
-  // Workflow state (phase/gate) is polled; the semantic-event timeline streams over the WebSocket
-  // (useEventStream) with reconnect catch-up — so the timeline is live, not on the 2s poll.
+  // The execution tree + projection facts (candidateSha, title) change far less often than the polled
+  // lifecycle state, so they refresh alongside but tolerate their own failures.
+  async function refreshTree(): Promise<void> {
+    if (!repositoryId || !taskId) return;
+    try {
+      setTree(await tasksApi.executionTree(repositoryId, taskId));
+    } catch {
+      // execution tree is best-effort; keep last-known
+    }
+    try {
+      const summary = (await tasksApi.list()).find((t) => t.taskId === taskId);
+      if (summary) {
+        setCandidateSha(summary.candidateSha);
+        setTitle(summary.title);
+        setPrompt(summary.prompt);
+      }
+    } catch {
+      // projection facts best-effort
+    }
+    try {
+      setMedia(await tasksApi.listMedia(repositoryId, taskId));
+    } catch {
+      // media best-effort
+    }
+  }
+
   useEffect(() => {
     void refresh();
+    void refreshTree();
     const interval = setInterval(() => void refresh(), POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
+    const treeInterval = setInterval(() => void refreshTree(), POLL_INTERVAL_MS * 3);
+    return () => {
+      clearInterval(interval);
+      clearInterval(treeInterval);
+    };
   }, [repositoryId, taskId]);
 
   async function withBusy(fn: () => Promise<unknown>): Promise<void> {
@@ -107,23 +168,40 @@ export function TaskDetailPage() {
     );
   }
 
-  const runtimeEntries = Object.entries(state.runtimeMsByPhase);
+  const presentation = presentationFromLifecycle(state.condition, state.phase);
 
   return (
     <div>
       <PageHeader
-        title={`Task ${shortId(taskId)}`}
+        title={title ?? `Task ${shortId(taskId)}`}
         eyebrow={`Repository ${shortId(repositoryId)}`}
         back={back}
         actions={
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={busy || TERMINAL_CONDITIONS.has(state.condition)}
-            onClick={() => void withBusy(() => tasksApi.cancel(repositoryId, taskId))}
-          >
-            Cancel
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void tasksApi
+                  .create(repositoryId, prompt || `Retry of ${shortId(taskId)}`, {
+                    ...(title ? { title } : {}),
+                    retryOfTaskId: taskId,
+                  })
+                  .then((r) => navigate(`/tasks/${repositoryId}/${r.taskId}`))
+                  .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+              }}
+            >
+              Retry as new task
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy || TERMINAL_CONDITIONS.has(state.condition)}
+              onClick={() => void withBusy(() => tasksApi.cancel(repositoryId, taskId))}
+            >
+              Cancel
+            </Button>
+          </>
         }
       />
 
@@ -133,145 +211,180 @@ export function TaskDetailPage() {
         </div>
       )}
 
+      {freshness && !freshness.liveWorkflowAvailable && (
+        <div className="mb-4 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">
+          Live workflow state is unavailable — showing the durable projection (last indexed{' '}
+          {freshness.indexedAt}).
+        </div>
+      )}
+
+      {/* Gate on top: the one thing a human must act on comes before everything else. */}
+      {state.pendingHumanGate && (
+        <div className="mb-4">
+          <GatePanel
+            repositoryId={repositoryId}
+            taskId={taskId}
+            phase={state.phase}
+            gate={state.pendingHumanGate}
+            size={state.size}
+            busy={busy}
+            onApproveContract={(sizeOverride) =>
+              void withBusy(() =>
+                tasksApi.approveContract(repositoryId, taskId, state.attemptNumber || 1, sizeOverride),
+              )
+            }
+            onRejectContract={() =>
+              void withBusy(() => tasksApi.rejectContract(repositoryId, taskId, 'rejected from UI'))
+            }
+            onApprovePlan={() =>
+              void withBusy(() => tasksApi.approvePlan(repositoryId, taskId, state.attemptNumber || 1))
+            }
+            onRejectPlan={() =>
+              void withBusy(() => tasksApi.rejectPlan(repositoryId, taskId, 'rejected from UI'))
+            }
+          />
+        </div>
+      )}
+
+      {/* Phase rail: where in the lifecycle this task is. */}
+      <Panel className="mb-4">
+        <PanelHeader
+          title="Phase"
+          action={<Badge variant={presentation.badgeVariant}>{presentation.label}</Badge>}
+        />
+        <PanelBody>
+          <ol className="flex flex-wrap items-center gap-1.5 text-xs">
+            {PHASE_RAIL.map((phase, i) => {
+              const activeIndex = PHASE_RAIL.indexOf(state.phase);
+              const isActive = phase === state.phase;
+              const isPast = activeIndex >= 0 && i < activeIndex;
+              return (
+                <li key={phase} className="flex items-center gap-1.5">
+                  <span
+                    className={cn(
+                      'rounded px-2 py-0.5 capitalize',
+                      isActive
+                        ? 'bg-primary/15 font-medium text-primary'
+                        : isPast
+                          ? 'text-muted-foreground'
+                          : 'text-muted-foreground/50',
+                    )}
+                  >
+                    {phase}
+                  </span>
+                  {i < PHASE_RAIL.length - 1 && <span aria-hidden className="text-muted-foreground/40">→</span>}
+                </li>
+              );
+            })}
+          </ol>
+        </PanelBody>
+      </Panel>
+
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <StatTile label="Phase" value={state.phase} tone="accent" />
         <StatTile label="Condition" value={state.condition} />
         <StatTile label="Delivery" value={state.deliveryState} />
         <StatTile label="Size" value={state.size ?? '—'} />
         <StatTile label="Attempt" value={state.attemptNumber} />
-        <StatTile
-          label="Tokens in / out"
-          value={`${state.tokenUsageTotal.inputTokens} / ${state.tokenUsageTotal.outputTokens}`}
-        />
       </div>
 
-      {state.phaseSet && state.phaseSet.length > 0 && (
-        <Panel className="mb-4">
-          <PanelHeader title="Planned phases" />
-          <PanelBody className="text-sm text-muted-foreground">
-            {state.phaseSet.join(' → ')}
-          </PanelBody>
-        </Panel>
+      <div className="mb-4 flex gap-1 border-b">
+        {(
+          [
+            ['execution', 'Execution'],
+            ['verification', 'Verification'],
+            ['usage', 'Usage & Time'],
+          ] as [Tab, string][]
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setTab(id)}
+            className={cn(
+              '-mb-px border-b-2 px-3 py-1.5 text-sm font-medium transition-colors',
+              tab === id
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'execution' && (
+        <div className="flex flex-col gap-4">
+          <Panel>
+            <PanelHeader title="Phase attempts" />
+            <PanelBody>
+              {tree ? (
+                <ExecutionTree tree={tree} />
+              ) : (
+                <p className="text-sm text-muted-foreground">Loading execution tree…</p>
+              )}
+            </PanelBody>
+          </Panel>
+
+          <Panel>
+            <PanelHeader title={`Live event timeline ${EVENT_STREAM_LABEL[status] ?? ''}`} />
+            <PanelBody>
+              {events.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {status === 'reconnecting'
+                    ? 'No events yet (showing history when the stream reconnects).'
+                    : 'No events yet.'}
+                </p>
+              ) : (
+                <ol className="flex flex-col gap-1.5">
+                  {events.map((e) => (
+                    <li
+                      key={e.id}
+                      className={cn('border-l-2 border-l-border pl-3 text-sm', CONTROL_PLANE_EVENT_TONE[e.type])}
+                    >
+                      <span className="font-mono text-xs text-muted-foreground">#{e.sequence}</span>{' '}
+                      <strong className="text-foreground">{e.producer}</strong>{' '}
+                      <span className="text-muted-foreground">
+                        · {e.phase} · {e.type}:
+                      </span>{' '}
+                      {e.summary}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </PanelBody>
+          </Panel>
+
+          {maintainabilityFindings.length > 0 && (
+            <Panel>
+              <PanelHeader title="Maintainability notes (advisory — non-blocking)" />
+              <PanelBody>
+                <ul className="flex flex-col gap-2 text-sm">
+                  {maintainabilityFindings.map((f) => (
+                    <li key={f.id}>
+                      {f.path ? (
+                        <code className="font-mono text-xs text-primary">
+                          {f.path}
+                          {f.line ? `:${f.line}` : ''}
+                        </code>
+                      ) : null}{' '}
+                      <span className="text-muted-foreground">{f.description}</span>
+                    </li>
+                  ))}
+                </ul>
+              </PanelBody>
+            </Panel>
+          )}
+        </div>
       )}
 
-      <Panel className="mb-4">
-        <PanelHeader title="Runtime by phase" />
-        <PanelBody>
-          {runtimeEntries.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No phase runtime recorded yet.</p>
-          ) : (
-            <ul className="flex flex-col gap-1 text-sm">
-              {runtimeEntries.map(([phase, ms]) => (
-                <li key={phase} className="flex justify-between">
-                  <span className="text-muted-foreground">{phase}</span>
-                  <span className="font-mono tabular-nums text-foreground">{ms}ms</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </PanelBody>
-      </Panel>
-
-      <Panel className="mb-4">
-        <PanelHeader title={`Live event timeline ${EVENT_STREAM_LABEL[status] ?? ''}`} />
-        <PanelBody>
-          {events.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {status === 'reconnecting'
-                ? 'No events yet (showing history when the stream reconnects).'
-                : 'No events yet.'}
-            </p>
-          ) : (
-            <ol className="flex flex-col gap-1.5">
-              {events.map((e) => (
-                <li
-                  key={e.id}
-                  className={cn(
-                    'border-l-2 border-l-border pl-3 text-sm',
-                    CONTROL_PLANE_EVENT_TONE[e.type],
-                  )}
-                >
-                  <span className="font-mono text-xs text-muted-foreground">#{e.sequence}</span>{' '}
-                  <strong className="text-foreground">{e.producer}</strong>{' '}
-                  <span className="text-muted-foreground">
-                    · {e.phase} · {e.type}:
-                  </span>{' '}
-                  {e.summary}
-                </li>
-              ))}
-            </ol>
-          )}
-        </PanelBody>
-      </Panel>
-
-      <Panel className="mb-4">
-        <PanelHeader title="Open findings" />
-        <PanelBody>
-          {state.openFindingIds.length === 0 ? (
-            <p className="text-sm text-muted-foreground">None.</p>
-          ) : (
-            <ul className="flex flex-col gap-1 font-mono text-xs text-muted-foreground">
-              {state.openFindingIds.map((id) => (
-                <li key={id}>{id}</li>
-              ))}
-            </ul>
-          )}
-        </PanelBody>
-      </Panel>
-
-      {maintainabilityFindings.length > 0 && (
-        <Panel className="mb-4">
-          <PanelHeader title="Maintainability notes (advisory — non-blocking)" />
-          <PanelBody>
-            <ul className="flex flex-col gap-2 text-sm">
-              {maintainabilityFindings.map((f) => (
-                <li key={f.id}>
-                  {f.path ? (
-                    <code className="font-mono text-xs text-primary">
-                      {f.path}
-                      {f.line ? `:${f.line}` : ''}
-                    </code>
-                  ) : null}{' '}
-                  <span className="text-muted-foreground">{f.description}</span>
-                </li>
-              ))}
-            </ul>
-          </PanelBody>
-        </Panel>
+      {tab === 'verification' && (
+        <VerificationTab state={state} media={media} candidateSha={candidateSha} />
       )}
 
-      {state.pendingHumanGate && (
-        <GatePanel
-          repositoryId={repositoryId}
-          taskId={taskId}
-          phase={state.phase}
-          gate={state.pendingHumanGate}
-          size={state.size}
-          busy={busy}
-          // TaskWorkflowState does not expose contractVersion/planVersion directly (only
-          // CompletionCandidate does, which isn't part of this response) — attemptNumber is used
-          // as the best available stand-in, defaulting to 1 for the first attempt.
-          onApproveContract={(sizeOverride) =>
-            void withBusy(() =>
-              tasksApi.approveContract(
-                repositoryId,
-                taskId,
-                state.attemptNumber || 1,
-                sizeOverride,
-              ),
-            )
-          }
-          onRejectContract={() =>
-            void withBusy(() => tasksApi.rejectContract(repositoryId, taskId, 'rejected from UI'))
-          }
-          onApprovePlan={() =>
-            void withBusy(() =>
-              tasksApi.approvePlan(repositoryId, taskId, state.attemptNumber || 1),
-            )
-          }
-          onRejectPlan={() =>
-            void withBusy(() => tasksApi.rejectPlan(repositoryId, taskId, 'rejected from UI'))
-          }
+      {tab === 'usage' && (
+        <UsageAndTime
+          tree={tree ?? { taskId, phaseAttempts: [] }}
+          tokenBreakdown={tokenBreakdown}
+          runtimeAttribution={runtimeAttribution}
         />
       )}
     </div>
