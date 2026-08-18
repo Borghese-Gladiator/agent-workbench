@@ -29,6 +29,7 @@ import {
   resolveStartCommandForWorktree,
   resolveRepositoryPath,
   installWorktreeDependencies,
+  selectQaExecutor,
 } from './command-support.js';
 import { runBrowserQaViaServer } from './browser-qa-support.js';
 import { draftContractInputFromPrompt, formatContractGateSummary } from './contract-support.js';
@@ -1060,14 +1061,13 @@ const exerciseHandler: PhaseHandler = {
       claimIds: runState.contract?.claims.map((c) => c.id) ?? [],
     };
 
-    // Real browser QA: when AWB_QA_MODE=browser and the repo has a discovered dev-server
-    // start command, start it and run runBrowserQa (real chromium → real .webm video + .zip trace)
-    // against it. Otherwise fall back to the CLI QA executor. `ranBrowserQa` tracks which path ran so
+    // QA executor selection by repo surface (see selectQaExecutor). AWB_QA_MODE picks the executor:
+    // `browser` (real dev-server + chromium → real .webm video + .zip trace), `http-api` (scripted
+    // real HTTP against a running API), `library` (a real consumer script exercising the built
+    // library), or the default CLI executor. When `browser` is requested but the produced project
+    // isn't a server (`serves: false`) or nothing resolves, we now route to a real non-browser
+    // consumer instead of a hard-fail. `ranBrowserQa` tracks which path ran so
     // `browserScenariosHaveTraces` reflects a real trace artifact rather than a hardcoded true.
-    // QA executor selection by repo surface. AWB_QA_MODE picks the executor: `browser`
-    // (real dev-server + chromium), `http-api` (scripted real HTTP against a running API), `library`
-    // (a real consumer script exercising the built library), or the default CLI executor. The
-    // http-api/library modes were fully-implemented but had no runtime caller before this.
     type QaResult =
       | Awaited<ReturnType<typeof runCliQa>>
       | Awaited<ReturnType<typeof runBrowserQa>>
@@ -1088,17 +1088,27 @@ const exerciseHandler: PhaseHandler = {
           })
         : undefined;
 
-    // Only a server (`serves: true`) can be browser-QA'd — it carries a baseUrl to point Chromium at.
-    // A `serves: false` result (a CLI / compiled binary / one-shot run) has no URL, so we skip browser
-    // QA rather than hand `waitForServer` a port nothing binds (which would hang until timeout).
-    if (resolvedStart?.serves === true && runState.worktreePath) {
+    // Pure selection of the executor by (qaMode, resolvedStart, hasWorktree); the effectful executor
+    // dispatch stays here in the handler. Only a server (`serves: true`) can be browser-QA'd — it
+    // carries a baseUrl to point Chromium at. A `serves: false` result (a static frontend build / CLI
+    // / compiled binary) or a no-resolution browser case now routes to a real non-browser consumer
+    // (`serve-as-is` / `library`) rather than the old `echo …; exit 1` hard-fail.
+    const executor = selectQaExecutor({
+      qaMode,
+      resolvedStart,
+      hasWorktree: Boolean(runState.worktreePath),
+      httpApiBaseUrl: process.env.AWB_QA_BASE_URL,
+      libraryScriptSource: process.env.AWB_QA_LIBRARY_SCRIPT,
+    });
+
+    if (executor.kind === 'browser') {
       ranBrowserQa = true;
       // A caller-supplied AWB_QA_BASE_URL still wins; otherwise use the resolver's baseUrl (which the
       // framework-inference tier matches to the port its start command binds to).
-      const baseUrl = process.env.AWB_QA_BASE_URL ?? resolvedStart.baseUrl;
+      const baseUrl = process.env.AWB_QA_BASE_URL ?? executor.baseUrl;
       qaResult = await ctx.observability.time('qaExecutionMs', () =>
         runBrowserQaViaServer({
-          startCommand: resolvedStart.command,
+          startCommand: executor.command,
           worktreePath: runState.worktreePath as string,
           baseUrl,
           scenario: {
@@ -1123,11 +1133,11 @@ const exerciseHandler: PhaseHandler = {
       // inference/worktree-discovery rather than the already-persisted profile row, write it back so
       // the next exercise run is a Tier-1 hit instead of re-inferring. Best-effort — QA already
       // passed, so a persist failure must not fail the phase. Mock/non-durable path has no daemon.
-      if (ctx.daemon && resolvedStart.source !== 'repository-commands') {
+      if (ctx.daemon && runState.worktreePath && executor.persistSource !== 'repository-commands') {
         try {
           await ctx.daemon.persistStartCommand({
             repositoryId: state.repositoryId,
-            command: resolvedStart.command,
+            command: executor.command,
             cwd: runState.worktreePath,
             validatedAtSha: context.candidateSha,
           });
@@ -1135,42 +1145,36 @@ const exerciseHandler: PhaseHandler = {
           // non-fatal: the profile just misses the cache and re-infers next time
         }
       }
-    } else if (qaMode === 'http-api') {
-      const baseUrl = process.env.AWB_QA_BASE_URL ?? 'http://localhost:3000';
+    } else if (executor.kind === 'http-api') {
       qaResult = await ctx.observability.time('qaExecutionMs', () =>
         runHttpApiQa(
           {
-            baseUrl,
+            baseUrl: executor.baseUrl,
             requests: [{ method: 'GET', path: '/', expectations: [{ kind: 'status', equals: 200 }] }],
           },
           context,
           runState.artifactStore,
         ),
       );
-    } else if (qaMode === 'library') {
+    } else if (executor.kind === 'library') {
       qaResult = await ctx.observability.time('qaExecutionMs', () =>
         runLibraryQa(
-          {
-            consumerScriptSource:
-              process.env.AWB_QA_LIBRARY_SCRIPT ?? 'console.log("ASSERT:library-importable=true");',
-          },
+          { consumerScriptSource: executor.consumerScriptSource },
           context,
           runState.artifactStore,
         ),
       );
-    } else if (qaMode === 'browser') {
-      // Browser QA was requested but no start command could be resolved from the DB, the worktree, or
-      // the produced project shape (TASK-65). Do NOT silently fall through to the trivial `echo`
-      // check — that reads as a false pass while covering no behavioral claim. Fail QA legibly so the
-      // gate blocks with an actionable reason instead of masking a missing runnable target.
+    } else if (executor.kind === 'serve-as-is') {
+      // The fix: browser QA was requested but the resolved runnable form is a non-server
+      // (`serves: false`) — a static frontend build, CLI, or compiled binary. Run the captured
+      // command as a real non-browser consumer (a passing exit code is genuine evidence) instead of
+      // the old `echo …; exit 1` hard-fail that masked a missing dev server as a false pass.
+      const [command, ...args] = executor.command.split(/\s+/);
       qaResult = await ctx.observability.time('qaExecutionMs', () =>
         runCliQa(
           {
-            command: 'sh',
-            args: [
-              '-c',
-              'echo "no start command could be resolved for browser QA (see TASK-65)"; exit 1',
-            ],
+            command: command ?? executor.command,
+            args,
             cwd,
             expectations: [{ kind: 'exitCode', equals: 0 }],
           },

@@ -136,9 +136,12 @@ export async function resolveStartCommand(repositoryId: string): Promise<string 
 
 /**
  * A resolved start command for the browser-QA path. `serves: true` carries the `baseUrl` a browser
- * loads; `serves: false` is a one-shot run / CLI / compiled binary (captured for a future non-browser
- * QA consumer, never driven by `waitForServer`). Mirrors `@awb/repository`'s `ResolvedRunCommand`, with
- * the extra `repository-commands` / `worktree-discovery` sources for the persisted/discovered tiers.
+ * loads; `serves: false` is a one-shot run / CLI / compiled binary. The `serves: false` command is
+ * now consumed by `selectQaExecutor` below: under `AWB_QA_MODE=browser` it routes to the
+ * `serve-as-is` (non-browser) executor — running the captured command via CLI QA — instead of the
+ * old `echo …; exit 1` hard-fail. It is never handed to `waitForServer` (which would hang on a port
+ * nothing binds). Mirrors `@awb/repository`'s `ResolvedRunCommand`, with the extra
+ * `repository-commands` / `worktree-discovery` sources for the persisted/discovered tiers.
  */
 export type ResolvedStartCommand =
   | { command: string; serves: true; baseUrl: string; source: RunCommandSource | 'repository-commands' | 'worktree-discovery' }
@@ -202,4 +205,98 @@ export async function resolveReviewDiff(input: {
   } catch {
     return { diff: '', changedPaths: [] };
   }
+}
+
+/**
+ * Discriminated result of QA-executor selection for the exercise phase. The handler dispatches on
+ * `kind` to the matching effectful executor, keeping this selection pure:
+ *   - `browser`     drives a real dev server + Chromium (only for a `serves: true` resolution);
+ *   - `http-api`    scripts real HTTP against a running API (explicit `AWB_QA_MODE=http-api`);
+ *   - `library`     runs a real consumer script exercising the built library (explicit
+ *                   `AWB_QA_MODE=library`, and the browser-mode fallback when nothing resolved);
+ *   - `serve-as-is` is the fix: under `AWB_QA_MODE=browser` a resolved-but-`serves: false` command
+ *                   (a static frontend build / CLI / compiled binary) runs as a non-browser CLI QA
+ *                   consumer instead of the old `echo …; exit 1` hard-fail;
+ *   - `cli-ok`      the default mock / no-mode placeholder (`echo qa-ok`).
+ */
+export type QaExecutorDescriptor =
+  | {
+      kind: 'browser';
+      command: string;
+      baseUrl: string;
+      persistSource: ResolvedStartCommand['source'];
+    }
+  | { kind: 'http-api'; baseUrl: string }
+  | { kind: 'library'; consumerScriptSource: string }
+  | { kind: 'serve-as-is'; command: string }
+  | { kind: 'cli-ok' };
+
+/**
+ * Pure inputs the selector branches on. `qaMode` is `AWB_QA_MODE` (or undefined off the real-agent
+ * path); `resolvedStart` is the tiered start resolution; `hasWorktree` gates the browser path (a
+ * browser run needs a real worktree to boot the server in). `httpApiBaseUrl` / `libraryScriptSource`
+ * are env-derived values the handler reads and passes in so the selector stays side-effect-free.
+ */
+export interface SelectQaExecutorInput {
+  qaMode: string | undefined;
+  resolvedStart: ResolvedStartCommand | undefined;
+  hasWorktree: boolean;
+  httpApiBaseUrl?: string;
+  libraryScriptSource?: string;
+}
+
+const DEFAULT_HTTP_API_BASE_URL = 'http://localhost:3000';
+const DEFAULT_LIBRARY_SCRIPT_SOURCE = 'console.log("ASSERT:library-importable=true");';
+
+/**
+ * Pure, unit-testable selection of the QA executor for the exercise phase over
+ * (`qaMode`, `resolvedStart`, `hasWorktree`):
+ *   - a `serves: true` resolution with a worktree → `browser`;
+ *   - explicit `AWB_QA_MODE=http-api` → `http-api`;
+ *   - explicit `AWB_QA_MODE=library` → `library`;
+ *   - `AWB_QA_MODE=browser` with a `serves: false` resolution → `serve-as-is` (run the captured
+ *     command as a non-browser CLI QA consumer — the fix, never the `exit 1` hard-fail);
+ *   - `AWB_QA_MODE=browser` with no resolution (nothing recognized) → `library` fallback (a defined
+ *     non-browser consumer, never the `exit 1` hard-fail);
+ *   - otherwise → `cli-ok` (mock / no-mode default).
+ */
+export function selectQaExecutor(input: SelectQaExecutorInput): QaExecutorDescriptor {
+  const { qaMode, resolvedStart, hasWorktree } = input;
+
+  if (resolvedStart?.serves === true && hasWorktree) {
+    return {
+      kind: 'browser',
+      command: resolvedStart.command,
+      baseUrl: resolvedStart.baseUrl,
+      persistSource: resolvedStart.source,
+    };
+  }
+
+  if (qaMode === 'http-api') {
+    return { kind: 'http-api', baseUrl: input.httpApiBaseUrl ?? DEFAULT_HTTP_API_BASE_URL };
+  }
+
+  if (qaMode === 'library') {
+    return {
+      kind: 'library',
+      consumerScriptSource: input.libraryScriptSource ?? DEFAULT_LIBRARY_SCRIPT_SOURCE,
+    };
+  }
+
+  if (qaMode === 'browser') {
+    // The fix: browser QA was requested but the resolved runnable form is a non-server
+    // (`serves: false`) — a static frontend build, CLI, or compiled binary. Run it as a non-browser
+    // CLI QA consumer instead of the old `echo …; exit 1` hard-fail.
+    if (resolvedStart && resolvedStart.serves === false) {
+      return { kind: 'serve-as-is', command: resolvedStart.command };
+    }
+    // Nothing resolved at all: fall back to a defined non-browser library consumer rather than the
+    // trivial `exit 1` that read as a false pass covering no behavioral claim.
+    return {
+      kind: 'library',
+      consumerScriptSource: input.libraryScriptSource ?? DEFAULT_LIBRARY_SCRIPT_SOURCE,
+    };
+  }
+
+  return { kind: 'cli-ok' };
 }

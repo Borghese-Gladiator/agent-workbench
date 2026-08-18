@@ -25,8 +25,11 @@ export type RunCommandSource =
 /**
  * A resolved way to run a produced project. `serves: true` is a long-running web/dev server the
  * browser-QA path can drive (it carries the `baseUrl` a browser loads); `serves: false` is a one-shot
- * run / CLI / compiled binary that exits — captured so a future non-browser QA consumer can use it,
- * but never handed to `waitForServer` (which would hang waiting on a port nothing binds).
+ * run / CLI / compiled binary that exits. The `serves: false` command is consumed by the worker's
+ * `selectQaExecutor` (workers/temporal-worker/src/activities/command-support.ts): under
+ * `AWB_QA_MODE=browser` it routes to the non-browser `serve-as-is` executor (running the command via
+ * CLI QA) rather than the old exit-1 hard-fail. It is never handed to `waitForServer` (which would
+ * hang waiting on a port nothing binds).
  */
 export type ResolvedRunCommand =
   | { command: string; source: RunCommandSource; serves: true; baseUrl: string }
