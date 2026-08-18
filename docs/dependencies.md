@@ -38,17 +38,24 @@ workers/temporal-worker → domain, workflow, agent-gateway, capability-broker, 
 
 ## Package removed: `@awb/observability`
 
-The original scaffolding included an empty `packages/observability` (runtime/
-token/event telemetry schema). It was
-never populated: token/usage aggregation ended up living directly in
-`@awb/agent-gateway` (`UsageAggregator`, since usage is inherently a property
-of an agent session, not a separate concern), and runtime-breakdown-by-phase
-lives in `TaskWorkflowState` (`@awb/workflow`) since the Workflow already
-tracks phase transitions and is the natural owner of "how long did phase X
-take." No code ever depended on the empty package, so it was deleted rather
-than left as a confusing empty stub — a future need for a shared telemetry
-package should re-derive it from what `agent-gateway`/`workflow` already
-track, not resurrect this file's original shape blindly.
+The original scaffolding included an empty `@awb/observability` package (runtime/
+token/event telemetry schema). It was never populated, and observability instead
+ended up distributed across the packages that already own the data:
+
+- **OTel traces/metrics/logs** → `@awb/telemetry`.
+- **Token/usage + runtime-attribution + context-composition persistence and read
+  paths** → `@awb/database` (`schema/observability.ts`,
+  `data-access/observability.ts`, `schema/sessions.ts`), since usage is inherently a
+  property of an agent session, not a separate concern.
+- **Per-phase-attempt accrual** (the accumulator that drains into the daemon's
+  persistence) → `workers/temporal-worker/src/activities/observability-accumulator.ts`.
+- **Coarse runtime-breakdown-by-phase** → `TaskWorkflowState` (`@awb/workflow`), since
+  the Workflow already tracks phase transitions and is the natural owner of "how long
+  did phase X take."
+
+No code ever depended on the empty package, so it was deleted rather than left as a
+confusing empty stub — a future need for a shared telemetry package should re-derive it
+from what these packages already track, not resurrect the original shape blindly.
 
 ## Why this shape
 

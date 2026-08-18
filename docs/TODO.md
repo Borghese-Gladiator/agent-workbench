@@ -175,28 +175,27 @@ client dropping `runtimeAttribution`, and telemetry being off-by-default — are
 > lives in `packages/telemetry`, `packages/database` (`schema/observability.ts` +
 > `data-access/observability.ts` + `schema/sessions.ts`), and
 > `workers/temporal-worker/src/activities/observability-accumulator.ts`. Several backlog
-> items (TASK-61/79/89/98) cite `packages/observability/` — that path is wrong; see TASK-108.
+> items (TASK-61/79/89/98) once cited `packages/observability/`; that path was wrong and has
+> been corrected — see TASK-108 (done).
 
-### [ ] TASK-108: Backlog + docs cite a nonexistent `packages/observability/` — fix the path drift
+### [x] TASK-108: Backlog + docs cited a nonexistent `packages/observability/` — path drift fixed
 
-**What's wrong.** TASK-61, TASK-79, TASK-89, and TASK-98 all point their "Where" at
-`packages/observability/`, which **does not exist** (verified: no directory of that name
-outside `archive/`, not among the 23 workspace packages). Anyone picking up those tasks
-starts in the wrong place. The real homes are `packages/telemetry` (OTel) and
-`packages/database` (`data-access/observability.ts`, `schema/observability.ts`,
-`schema/sessions.ts`) plus `workers/temporal-worker/src/activities/observability-accumulator.ts`.
+**What was wrong.** TASK-61, TASK-79, TASK-89, and TASK-98 pointed their "Where" at a package
+literally named `packages/observability/`, which does not exist (verified: no directory of that
+name outside `archive/`, not among the workspace packages). Anyone picking up those tasks started
+in the wrong place. The real homes are `packages/telemetry` (OTel) and `packages/database`
+(`data-access/observability.ts`, `schema/observability.ts`, `schema/sessions.ts`) plus
+`workers/temporal-worker/src/activities/observability-accumulator.ts`.
 
-**What to do.** Correct the `packages/observability/` references in TASK-61/79/89/98 (and
-anywhere else in `docs/`) to the actual packages. This is a documentation-accuracy fix, not
-code — but it is blocking clarity for the token-audit work (TASK-79) which is high priority.
+**What was done.** Repointed the four tasks' "Where" fields at the real packages and rewrote the
+`@awb/observability` removed-package note in `docs/dependencies.md` to name those homes. The only
+surviving `packages/observability` string in `docs/` is this note itself, which exists to explain
+the historical drift.
 
-**Where.** `docs/TODO.md` (the four tasks' "Where" fields), any `docs/` mention of a
-`packages/observability` module.
+**How we know it's done.** `rg 'packages/observability' docs/` returns only this task's own note,
+and each corrected task names the real package.
 
-**How we'll know it's done.** *Manual:* `rg 'packages/observability' docs/` returns nothing
-(or only this task's own note), and each corrected task names the real package.
-
-### [ ] TASK-109: `context_composition` is a chars/4 ESTIMATE, not measured tokens — the token-attribution surface is synthetic
+### [x] TASK-109: `context_composition` is a chars/4 ESTIMATE, not measured tokens — the token-attribution surface is synthetic
 
 **What's wrong.** The "8 token-source buckets" (`context_composition`) that the token-audit
 work (TASK-79) and any future Usage view read from are **not measured** — they are computed
@@ -233,7 +232,7 @@ buckets sum to (within a small rounding tolerance) the provider-reported input t
 *Manual:* TASK-79's per-phase ranking is driven by reconciled tokens, and cache-read vs.
 fresh-input is distinguishable.
 
-### [ ] TASK-110: The structured logger (`createLogger`) is defined but has ZERO consumers — wire it or delete it
+### [x] TASK-110: The structured logger (`createLogger`) is defined but has ZERO consumers — wired it
 
 **What's wrong.** `docs/observability.md` presents a third OTel sub-channel — *"a leveled,
 structured logger (`createLogger`) stamped with run_id/task_id, replacing raw stdout

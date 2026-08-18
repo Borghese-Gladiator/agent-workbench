@@ -104,7 +104,9 @@ export class ObservabilityAccumulator {
             },
           ]
         : [],
-      ...(input.contextComposition ? { contextComposition: input.contextComposition } : {}),
+      ...(input.contextComposition
+        ? { contextComposition: reconcileContextComposition(input.contextComposition, input.usage) }
+        : {}),
     });
   }
 
@@ -154,5 +156,61 @@ export function estimateContextComposition(
     repositoryMapTokens: tokens(payload.repositoryMap),
     memoryTokens: tokens(payload.memory),
     instructionTokens: tokens(instruction),
+    // A chars/4 heuristic until reconcileContextComposition scales it to a measured inputTokens total.
+    estimated: true,
   };
+}
+
+/** The 8 chars/4 buckets, in the order they are scaled and rounded. */
+const CONTEXT_BUCKETS = [
+  'contractTokens',
+  'planTokens',
+  'diffTokens',
+  'evidenceTokens',
+  'findingsTokens',
+  'repositoryMapTokens',
+  'memoryTokens',
+  'instructionTokens',
+] as const satisfies ReadonlyArray<keyof Omit<ContextComposition, 'estimated'>>;
+
+/**
+ * Reconcile a chars/4 estimate against the provider-reported usage. When `usage.inputTokens` is
+ * available, scale the 8 estimated buckets so they SUM to that measured fresh-input total
+ * (largest-remainder rounding keeps the sum exact) and flag `estimated: false`. Cache-read tokens
+ * (`usage.cachedInputTokens`) are billed and attributed separately on the model_invocations row —
+ * they are NOT folded into these buckets, so "context we paid to re-send" stays distinguishable from
+ * fresh input. With no usage (mock runtime) the estimate passes through flagged `estimated: true`.
+ */
+export function reconcileContextComposition(
+  estimate: ContextComposition,
+  usage: ModelUsage | undefined,
+): ContextComposition {
+  const measured = usage?.inputTokens;
+  if (measured === undefined) return { ...estimate, estimated: true };
+
+  const estimatedTotal = CONTEXT_BUCKETS.reduce((sum, k) => sum + estimate[k], 0);
+  if (estimatedTotal <= 0) {
+    // Nothing to scale (all buckets zero); attribute the whole measured total to instruction so the
+    // sum still reconciles, and mark it measured.
+    return { ...estimate, instructionTokens: measured, estimated: false };
+  }
+
+  // Scale each bucket by measured/estimatedTotal, then distribute the rounding remainder to the
+  // buckets with the largest fractional parts so the reconciled buckets sum EXACTLY to `measured`.
+  const parts = CONTEXT_BUCKETS.map((bucket) => {
+    const scaled = (estimate[bucket] * measured) / estimatedTotal;
+    const floor = Math.floor(scaled);
+    return { bucket, floor, frac: scaled - floor };
+  });
+  let remainder = measured - parts.reduce((sum, p) => sum + p.floor, 0);
+  const reconciled: ContextComposition = { ...estimate, estimated: false };
+  for (const p of parts) {
+    reconciled[p.bucket] = p.floor;
+  }
+  for (const p of [...parts].sort((a, b) => b.frac - a.frac)) {
+    if (remainder <= 0) break;
+    reconciled[p.bucket] += 1;
+    remainder -= 1;
+  }
+  return reconciled;
 }

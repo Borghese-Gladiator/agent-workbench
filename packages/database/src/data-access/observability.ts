@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import type { PhaseObservability, TokenBreakdown } from '@awb/domain';
+import type { ContextComposition, PhaseObservability, TaskPhase, TokenBreakdown } from '@awb/domain';
 import {
   agentSessions,
   modelInvocations,
@@ -73,13 +73,15 @@ export function persistPhaseObservability(db: DrizzleDb, payload: PhaseObservabi
       }
 
       if (session.contextComposition) {
+        const { estimated, ...ccBuckets } = session.contextComposition;
         const ccRow = {
           id: session.id,
           taskId: session.taskId,
           agentSessionId: session.id,
           phase: session.phase,
           role: session.role,
-          ...session.contextComposition,
+          ...ccBuckets,
+          estimated: estimated ? 1 : 0,
           createdAt: now,
         };
         tx.insert(contextComposition)
@@ -142,6 +144,32 @@ export function getTokenBreakdown(db: DrizzleDb, taskId: string): TokenBreakdown
 
 export function getRuntimeAttribution(db: DrizzleDb, taskId: string) {
   return db.select().from(runtimeAttribution).where(eq(runtimeAttribution.taskId, taskId)).all();
+}
+
+/**
+ * Per-session context-composition for a task, with the `estimated` provenance flag surfaced as a
+ * boolean (SQLite stores 1/0). Lets a Usage view distinguish buckets reconciled to measured input
+ * tokens (`estimated: false`) from an unmeasured chars/4 guess (`estimated: true`).
+ */
+export function getContextComposition(
+  db: DrizzleDb,
+  taskId: string,
+): Array<ContextComposition & { agentSessionId: string; phase: TaskPhase; role: string }> {
+  const rows = db.select().from(contextComposition).where(eq(contextComposition.taskId, taskId)).all();
+  return rows.map((r) => ({
+    contractTokens: r.contractTokens,
+    planTokens: r.planTokens,
+    diffTokens: r.diffTokens,
+    evidenceTokens: r.evidenceTokens,
+    findingsTokens: r.findingsTokens,
+    repositoryMapTokens: r.repositoryMapTokens,
+    memoryTokens: r.memoryTokens,
+    instructionTokens: r.instructionTokens,
+    estimated: r.estimated === 1,
+    agentSessionId: r.agentSessionId,
+    phase: r.phase,
+    role: r.role,
+  }));
 }
 
 /**

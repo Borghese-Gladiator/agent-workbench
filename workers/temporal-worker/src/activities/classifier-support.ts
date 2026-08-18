@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { SemanticEvent, TaskPhase } from '@awb/domain';
 import type { SizingInput, SizeClassification } from '@awb/planning';
 import { runIdForTask } from '@awb/database';
+import { createLogger } from '@awb/telemetry';
 import type { CodingAgentAdapter } from '@awb/agent-gateway';
 import type { DaemonClient } from '../daemon-client.js';
 import {
@@ -77,9 +78,18 @@ async function recordShadowComparison(
   const localSize = local ? local.size : 'unavailable';
   const agree = authoritative !== undefined && local !== undefined && authoritative.size === local.size;
 
-  console.error(
-    `[classifier-shadow] task=${input.taskId} haiku=${haiku} local=${localSize} (${shadowClassifierModel()}) agree=${agree}`,
-  );
+  const log = createLogger('awb-worker').child({
+    runId: runIdForTask(input.taskId),
+    taskId: input.taskId,
+    phase: input.phase,
+    attemptNumber: input.attemptNumber,
+  });
+  log.info('classifier-shadow comparison', {
+    haiku,
+    local: localSize,
+    localModel: shadowClassifierModel(),
+    agree,
+  });
 
   if (!input.daemon) return;
   const event: SemanticEvent = {
