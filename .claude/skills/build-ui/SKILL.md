@@ -1,152 +1,443 @@
 ---
 name: build-ui
-description: Build a beautiful, coherent UI from scratch — greenfield frontends, new apps, standalone views, or the first screens of a product that has no established visual style yet. Covers layout, a type scale, spacing rhythm, color/token discipline, light/dark, responsive rules, and a component-kit-first approach. Use ONLY when creating a UI with no existing style to match. Do NOT use when editing, extending, or adding to an existing frontend — there you match the established style instead.
+description: Build polished greenfield React interfaces using Tailwind CSS and shadcn/ui with a restrained Linear/Vercel/Raycast-style product aesthetic. Use when creating a new app, site, dashboard, tool, prototype, or standalone view that has no established visual language yet, especially when the user asks to design, polish, beautify, or build a frontend from scratch. Do not use when editing or extending an existing styled frontend; in that case preserve the existing design system instead.
 ---
 
-# Build a UI from scratch
+# Build UI
 
-Produce a greenfield UI that reads as one coherent system: consistent spacing,
-a real type scale, a disciplined token-driven palette that works in light and
-dark, responsive layout, and components assembled from a kit rather than
-hand-rolled one screen at a time.
+Build the interface as if it belongs to a mature product team with one house style: restrained, precise, fast-looking, typography-led, neutral, and quietly premium.
 
-This is a *craft* skill, not a workflow skill. It does not boot the stack, drive
-the workbench, or open PRs. It shapes the frontend code you write when there is
-no established style to inherit.
+Optimize for coherence over novelty. Generic is acceptable. Sloppy is not.
 
-## When this fires — and when it MUST NOT
+## Default stack
 
-**Invoke ONLY when building a UI from scratch:**
+Use these defaults unless the project already specifies otherwise:
 
-- a new app, site, or standalone tool with no frontend yet
-- the first screens of a product that has no visual language yet
-- a self-contained artifact / prototype / demo page built fresh
-- an explicit ask to "design", "make it look good", "build a polished UI"
+* React
+* Tailwind CSS
+* shadcn/ui
+* Radix primitives through shadcn where applicable
+* lucide-react for icons
 
-**DO NOT invoke when editing or extending an existing frontend.** If the target
-already has a frontend — components, tokens, a CSS/theme file, a design system,
-or even a consistent ad-hoc style — that established style is authoritative.
-Adding a button, a page, a modal, or a section to a styled app is an *edit*, not
-a from-scratch build. In that case:
+Do not introduce another component library unless the task requires a component shadcn cannot reasonably cover.
 
-- match the existing tokens, spacing, type scale, and component patterns
-- reuse the app's components and utilities; do not introduce a parallel style
-- skip this skill entirely — its guidance would fight the established look
+## Design direction
 
-Quick test: *is there already a style here that a reasonable reviewer would
-expect me to match?* If yes → edit-mode, do not use this skill. If genuinely
-nothing to match → from-scratch, continue.
+Aim for the visual territory of Linear, Vercel, and Raycast without copying any one product.
 
-## Reuse, don't duplicate
+Default characteristics:
 
-Two built-in skills already carry deep craft. Defer to them rather than
-restating their rules here:
+* neutral or near-neutral surfaces
+* one restrained accent color
+* strong typographic hierarchy
+* compact controls with generous page-level spacing
+* thin borders instead of heavy shadows
+* subtle elevation only where layering matters
+* small-to-medium radii rather than bubbly cards
+* crisp iconography
+* dense information architecture without visual clutter
+* motion that feels fast and functional
+* excellent dark mode
 
-- **`artifact-design`** — general visual/artifact design craft. Read it first
-  for any from-scratch UI; treat it as the base layer this skill builds on.
-- **`dataviz`** — MANDATORY before writing any chart, graph, plot, dashboard,
-  stat tile, meter, KPI row, sparkline, or data-viz color. Do not hand-pick
-  chart colors here; use its palette + validator.
+Avoid visual novelty unless the user asks for it.
 
-This skill only adds the greenfield-app-specific scaffolding (tokens, layout,
-responsive, kit-first) that those two do not spell out for a full frontend.
+## Hard bans
 
-## Optional first step: a `design.md`
+Do not default to any of these:
 
-For anything beyond a single small screen, write a short `design.md` in the
-project before building. It makes the output meaningfully more coherent because
-every screen then references one source of truth instead of drifting. Keep it
-tight — a page, not a spec:
+* gradients as decoration
+* giant rounded cards everywhere
+* glassmorphism
+* neon glows
+* floating blobs or abstract background shapes
+* excessive shadows
+* rainbow palettes
+* oversized hero text in application UIs
+* center-aligned dashboard content
+* cards inside cards inside cards
+* a border around every possible region
+* icons inside colored circles unless meaning requires it
+* decorative charts or fake analytics
+* gratuitous animations
+* one-off arbitrary Tailwind values when a standard token exists
 
-```markdown
-# Design
+If the interface still looks good after removing an effect, remove the effect.
 
-## Vibe
-One or two lines: the feeling (calm/dense/playful/serious) and any reference.
+## Establish the system first
 
-## Tokens
-- color: brand, neutrals, semantic (success/warn/danger/info), surface, text
-- radius, shadow/elevation, border
-- Define every token in BOTH light and dark.
+Before building more than a tiny one-screen UI, define a small visual system in code or in a short `design.md`.
 
-## Type scale
-Font family(ies) + the ramp (e.g. 12 / 14 / 16 / 20 / 24 / 32 / 48) and weights.
+Specify:
 
-## Spacing
-The base unit (usually 4px) and the allowed steps (4/8/12/16/24/32/48/64).
+* surface and text tokens for light and dark
+* one accent color
+* border color
+* semantic success, warning, and destructive colors
+* radius scale
+* shadow/elevation policy
+* type ramp
+* spacing rhythm
+* max content width
+* sidebar/header behavior
 
-## Layout
-Max content width, grid/columns, breakpoints, nav pattern.
+Keep the system intentionally small. Prefer 8 useful tokens over 30 theoretical ones.
 
-## Components
-The kit in use, plus any app-specific composites.
+## Color
+
+Start neutral.
+
+Use a palette structurally similar to:
+
+* background: near-white / near-black
+* surface: one subtle step away from background
+* elevated surface: one additional step
+* foreground: near-black / near-white
+* muted foreground: mid neutral
+* border: low-contrast neutral
+* accent: one saturated but controlled hue
+
+Use the accent sparingly for primary actions, selected states, focus, and important emphasis.
+
+Do not use the accent as large-area background fill unless the user explicitly wants a branded or marketing-heavy look.
+
+Prefer semantic CSS variables and shadcn-compatible tokens such as:
+
+```css
+--background
+--foreground
+--card
+--card-foreground
+--popover
+--popover-foreground
+--primary
+--primary-foreground
+--secondary
+--secondary-foreground
+--muted
+--muted-foreground
+--accent
+--accent-foreground
+--destructive
+--border
+--input
+--ring
 ```
 
-Skip `design.md` for a genuinely one-off tiny screen; still apply the rules below.
+Define both light and dark values from the start.
 
-## The rules
+## Typography
 
-### Tokens first, values never
-Define semantic design tokens once and reference them everywhere. Never sprinkle
-raw hex, raw px colors, or one-off shadows across components.
+Let typography do most of the visual work.
 
-- Name by role, not value: `--color-surface`, `--color-text`, `--color-primary`,
-  `--color-border`, `--color-success/warn/danger`, not `--blue-500` scattered inline.
-- Radius, elevation/shadow, and border widths are tokens too.
-- Every token has a light value and a dark value. No exceptions.
+Default to a clean sans-serif already available in the project. If choosing a web-safe or system stack, prefer a modern system sans stack. Do not add a custom font dependency unless it materially improves the product.
 
-### Light and dark are both first-class
-Design both from the start; do not bolt dark on later.
+Use a compact ramp such as:
 
-- Drive theming off tokens + a single `.dark` (or `prefers-color-scheme`) switch.
-- Don't just invert — dark surfaces are near-black-with-hue, text is off-white,
-  and shadows give way to subtle borders/elevation. Re-check contrast in dark.
-- Target WCAG AA contrast (4.5:1 body text, 3:1 large text / UI) in both modes.
+* 12px: metadata, labels, table auxiliaries
+* 14px: controls, secondary text, dense body text
+* 16px: primary body text
+* 20px: section heading
+* 24px: page heading
+* 30–36px: rare product/marketing heading
 
-### A real type scale
-Pick a modular ramp and stick to it; never type arbitrary font sizes.
+Use 2–3 weights total.
 
-- A small fixed set of sizes (e.g. 12 / 14 / 16 / 20 / 24 / 32 / 48).
-- Two or three weights max. Set line-height by role (tight for headings,
-  ~1.5 for body). Constrain body measure to ~60–75ch.
+Prefer medium weight for labels and controls, semibold for headings, normal for body copy.
 
-### Spacing rhythm on one unit
-All spacing is multiples of one base unit (usually 4px). Use a fixed step set
-(4 / 8 / 12 / 16 / 24 / 32 / 48 / 64). Consistent gaps and padding are the single
-biggest driver of a "designed" feel. Prefer layout primitives (stack/cluster/grid
-gap) over ad-hoc margins.
+Keep application headings relatively compact. A dashboard page title usually does not need to be 48px.
 
-### Responsive by default
-Design mobile-first and let layout reflow; don't build desktop-only then patch.
+## Spacing
 
-- A few deliberate breakpoints, not dozens of one-offs.
-- Fluid where sensible (`clamp()`, `min()`, grid `auto-fit`/`minmax`) so fewer
-  breakpoints are needed. Cap content width for readability on large screens.
-- Verify at a narrow width (~360px) and a wide one; no horizontal scroll, no
-  overlap, tap targets ≥ ~44px.
+Use a 4px base rhythm.
 
-### Component-kit first
-Assemble from a component library; do not hand-roll bespoke buttons, inputs,
-dialogs, and menus per screen.
+Prefer these values:
 
-- Prefer an established kit (e.g. shadcn/ui + Radix, or the project's chosen kit)
-  for accessible, consistent primitives. This repo's `apps/web` uses a shadcn-style
-  kit — mirror that approach for new frontends here.
-- Build app-specific *composites* from kit primitives; keep one canonical version
-  of each pattern (one Card, one PageHeader, one EmptyState) and reuse it.
-- Kit components must still consume your tokens so the whole thing stays coherent.
+`4, 8, 12, 16, 20, 24, 32, 40, 48, 64`
 
-### Layout & hierarchy
-- Establish a clear layout shell (nav + content region) before filling screens.
-- One primary action per view; use size, weight, and color to rank importance.
-- Align to a grid; give content room to breathe. Empty, loading, and error
-  states are part of the design, not an afterthought.
+Within components, keep spacing compact. Between major page sections, increase spacing substantially.
+
+A reliable default:
+
+* icon-to-label: 8px
+* field label-to-control: 6–8px
+* control groups: 12–16px
+* card padding: 16–24px
+* section gap: 32–48px
+* page padding: 16px mobile, 24–32px desktop
+
+Avoid arbitrary margins. Prefer `gap-*` on stacks, flex, and grid containers.
+
+## Radius and borders
+
+Default radius language:
+
+* controls: 6–8px
+* cards/panels: 8–12px
+* dialogs/popovers: 10–12px
+* pills: only for tags, statuses, segmented controls, and true pill-shaped UI
+
+Do not make every rectangle `rounded-2xl`.
+
+Use 1px subtle borders for separation. Use shadows only for overlays, menus, dialogs, or clear elevation changes.
+
+## Page composition
+
+Build the shell before the details.
+
+For application UIs, prefer one of these structures:
+
+1. sidebar + top content header + main region
+2. compact top navigation + constrained main region
+3. split-pane workspace for tools that need persistent context
+
+Keep the main content aligned to a consistent grid.
+
+For most product pages:
+
+* put page title and description at top-left
+* put the primary action at top-right when appropriate
+* keep filters/search close to the content they affect
+* reserve full-width treatment for content that benefits from it
+* constrain reading-heavy content to a narrower measure
+
+Do not wrap every section in a Card. Use whitespace and separators first; use Card when the content is genuinely a distinct surface or interactive object.
+
+## Hierarchy
+
+Every screen must answer these immediately:
+
+1. Where am I?
+2. What is the most important information?
+3. What can I do next?
+
+Use one visually dominant primary action per view.
+
+Use muted text aggressively for metadata and explanation instead of introducing extra colors.
+
+Keep destructive actions visually quiet until context makes them relevant.
+
+## shadcn/ui first
+
+Use shadcn components before creating primitives from scratch.
+
+Prefer components such as:
+
+* Button
+* Input
+* Textarea
+* Select
+* Checkbox
+* RadioGroup
+* Switch
+* Tabs
+* Dialog
+* Sheet
+* Popover
+* DropdownMenu
+* Tooltip
+* Command
+* Table
+* Badge
+* Avatar
+* Separator
+* Skeleton
+* Sonner/Toast where available
+
+Compose these into app-specific components such as:
+
+* PageHeader
+* FilterBar
+* DataTable
+* EmptyState
+* SettingsSection
+* ResourceList
+* DetailPanel
+* SearchCommand
+
+Do not duplicate variants of the same composite without a clear reason.
+
+## Buttons
+
+Keep button hierarchy simple:
+
+* `default`: primary action
+* `secondary` or `outline`: normal secondary action
+* `ghost`: low-emphasis contextual action
+* `destructive`: destructive confirmation or explicit destructive action
+
+Avoid several filled buttons competing in one region.
+
+Use icon-only buttons only when the icon is universally recognizable or has a tooltip.
+
+## Forms
+
+Make forms boring in the best way.
+
+Use:
+
+* labels above controls
+* helper/error text directly below
+* consistent field widths
+* clear grouping
+* visible focus states
+* inline validation only when useful
+
+Do not use placeholder text as the only label.
+
+For long settings forms, group controls into titled sections separated by whitespace or separators rather than putting each field in a card.
+
+## Tables and dense data
+
+Favor tables for genuinely tabular information rather than inventing card grids.
+
+Use:
+
+* compact row height
+* muted secondary columns
+* tabular numerals for numeric data when available
+* right alignment for numeric values
+* persistent column alignment
+* row hover only when rows are interactive
+* subtle separators
+
+Keep bulk actions, search, filters, and pagination visually attached to the table.
+
+## Empty, loading, and error states
+
+Design these deliberately.
+
+Empty state:
+
+* concise title
+* one sentence of explanation at most
+* one primary next action when useful
+* optional simple icon
+
+Loading state:
+
+* use skeletons matching final geometry
+* avoid full-page spinners for content-heavy views
+
+Error state:
+
+* explain what failed in plain language
+* provide a recovery action if one exists
+* avoid alarming styling unless the error is destructive or blocking
+
+## Icons
+
+Use lucide-react by default.
+
+Use icons at 14–18px in controls and 18–20px in navigation unless the context needs otherwise.
+
+Keep stroke weight visually consistent.
+
+Do not mix icon families.
+
+Do not use an icon when text alone is clearer.
+
+## Motion
+
+Use motion sparingly and quickly.
+
+Good uses:
+
+* dropdown/popover enter/exit
+* dialog/sheet transitions
+* accordion expansion
+* selection-state transitions
+* subtle hover/focus feedback
+
+Typical duration: 100–200ms.
+
+Avoid ornamental movement, parallax, or long easing sequences in application UI.
+
+## Responsive behavior
+
+Design mobile-first, then increase information density with width.
+
+Verify around 360px and at a wide desktop width.
+
+On small screens:
+
+* collapse sidebars into a Sheet/drawer when needed
+* stack page-header actions
+* allow tables to scroll only when a better mobile representation would distort the data
+* turn split panes into navigable single panes
+* keep tap targets roughly 44px where practical
+
+Avoid breakpoint proliferation. Prefer fluid grids and a few deliberate breakpoints.
+
+## Accessibility
+
+Treat accessibility as baseline quality.
+
+* preserve visible keyboard focus
+* use semantic elements
+* keep body-text contrast at WCAG AA
+* associate labels and fields correctly
+* give icon-only controls accessible names
+* preserve sensible tab order
+* ensure dialogs and menus use accessible primitives
+* do not communicate status by color alone
+
+Rely on Radix/shadcn behavior where appropriate rather than recreating interaction semantics manually.
+
+## Implementation style
+
+Keep React components simple and composable.
+
+Prefer:
+
+* small app-specific components
+* declarative arrays for repeated navigation or actions
+* shared Tailwind utilities through `cn()`
+* semantic variants via `class-variance-authority` when the codebase already uses it
+* CSS variables for theme tokens
+
+Avoid:
+
+* giant monolithic page components
+* style objects for ordinary styling
+* inline hex colors
+* arbitrary values like `mt-[13px]` without strong reason
+* duplicated Tailwind class strings for a repeated pattern
+
+## Quality pass
+
+Before considering the UI complete, inspect it as a whole and simplify.
+
+Check:
+
+* Is the page hierarchy obvious in under three seconds?
+* Is there exactly one dominant action?
+* Are there unnecessary cards?
+* Are there unnecessary borders?
+* Are radii too large?
+* Is the accent color overused?
+* Are headings larger than they need to be?
+* Is there enough space between major sections?
+* Are controls internally compact and aligned?
+* Does dark mode look designed rather than inverted?
+* Does the mobile layout feel intentional?
+* Could any decorative effect be removed without losing meaning?
+
+When in doubt, remove decoration before adding more.
 
 ## Definition of done
-- Tokens defined for every color/radius/shadow, in light AND dark.
-- One type scale and one spacing unit used consistently across screens.
-- Layout is responsive and verified narrow + wide with no overflow.
-- UI is assembled from a component kit; shared composites are not duplicated.
-- Any charts went through `dataviz`; general craft checked against `artifact-design`.
-- If the target already had a style, this skill was NOT used — the existing style
-  was matched instead.
+
+Finish only when:
+
+* React + Tailwind + shadcn/ui are used consistently unless the project requires otherwise
+* the screen follows the restrained Linear/Vercel/Raycast-inspired house style
+* light and dark tokens are coherent
+* typography and spacing use a limited scale
+* hierarchy and primary action are obvious
+* primitive controls come from shadcn where practical
+* mobile and desktop layouts both work
+* loading, empty, and error states exist where relevant
+* keyboard/focus behavior is preserved
+* arbitrary one-off styling is minimized
+* decorative excess has been removed
+
+If an existing styled frontend is present, do not apply this visual language over it. Match the product that already exists.
