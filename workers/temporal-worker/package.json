@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --dir . --pool=forks",
+    "test": "vitest run --pool=forks",
     "predev": "pnpm --filter @awb/workflow run build",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js"

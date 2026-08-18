@@ -285,36 +285,32 @@ describe('TaskWorkflow', () => {
     expect(result.condition).toBe('completed');
   }, 60_000);
 
-  // TASK-105: a stuck-phase Activity failure is COUNTED on the SAME failure streak as a repaired
-  // failure, so it drives escalation to a `repeated-failure-no-progress` human gate rather than a
-  // silent "attempt 1" replay. A single throw plus two repairs on the same phase reaches the 3-strike
-  // NO_PROGRESS_THRESHOLD — proving the throw contributes to the streak (only one throw keeps the
-  // real activity-retry backoff paid just once, so the test stays fast).
+  // TASK-105: a stuck-phase Activity failure is COUNTED on the same failure streak a repaired failure
+  // uses, so it drives escalation to a `repeated-failure-no-progress` human gate rather than a silent
+  // replay. Two repairs then a throw on verify reach NO_PROGRESS_THRESHOLD — the throw is the final
+  // strike (a single THROW keeps the real activity-retry backoff paid just once). createScriptedActivities
+  // holds the THROW across all of its retries before advancing, so the escalation is deterministic.
   it('counts a stuck runPhase throw toward repeated-failure-no-progress escalation (TASK-105)', async () => {
-    let sawNoProgressPark = false;
+    let observedReason: string | undefined;
     const { result } = await runWithActivities(
       {
         specify: [candidate('specify')],
         plan: [candidate('plan')],
-        // Strike 1 = throw (exhausted retries), strikes 2 and 3 = repairs. All on verify, so verify's
-        // streak reaches the threshold and the workflow parks at a no-progress gate.
-        verify: [THROW, repair(), repair(), candidate('verify')],
+        verify: [repair(), repair(), THROW, candidate('verify')],
       },
       async (handle) => {
         await waitForCondition(async () => {
           const state = await handle.query(getCurrentStateQuery);
           if (state.condition === 'awaiting-human') {
-            const gate = await handle.query(getPendingHumanGateQuery);
-            if (gate?.reason === 'repeated-failure-no-progress') sawNoProgressPark = true;
+            observedReason = (await handle.query(getPendingHumanGateQuery))?.reason;
             return true;
           }
           return false;
         }, 60_000);
-        // Cancel so the test env tears down cleanly rather than waiting on a human.
         await handle.signal(cancelSignal);
       },
     );
-    expect(sawNoProgressPark).toBe(true);
+    expect(observedReason).toBe('repeated-failure-no-progress');
     expect(result.condition).toBe('cancelled');
   }, 90_000);
 
