@@ -35,13 +35,38 @@ async function poll(check: () => Promise<boolean>, timeoutMs = 30_000, intervalM
   throw new Error('poll timed out');
 }
 
+/**
+ * `TestWorkflowEnvironment.createLocal()` boots a real Temporal test server on a local port. A busy
+ * port can make that boot block indefinitely — the observed ~30-minute hang. Race it against a short
+ * timeout so a port conflict surfaces as an immediate, legible failure instead of stalling the suite.
+ */
+async function createLocalEnvFailFast(timeoutMs = 30_000): Promise<TestWorkflowEnvironment> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `TestWorkflowEnvironment.createLocal() did not start within ${timeoutMs}ms — the Temporal test port is likely already in use.`,
+          ),
+        ),
+      timeoutMs,
+    );
+  });
+  try {
+    return await Promise.race([TestWorkflowEnvironment.createLocal(), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 let testEnv: TestWorkflowEnvironment;
 let repoDir: string;
 let dataDir: string;
 let server: DaemonServer;
 
 beforeAll(async () => {
-  testEnv = await TestWorkflowEnvironment.createLocal();
+  testEnv = await createLocalEnvFailFast();
   repoDir = await makeTempRepo();
   process.env.AWB_RUN_PHASE_FIXTURE_REPO = repoDir;
 
