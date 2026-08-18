@@ -1,13 +1,20 @@
-import { eq } from 'drizzle-orm';
+import { eq, asc } from 'drizzle-orm';
 import type { PhaseObservability, TokenBreakdown } from '@awb/domain';
 import {
   agentSessions,
   modelInvocations,
   runtimeAttribution,
   contextComposition,
+  phaseAttempts,
 } from '../schema/index.js';
 import type { DrizzleDb } from '../connection.js';
-import { ensureRunAndPhaseAttempt } from './tasks.js';
+import type {
+  PhaseAttemptRow,
+  AgentSessionRow,
+  ModelInvocationRow,
+  ContextCompositionRow,
+} from '../row-types.js';
+import { ensureRunAndPhaseAttempt, refreshTaskSummary } from './tasks.js';
 
 /**
  * Persists a phase attempt's observability: agent_sessions + their
@@ -88,7 +95,55 @@ export function persistPhaseObservability(db: DrizzleDb, payload: PhaseObservabi
           .run();
       }
     }
+
+    // Refresh the durable projection inside the same tx so the task summary never lags a token write.
+    refreshTaskSummary(txDb, payload.taskId);
   });
+}
+
+/**
+ * Execution-tree level 1: the phase attempts for a task, ordered phase then attempt number, each
+ * carrying its `retryOf` back-pointer. Feeds the Task Detail execution tree + Usage & Time.
+ */
+export function listPhaseAttempts(db: DrizzleDb, taskId: string): PhaseAttemptRow[] {
+  return db
+    .select()
+    .from(phaseAttempts)
+    .where(eq(phaseAttempts.taskId, taskId))
+    .orderBy(asc(phaseAttempts.phase), asc(phaseAttempts.attemptNumber))
+    .all();
+}
+
+/** Execution-tree level 2: the agent sessions under a phase attempt, ordered by start time. */
+export function listAgentSessions(db: DrizzleDb, phaseAttemptId: string): AgentSessionRow[] {
+  return db
+    .select()
+    .from(agentSessions)
+    .where(eq(agentSessions.phaseAttemptId, phaseAttemptId))
+    .orderBy(asc(agentSessions.startedAt))
+    .all();
+}
+
+/** Execution-tree leaf: the model invocations under an agent session, ordered by start time. */
+export function listModelInvocations(db: DrizzleDb, agentSessionId: string): ModelInvocationRow[] {
+  return db
+    .select()
+    .from(modelInvocations)
+    .where(eq(modelInvocations.agentSessionId, agentSessionId))
+    .orderBy(asc(modelInvocations.startedAt))
+    .all();
+}
+
+/** Per-session context-composition buckets for the Usage & Time section. Undefined when none recorded. */
+export function getContextComposition(
+  db: DrizzleDb,
+  agentSessionId: string,
+): ContextCompositionRow | undefined {
+  return db
+    .select()
+    .from(contextComposition)
+    .where(eq(contextComposition.agentSessionId, agentSessionId))
+    .all()[0];
 }
 
 /**

@@ -4,6 +4,7 @@ export * from './plan.js';
 export * from './workspace.js';
 export * from './evidence.js';
 export * from './lifecycle.js';
+export * from './task-status.js';
 export * from './events.js';
 export * from './tasks.js';
 export * from './task-dag.js';
