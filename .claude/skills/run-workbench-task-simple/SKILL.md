@@ -183,6 +183,39 @@ STOP; rebuilding is not a driver action.
 
 ---
 
+## Driving MANY tasks at once (a fleet) — TASK-115
+
+When several tasks run at once, drive them all from **one** session with a single
+poll loop — do **not** spawn one context-inheriting subagent per task.
+
+**Why not per-task subagents (the anti-pattern, learned the hard way):** a
+`fork`-style subagent inherits the whole controller conversation, so it believes it
+is the coordinator, re-narrates the entire fleet, and may drive *other* tasks
+(double-driving). Each also tends to answer one poll then end its turn — with no
+external scheduler to wake it, it goes idle and its watchdog reports "stalled: no
+progress." Net: more confusion and more stalls than driving directly.
+
+**Do this instead — one in-session poll loop over all task ids:**
+
+1. Keep the list of `(repositoryId, taskId)` you are driving.
+2. Every ~45–90s, for each task read its gate reason ONCE (cheap): `task show
+   <repo> <task>` and read `pendingHumanGate.reason` (the pending gate is only
+   authoritative from the daemon, not from a raw SQLite column).
+3. For any task at a gate, apply the SAME decision table above
+   (contract→approve, plan→approve, else STOP that one and hand back). Continue.
+4. Loop **inside your own turn** with a bounded wait (`sleep 60` in one shell
+   call, then re-poll) — never fire a single poll and end the turn expecting to be
+   woken.
+5. **Respect the concurrency cap.** The stack now bounds how many tasks run heavy
+   phases at once (`AWB_MAX_CONCURRENT_ACTIVITIES`, default 4) so the box can't be
+   thrashed — you don't need to stagger task creation yourself, but don't try to
+   force more than a handful through at once on a laptop.
+
+If a task's gate reason isn't in the table (blocked / waiver / budget / scope) or
+anything is ambiguous, STOP that task and hand it back — keep driving the others.
+
+---
+
 ## Key invariants (do not violate)
 
 - You DRIVE, you do not CODE. Never edit files, never push, never open a PR.

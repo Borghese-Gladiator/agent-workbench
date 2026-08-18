@@ -11,3 +11,4 @@ export * from './qa-media-commit.js';
 export * from './pre-upload-checks.js';
 export * from './delivery.js';
 export * from './local-merge.js';
+export * from './recover-delivery.js';

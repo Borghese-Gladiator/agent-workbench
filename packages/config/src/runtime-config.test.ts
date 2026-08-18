@@ -11,6 +11,7 @@ import {
   DEFAULT_OTEL_UI_PORT,
   DEFAULT_OTEL_CONTAINER,
   DEFAULT_TASK_QUEUE,
+  DEFAULT_MAX_CONCURRENT_ACTIVITIES,
 } from './runtime-config.js';
 
 const ENV_KEYS = [
@@ -25,6 +26,7 @@ const ENV_KEYS = [
   'AWB_DAEMON_URL',
   'OTEL_EXPORTER_OTLP_ENDPOINT',
   'AWB_DATA_DIR',
+  'AWB_MAX_CONCURRENT_ACTIVITIES',
 ] as const;
 
 describe('resolveRuntimeConfig', () => {
@@ -53,7 +55,22 @@ describe('resolveRuntimeConfig', () => {
       temporalAddress: `127.0.0.1:${DEFAULT_TEMPORAL_PORT}`,
       daemonUrl: `http://127.0.0.1:${DEFAULT_DAEMON_PORT}`,
       otelEndpoint: `http://127.0.0.1:${DEFAULT_OTEL_OTLP_PORT}`,
+      maxConcurrentActivities: DEFAULT_MAX_CONCURRENT_ACTIVITIES,
     });
+  });
+
+  it('reads AWB_MAX_CONCURRENT_ACTIVITIES as a positive integer, else defaults', () => {
+    process.env.AWB_MAX_CONCURRENT_ACTIVITIES = '2';
+    expect(resolveRuntimeConfig().maxConcurrentActivities).toBe(2);
+    delete process.env.AWB_MAX_CONCURRENT_ACTIVITIES;
+    expect(resolveRuntimeConfig().maxConcurrentActivities).toBe(DEFAULT_MAX_CONCURRENT_ACTIVITIES);
+  });
+
+  it('rejects a non-positive-integer AWB_MAX_CONCURRENT_ACTIVITIES', () => {
+    process.env.AWB_MAX_CONCURRENT_ACTIVITIES = '0';
+    expect(() => resolveRuntimeConfig()).toThrow(/positive integer/);
+    process.env.AWB_MAX_CONCURRENT_ACTIVITIES = 'lots';
+    expect(() => resolveRuntimeConfig()).toThrow(/positive integer/);
   });
 
   it.each([

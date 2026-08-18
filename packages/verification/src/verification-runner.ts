@@ -81,6 +81,43 @@ function evidenceKindForPurpose(purpose: ValidatedCommand['purpose']): Evidence[
   }
 }
 
+/**
+ * Bounds a unit-test command's worker pool so one verify can't fan out to hundreds of processes
+ * (TASK-112). Combined with the worker's activity-concurrency cap, this keeps N concurrent verifies
+ * from thrashing the box. We set the vitest thread-pool env vars (honored by any vitest invocation
+ * regardless of the runner wrapping it — npm/pnpm/yarn — so no fragile arg injection), plus the
+ * generic `JEST_MAX_WORKERS`/`--maxWorkers`-equivalent env for jest. A caller-supplied value always
+ * wins. Non-test purposes (build/lint/typecheck) are returned unchanged.
+ */
+export function boundedTestEnv(
+  purpose: ValidatedCommand['purpose'],
+  env: Record<string, string>,
+): Record<string, string> {
+  if (purpose !== 'unit-test' && purpose !== 'integration-test') return env;
+  const cap = readTestWorkerCap();
+  if (cap === undefined) return env;
+  const bounded = { ...env };
+  // vitest reads these directly; setting both min and max pins the pool size.
+  if (bounded.VITEST_MAX_THREADS === undefined) bounded.VITEST_MAX_THREADS = String(cap);
+  if (bounded.VITEST_MIN_THREADS === undefined) bounded.VITEST_MIN_THREADS = String(cap);
+  // jest honors JEST_WORKER_ID-style limits via --maxWorkers; expose an env hint some setups read.
+  if (bounded.JEST_MAX_WORKERS === undefined) bounded.JEST_MAX_WORKERS = String(cap);
+  return bounded;
+}
+
+/**
+ * Per-verify test-worker cap from `AWB_TEST_MAX_WORKERS` (positive integer). Unset → undefined
+ * (leave the runner's own default). Kept independent of the worker's activity cap so the two levers
+ * can be tuned separately; read from env here to avoid a @awb/config dependency in this leaf package.
+ */
+function readTestWorkerCap(): number | undefined {
+  const raw = process.env.AWB_TEST_MAX_WORKERS;
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) return undefined;
+  return n;
+}
+
 function statusFor(result: CommandResult): EvidenceStatus {
   if (result.timedOut) return 'inconclusive';
   if (result.exitCode === 0) return 'passed';
@@ -119,7 +156,7 @@ export async function runCommandAndRecordEvidence(
     command: executable ?? command.command,
     args,
     cwd: command.cwd,
-    env: context.env,
+    env: boundedTestEnv(command.purpose, context.env),
     timeoutMs: context.timeoutMs,
   });
 

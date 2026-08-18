@@ -35,6 +35,11 @@ export async function startWorker(): Promise<Worker> {
     // work in workers/temporal-worker's own Temporal integration test.
     workflowsPath: join(__dirname, '..', '..', '..', 'packages', 'workflow', 'dist', 'workflows.js'),
     activities,
+    // Cap concurrent activity execution (TASK-112). A heavy phase (implement/verify) can spawn a
+    // vitest worker pool, so Temporal's high default let N tasks fork hundreds of processes at once
+    // and thrash a single-developer machine (observed load ~377 with 10 tasks). Bounding this to a
+    // small env-driven value keeps the box responsive; the deferred activities run as slots free up.
+    maxConcurrentActivityTaskExecutions: cfg.maxConcurrentActivities,
   });
   await worker.run();
   return worker;
