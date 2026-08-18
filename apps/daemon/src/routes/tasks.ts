@@ -17,6 +17,7 @@ import {
 import type { WorkbenchDatabase } from '@awb/database';
 import {
   upsertTask,
+  insertTaskDependency,
   listTasksWithRepository,
   deleteTask,
   getTaskDeliveredBranch,
@@ -25,7 +26,7 @@ import {
   listFindingsByTask,
 } from '@awb/database';
 import type { TaskSize } from '@awb/domain';
-import { validateTaskDag, TaskDagValidationError, type TaskDagSpec } from '@awb/domain';
+import { validateTaskDag, TaskDagValidationError, TaskDagSpecSchema, type TaskDagSpec } from '@awb/domain';
 import { routeFeedback, NO_ROUTING_SIGNAL, type FeedbackRoutingSignal } from '@awb/github';
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
 import { taskQueueName } from '../temporal-worker-constants.js';
@@ -96,12 +97,20 @@ export function registerTaskRoutes(
   });
 
   // Task DAG orchestration: declare a whole stacked-PR DAG atomically. Validates (unique keys,
-  // known refs, acyclic, single-parent stacking) + topo-sorts BEFORE any write, then creates every
-  // task row in one pass — roots `ready`, non-roots `blocked` with their `parent_task_id` edge.
-  // Only the roots are started now; the scheduler starts each child when its parent releases its
-  // draft PR. A validation failure writes nothing.
+  // known refs, acyclic, ≤1 'stack' parent per node — fan-in via 'after' edges is allowed, TASK-102)
+  // + topo-sorts BEFORE any write, then creates every task row in one pass — roots `ready`, non-roots
+  // `blocked`. The single 'stack' edge is mirrored on `parent_task_id` (git base); every edge (both
+  // 'stack' and 'after') is written to `task_dependencies` for fan-in eligibility. Only the roots are
+  // started now; the scheduler starts each child once all its predecessors release. Validation
+  // failure writes nothing.
   app.post<{ Body: TaskDagSpec }>('/api/task-dags', async (request, reply) => {
-    const { repositoryId, nodes } = request.body ?? {};
+    // Parse (and normalize dependsOn to typed edges) once; validate against the same spec.
+    const parsed = TaskDagSpecSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: parsed.error.message };
+    }
+    const { repositoryId, nodes } = parsed.data;
     let order: string[];
     try {
       order = validateTaskDag({ repositoryId, nodes });
@@ -116,8 +125,10 @@ export function registerTaskRoutes(
     for (const key of order) {
       const node = nodes.find((n) => n.key === key)!;
       const taskId = idByKey.get(key)!;
-      const parentTaskId = node.dependsOn ? idByKey.get(node.dependsOn) : undefined;
-      const scheduleState = parentTaskId ? 'blocked' : 'ready';
+      const edges = node.dependsOn ?? [];
+      const stackEdge = edges.find((e) => e.mode === 'stack');
+      const parentTaskId = stackEdge ? idByKey.get(stackEdge.ref) : undefined;
+      const scheduleState = edges.length > 0 ? 'blocked' : 'ready';
       upsertTask(database.db, {
         id: taskId,
         repositoryId,
@@ -125,6 +136,13 @@ export function registerTaskRoutes(
         scheduleState,
         ...(parentTaskId ? { parentTaskId } : {}),
       });
+      for (const edge of edges) {
+        insertTaskDependency(database.db, {
+          taskId,
+          dependsOnTaskId: idByKey.get(edge.ref)!,
+          mode: edge.mode,
+        });
+      }
       created.push({ key, taskId, parentTaskId, scheduleState });
     }
 

@@ -2,8 +2,10 @@ import {
   type WorkbenchDatabase,
   getTask,
   getTaskDeliveredBranch,
-  listTasksByParent,
   listStartableTasks,
+  listTasksByParent,
+  listParentsOf,
+  listDependentsOf,
   upsertTask,
   type TaskRow,
 } from '@awb/database';
@@ -58,12 +60,23 @@ export class TaskScheduler {
     this.hasReleased = options.hasReleased;
   }
 
-  /** PUSH path: a parent released its draft PR — start any now-eligible direct children. */
+  /**
+   * PUSH path: a predecessor released its draft PR — re-evaluate every dependent (fan-in reconcile,
+   * TASK-102) and start those whose predecessors have ALL released. A dependent is reached via the
+   * task_dependencies edge table (both 'stack' and 'after' edges), so a diamond child unblocks only
+   * once BOTH of its predecessors have released.
+   */
   async onParentReleased(parentTaskId: string): Promise<void> {
-    const children = listTasksByParent(this.database.db, parentTaskId);
-    for (const child of children) {
-      if (child.scheduleState === 'blocked') {
-        await this.tryStart(child);
+    // Dependents come from the edge table (both 'stack' and 'after') AND, for back-compat with
+    // directly-created stacking tasks that carry only parent_task_id (no edge row), from
+    // listTasksByParent. Dedup so a task reachable both ways is evaluated once.
+    const dependentIds = new Set<string>();
+    for (const edge of listDependentsOf(this.database.db, parentTaskId)) dependentIds.add(edge.taskId);
+    for (const child of listTasksByParent(this.database.db, parentTaskId)) dependentIds.add(child.id);
+    for (const dependentId of dependentIds) {
+      const dependent = getTask(this.database.db, dependentId);
+      if (dependent && dependent.scheduleState === 'blocked') {
+        await this.tryStart(dependent);
       }
     }
   }
@@ -147,11 +160,22 @@ export class TaskScheduler {
     }
   }
 
-  /** A root (no parent) is always eligible; a child is eligible once its parent has released. */
+  /**
+   * A task is eligible only when EVERY predecessor has released (fan-in, TASK-102). A root (no
+   * predecessor edges) is always eligible. Both 'stack' and 'after' edges gate the start; the mode
+   * only matters for base-branch resolution, not for eligibility.
+   */
   private async isEligible(task: TaskRow): Promise<boolean> {
-    if (!task.parentTaskId) return true;
-    const parent = getTask(this.database.db, task.parentTaskId);
-    if (!parent) return false;
-    return this.hasReleased(task.parentTaskId, task.repositoryId);
+    const parents = listParentsOf(this.database.db, task.id);
+    // Back-compat: a directly-created stacking child may carry parent_task_id without an edge row.
+    if (parents.length === 0 && !task.parentTaskId) return true;
+    const predecessorIds = new Set(parents.map((e) => e.dependsOnTaskId));
+    if (task.parentTaskId) predecessorIds.add(task.parentTaskId);
+    for (const predecessorId of predecessorIds) {
+      const predecessor = getTask(this.database.db, predecessorId);
+      if (!predecessor) return false;
+      if (!(await this.hasReleased(predecessorId, task.repositoryId))) return false;
+    }
+    return true;
   }
 }

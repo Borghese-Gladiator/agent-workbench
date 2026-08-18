@@ -33,6 +33,9 @@ export type NewRepositoryDependencyRow = typeof schema.repositoryDependencies.$i
 export type TaskRow = typeof schema.tasks.$inferSelect;
 export type NewTaskRow = typeof schema.tasks.$inferInsert;
 
+export type TaskDependencyRow = typeof schema.taskDependencies.$inferSelect;
+export type NewTaskDependencyRow = typeof schema.taskDependencies.$inferInsert;
+
 export type TaskContractRow = typeof schema.taskContracts.$inferSelect;
 export type NewTaskContractRow = typeof schema.taskContracts.$inferInsert;
 

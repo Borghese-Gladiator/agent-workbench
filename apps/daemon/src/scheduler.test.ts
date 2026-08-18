@@ -8,6 +8,7 @@ import {
   workspaceLeases,
   upsertTask,
   getTask,
+  insertTaskDependency,
   type WorkbenchDatabase,
 } from '@awb/database';
 import { TaskScheduler, type StartTaskFn } from './scheduler.js';
@@ -150,6 +151,30 @@ describe('TaskScheduler', () => {
     fail = false;
     await flaky.reconcile();
     expect(getTask(db.db, 'root')?.scheduleState).toBe('started');
+  });
+
+  it('fan-in (TASK-102): D starts only after BOTH predecessors B and C release', async () => {
+    // Diamond: A root; B and C stack on A; D stacks on B and additionally waits on C ('after').
+    upsertTask(db.db, { id: 'A', repositoryId: REPO, prompt: 'A', scheduleState: 'started' });
+    upsertTask(db.db, { id: 'B', repositoryId: REPO, prompt: 'B', parentTaskId: 'A', scheduleState: 'started' });
+    upsertTask(db.db, { id: 'C', repositoryId: REPO, prompt: 'C', parentTaskId: 'A', scheduleState: 'started' });
+    upsertTask(db.db, { id: 'D', repositoryId: REPO, prompt: 'D', parentTaskId: 'B', scheduleState: 'blocked' });
+    insertTaskDependency(db.db, { taskId: 'D', dependsOnTaskId: 'B', mode: 'stack' });
+    insertTaskDependency(db.db, { taskId: 'D', dependsOnTaskId: 'C', mode: 'after' });
+    seedLease(db, 'B', 'awb/B-slug');
+    seedLease(db, 'C', 'awb/C-slug');
+
+    // Only B releases → D must stay blocked (C hasn't released).
+    releasedParents.add('B');
+    await scheduler().onParentReleased('B');
+    expect(started).toHaveLength(0);
+    expect(getTask(db.db, 'D')?.scheduleState).toBe('blocked');
+
+    // C releases → D unblocks, with its base branch from the 'stack' parent B.
+    releasedParents.add('C');
+    await scheduler().onParentReleased('C');
+    expect(started).toEqual([{ taskId: 'D', baseBranch: 'awb/B-slug' }]);
+    expect(getTask(db.db, 'D')?.scheduleState).toBe('started');
   });
 
   it('boot reconcile() re-derives eligibility from SQLite (restart-safety)', async () => {
