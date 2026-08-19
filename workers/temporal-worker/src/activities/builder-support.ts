@@ -22,13 +22,13 @@ function workbenchRepoRoot(): string {
 }
 
 /**
- * Reads an agent-workbench `.claude/skills/<name>/SKILL.md` file's content (minus its
- * frontmatter, which is Claude-Code-specific metadata, not builder guidance). Returns undefined
- * when the skill doesn't exist rather than throwing — a planner-named skill that was renamed or
- * removed degrades to "no extra guidance" instead of failing the whole slice.
+ * Reads agent-workbench's own `.claude/skills/build-ui/SKILL.md` content (minus its frontmatter,
+ * which is Claude-Code-specific metadata, not builder guidance). Returns undefined when the file
+ * is missing rather than throwing — a moved/renamed skill degrades to "no extra guidance" instead
+ * of failing the whole slice.
  */
-export async function readSkillContent(skillName: string): Promise<string | undefined> {
-  const path = join(workbenchRepoRoot(), '.claude', 'skills', skillName, 'SKILL.md');
+export async function readBuildUiSkillContent(): Promise<string | undefined> {
+  const path = join(workbenchRepoRoot(), '.claude', 'skills', 'build-ui', 'SKILL.md');
   try {
     const raw = await readFile(path, 'utf8');
     return raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
@@ -95,10 +95,10 @@ export async function runRealBuilderAttempt(input: RealBuilderAttemptInput): Pro
 
 /**
  * Render a builder instruction, appending a repair block when a prior code-fixable gate left open
- * findings, and inlining a skill's content when the plan slice named one via `usesSkill`. The
- * skill content is inlined (not referenced by path) because the builder agent's `cwd` is the
- * target repo, not agent-workbench's own — it has no other way to see the skill file. Exported
- * for unit testing the rendering without a live session.
+ * findings, and inlining the build-ui skill's content when the plan slice set
+ * `usesBuildUiSkill: true`. The content is inlined (not referenced by path) because the builder
+ * agent's `cwd` is the target repo, not agent-workbench's own — it has no other way to see the
+ * skill file. Exported for unit testing the rendering without a live session.
  */
 export function buildBuilderInstruction(
   objective: string,
@@ -133,7 +133,7 @@ async function runBuilderSession(input: RealBuilderAttemptInput): Promise<RealBu
 
   try {
     const startedAt = Date.now();
-    const skillContent = input.slice.usesSkill ? await readSkillContent(input.slice.usesSkill) : undefined;
+    const skillContent = input.slice.usesBuildUiSkill ? await readBuildUiSkillContent() : undefined;
     const instruction = buildBuilderInstruction(input.slice.objective, input.priorFindings, skillContent);
     const execution = await input.adapter.execute(
       session,

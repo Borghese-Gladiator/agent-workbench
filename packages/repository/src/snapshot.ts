@@ -72,9 +72,14 @@ export interface BuildSnapshotOptions {
   repositoryId: string;
   /**
    * Enterprise repos (e.g. Klaviyo's `fender`/`app`) always have an established frontend and
-   * internal tooling. Skips command discovery (safe: runtime tiers in
-   * `resolveStartCommandForWorktree` etc. already re-discover/infer independently at task time)
-   * and short-circuits `hasExistingFrontend` to `true` without needing a `web` unit present.
+   * internal tooling, so several discovery steps that would be pointless for them are skipped:
+   * command discovery (safe: runtime tiers in `resolveStartCommandForWorktree` etc. already
+   * re-discover/infer independently at task time) and service/QA-surface discovery (nothing
+   * consumes it — see docs/TODO.md dead-code finding). `hasExistingFrontend` short-circuits to
+   * `true` without needing a `web` unit present. Unit discovery is ALSO skipped — its only other
+   * consumer is `extractFacts`' per-unit architecture facts, so enterprise repos get fewer
+   * accumulated facts as a deliberate tradeoff (large, well-known repos need less planner
+   * hand-holding than a freshly registered unknown one).
    */
   isEnterpriseRepo?: boolean;
 }
@@ -85,7 +90,7 @@ export async function buildRepositorySnapshot({
   isEnterpriseRepo = false,
 }: BuildSnapshotOptions): Promise<RepositorySnapshot> {
   const headSha = await getHeadSha(rootDir);
-  const units = await discoverUnits(rootDir);
+  const units = isEnterpriseRepo ? [] : await discoverUnits(rootDir);
   const hasExistingFrontend = isEnterpriseRepo || units.some((u) => u.kind === 'web');
 
   let commandsWithAmbiguity: ValidatedCommand[] = [];
@@ -108,11 +113,9 @@ export async function buildRepositorySnapshot({
     commandsWithAmbiguity = markAmbiguousDuplicates(validatedCommands);
   }
 
-  const { services, qaSurfaces } = await discoverServicesAndQaSurfaces(
-    rootDir,
-    repositoryId,
-    commandsWithAmbiguity,
-  );
+  const { services, qaSurfaces } = isEnterpriseRepo
+    ? { services: [], qaSurfaces: [] }
+    : await discoverServicesAndQaSurfaces(rootDir, repositoryId, commandsWithAmbiguity);
 
   const facts = await extractFacts(rootDir, repositoryId, headSha, units, commandsWithAmbiguity);
 

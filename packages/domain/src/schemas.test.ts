@@ -120,7 +120,7 @@ describe('domain schemas', () => {
     expect(contract.claims).toHaveLength(1);
   });
 
-  it('parses a PlanSlice with and without usesSkill', () => {
+  it('parses a PlanSlice with and without usesBuildUiSkill', () => {
     const base = {
       id: 'slice-1',
       objective: 'do the thing',
@@ -129,8 +129,8 @@ describe('domain schemas', () => {
       requiredTargetedChecks: ['test'],
       dependencies: [],
     };
-    expect(PlanSliceSchema.parse(base).usesSkill).toBeUndefined();
-    expect(PlanSliceSchema.parse({ ...base, usesSkill: 'build-ui' }).usesSkill).toBe('build-ui');
+    expect(PlanSliceSchema.parse(base).usesBuildUiSkill).toBeUndefined();
+    expect(PlanSliceSchema.parse({ ...base, usesBuildUiSkill: true }).usesBuildUiSkill).toBe(true);
   });
 
   it('parses an ImplementationPlan', () => {

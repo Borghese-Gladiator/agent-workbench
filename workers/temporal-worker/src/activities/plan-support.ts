@@ -12,7 +12,7 @@ interface PlannerPlanJson {
     requiredTargetedChecks?: string[];
     dependencies?: string[];
     qaScenarioIds?: string[];
-    usesSkill?: string;
+    usesBuildUiSkill?: boolean;
   }>;
 }
 
@@ -49,9 +49,9 @@ export function plannerInstruction(
     ? [
         'This repository has no existing frontend/UI (no web-capable unit was detected). If any slice',
         'builds a new, from-scratch UI (a page, app, dashboard, or standalone view with no established',
-        'visual style to match), set that slice\'s "usesSkill" field to "build-ui" so it follows the',
-        'agent-workbench build-ui skill\'s design system. Do NOT set "usesSkill" on a slice that only',
-        'edits non-UI code, and do not set it at all if no slice builds a from-scratch UI.',
+        'visual style to match), set that slice\'s "usesBuildUiSkill" field to true so it follows the',
+        'agent-workbench build-ui skill\'s design system. Do NOT set "usesBuildUiSkill" true on a slice',
+        'that only edits non-UI code, and leave it false/omitted if no slice builds a from-scratch UI.',
       ].join(' ')
     : '';
   return [
@@ -59,7 +59,7 @@ export function plannerInstruction(
     'Decompose the work into ordered slices. Respond with a JSON object of the form',
     '{"summary": string, "slices": [{"objective": string, "likelyPaths": string[],',
     '"requiredTargetedChecks": string[] (non-empty), "claimIds": string[], "dependencies": string[],',
-    '"qaScenarioIds": string[], "usesSkill": string (optional)}]}',
+    '"qaScenarioIds": string[], "usesBuildUiSkill": boolean (optional)}]}',
     'as a fenced ```json code block. Each slice must have at least one targeted check.',
     // Bias toward the smallest plan that covers the work: each slice is executed as a
     // separate, cold builder session, so extra slices multiply runtime and token cost. Investigation
@@ -130,7 +130,7 @@ export function parsePlannerOutput(
         requiredTargetedChecks: s.requiredTargetedChecks?.length ? s.requiredTargetedChecks : ['test'],
         dependencies: s.dependencies ?? [],
         qaScenarioIds,
-        ...(s.usesSkill ? { usesSkill: s.usesSkill } : {}),
+        ...(s.usesBuildUiSkill ? { usesBuildUiSkill: true } : {}),
       };
     });
 

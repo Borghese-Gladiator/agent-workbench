@@ -14,7 +14,7 @@ import type {
   CreateAgentSessionInput,
 } from '@awb/agent-gateway';
 import type { PlanSlice } from '@awb/domain';
-import { runRealBuilderAttempt, buildBuilderInstruction, readSkillContent } from './builder-support.js';
+import { runRealBuilderAttempt, buildBuilderInstruction, readBuildUiSkillContent } from './builder-support.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -134,16 +134,12 @@ describe('buildBuilderInstruction', () => {
   });
 });
 
-describe('readSkillContent', () => {
-  it('reads a real skill file from agent-workbench\'s own repo and strips its frontmatter', async () => {
-    const content = await readSkillContent('build-ui');
+describe('readBuildUiSkillContent', () => {
+  it('reads the real build-ui skill file from agent-workbench\'s own repo and strips its frontmatter', async () => {
+    const content = await readBuildUiSkillContent();
     expect(content).toBeDefined();
     expect(content).not.toMatch(/^---/);
     expect(content).toMatch(/# Build UI/);
-  });
-
-  it('returns undefined for a skill name that does not exist', async () => {
-    expect(await readSkillContent('this-skill-does-not-exist')).toBeUndefined();
   });
 });
 
@@ -322,11 +318,11 @@ describe('runRealBuilderAttempt (Stage 2 real builder)', () => {
   // The builder agent's cwd is the TARGET repo (see makeWorktree above), never agent-workbench's
   // own — it can never see `.claude/skills/build-ui/SKILL.md` via native discovery. Proves the
   // real skill file's content reaches the instruction even though the session runs elsewhere.
-  it('inlines the real build-ui skill content when the plan slice declares usesSkill', async () => {
+  it('inlines the real build-ui skill content when the plan slice sets usesBuildUiSkill', async () => {
     const adapter = new FakeBuilderAdapter(async (cwd) => {
       await writeFile(join(cwd, 'dashboard.tsx'), '// new dashboard\n');
     });
-    const uiSlice: PlanSlice = { ...slice, usesSkill: 'build-ui' };
+    const uiSlice: PlanSlice = { ...slice, usesBuildUiSkill: true };
 
     await runRealBuilderAttempt({
       adapter,
@@ -345,7 +341,7 @@ describe('runRealBuilderAttempt (Stage 2 real builder)', () => {
     expect(instruction).toMatch(/Build UI/);
   });
 
-  it('does not inline any skill content when the slice declares no usesSkill', async () => {
+  it('does not inline any skill content when the slice leaves usesBuildUiSkill unset', async () => {
     const adapter = new FakeBuilderAdapter(async (cwd) => {
       await writeFile(join(cwd, 'greeting.txt'), 'hello\n');
     });

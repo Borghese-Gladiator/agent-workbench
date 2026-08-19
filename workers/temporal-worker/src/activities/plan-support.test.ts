@@ -129,7 +129,7 @@ describe('parsePlannerOutput', () => {
 
   it('plannerInstruction hints at the build-ui skill only when there is no existing frontend', () => {
     expect(plannerInstruction(contract, false, false)).toMatch(/build-ui/);
-    expect(plannerInstruction(contract, false, false)).toMatch(/usesSkill/);
+    expect(plannerInstruction(contract, false, false)).toMatch(/usesBuildUiSkill/);
   });
 
   it('plannerInstruction omits the build-ui hint when a frontend already exists', () => {
@@ -139,20 +139,20 @@ describe('parsePlannerOutput', () => {
     expect(plannerInstruction(contract, false)).not.toMatch(/build-ui/);
   });
 
-  it('parses a planner-declared usesSkill onto its slice', () => {
+  it('parses a planner-declared usesBuildUiSkill onto its slice', () => {
     const text =
       '```json\n' +
       JSON.stringify({
-        slices: [{ objective: 'Build a new dashboard page', claimIds: ['claim-1'], usesSkill: 'build-ui' }],
+        slices: [{ objective: 'Build a new dashboard page', claimIds: ['claim-1'], usesBuildUiSkill: true }],
       }) +
       '\n```';
     const parsed = parsePlannerOutput(text, contract);
-    expect(parsed?.slices[0]?.usesSkill).toBe('build-ui');
+    expect(parsed?.slices[0]?.usesBuildUiSkill).toBe(true);
   });
 
-  it('leaves usesSkill undefined when the planner does not declare one', () => {
+  it('leaves usesBuildUiSkill undefined when the planner does not declare it', () => {
     const text = '```json\n' + JSON.stringify({ slices: [{ objective: 'Fix a bug' }] }) + '\n```';
     const parsed = parsePlannerOutput(text, contract);
-    expect(parsed?.slices[0]?.usesSkill).toBeUndefined();
+    expect(parsed?.slices[0]?.usesBuildUiSkill).toBeUndefined();
   });
 });

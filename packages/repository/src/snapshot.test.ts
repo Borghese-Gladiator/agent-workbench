@@ -243,12 +243,31 @@ describe('buildRepositorySnapshot', () => {
     expect(snapshot.hasExistingFrontend).toBe(false);
   });
 
-  it('enterprise repos short-circuit hasExistingFrontend to true and skip command discovery', async () => {
-    await writeFileEnsuringDir(dir, 'package.json', JSON.stringify({ name: 'cli-tool', scripts: { test: 'vitest run' } }));
+  it('enterprise repos short-circuit hasExistingFrontend and skip unit/command/service discovery', async () => {
+    await writeFileEnsuringDir(
+      dir,
+      'package.json',
+      JSON.stringify({ name: 'fender-clone', dependencies: { react: '^18.0.0' }, scripts: { test: 'vitest run' } }),
+    );
+    await writeFileEnsuringDir(dir, 'index.html', '<html></html>');
     await commitAll(dir, 'init');
 
     const snapshot = await buildRepositorySnapshot({ rootDir: dir, repositoryId: 'repo-ent', isEnterpriseRepo: true });
     expect(snapshot.hasExistingFrontend).toBe(true);
+    expect(snapshot.units).toEqual([]);
     expect(snapshot.commands).toEqual([]);
+    expect(snapshot.services).toEqual([]);
+    expect(snapshot.qaSurfaces).toEqual([]);
+  });
+
+  // Fewer facts is an accepted tradeoff for enterprise repos (see BuildSnapshotOptions doc) —
+  // but extractFacts must still run so doc-derived facts (CLAUDE.md/AGENTS.md/etc.) are not lost.
+  it('enterprise repos still extract doc-derived facts despite skipping unit/command discovery', async () => {
+    await writeFileEnsuringDir(dir, 'package.json', JSON.stringify({ name: 'fender-clone' }));
+    await writeFileEnsuringDir(dir, 'CLAUDE.md', '# agent guide');
+    await commitAll(dir, 'init');
+
+    const snapshot = await buildRepositorySnapshot({ rootDir: dir, repositoryId: 'repo-ent-2', isEnterpriseRepo: true });
+    expect(snapshot.facts.some((f) => f.sourcePaths.includes('CLAUDE.md'))).toBe(true);
   });
 });
