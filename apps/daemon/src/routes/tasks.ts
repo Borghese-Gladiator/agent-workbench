@@ -23,6 +23,7 @@ import {
   getTokenBreakdown,
   getRuntimeAttribution,
   listFindingsByTask,
+  getFleetStatus,
 } from '@awb/database';
 import type { TaskSize } from '@awb/domain';
 import { validateTaskDag, TaskDagValidationError, type TaskDagSpec } from '@awb/domain';
@@ -154,6 +155,12 @@ export function registerTaskRoutes(
         updatedAt: t.updatedAt,
       }),
     );
+  });
+
+  // Composed fleet view: one legible row per task (activity, bounce, findings, PR) in a single call,
+  // read entirely from SQLite (no per-task Temporal query). This is the endpoint `awb fleet` renders.
+  app.get('/api/tasks/fleet', async () => {
+    return { tasks: getFleetStatus(database.db) };
   });
 
   app.get<{ Params: { repositoryId: string; taskId: string } }>(
