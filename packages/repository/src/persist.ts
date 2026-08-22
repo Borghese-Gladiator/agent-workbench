@@ -22,6 +22,20 @@ import { buildRepositorySnapshot } from './snapshot.js';
 export interface RegisterRepositoryOptions {
   canonicalPath: string;
   name?: string;
+  /**
+   * Canonical-path prefixes that mark a repo enterprise (`WorkbenchConfig.enterpriseRepoRoots`).
+   * Passed in by the caller rather than read from config here to keep this package config-agnostic.
+   */
+  enterpriseRepoRoots?: string[];
+}
+
+/**
+ * True when `canonicalPath` falls under one of the configured enterprise repo roots.
+ * Enterprise repos (e.g. Klaviyo's `fender`/`app`) always have an established frontend and
+ * internal tooling, so snapshot discovery skips checks that would be pointless for them.
+ */
+export function isEnterpriseCanonicalPath(canonicalPath: string, enterpriseRepoRoots: string[]): boolean {
+  return enterpriseRepoRoots.some((root) => canonicalPath === root || canonicalPath.startsWith(`${root}/`));
 }
 
 /**
@@ -50,6 +64,7 @@ export async function registerRepository(
     remoteUrl: remotes[0]?.fetchUrl ?? null,
     defaultBranch,
     trusted: false,
+    isEnterpriseRepo: isEnterpriseCanonicalPath(options.canonicalPath, options.enterpriseRepoRoots ?? []),
     createdAt: now,
     updatedAt: now,
   };
@@ -66,6 +81,7 @@ function rowToRepository(row: RepositoryRow): Repository {
     remoteUrl: row.remoteUrl ?? undefined,
     defaultBranch: row.defaultBranch,
     trusted: row.trusted,
+    isEnterpriseRepo: row.isEnterpriseRepo,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -140,6 +156,7 @@ export async function refreshRepositorySnapshot(
   const snapshot = await buildRepositorySnapshot({
     rootDir: repository.canonicalPath,
     repositoryId: repository.id,
+    isEnterpriseRepo: repository.isEnterpriseRepo,
   });
 
   await db.insert(repositorySnapshots).values({
@@ -147,6 +164,7 @@ export async function refreshRepositorySnapshot(
     repositoryId: repository.id,
     headSha: snapshot.headSha,
     createdAt: snapshot.createdAt,
+    hasExistingFrontend: snapshot.hasExistingFrontend,
     repositoryMapArtifactId: snapshot.repositoryMapArtifactId,
   });
 
@@ -265,7 +283,7 @@ export async function persistDiscoveryFacts(
 export async function getLatestSnapshot(
   db: DrizzleDb,
   repositoryId: string,
-): Promise<{ id: string; headSha: string; createdAt: string } | undefined> {
+): Promise<{ id: string; headSha: string; createdAt: string; hasExistingFrontend: boolean } | undefined> {
   const rows = await db
     .select()
     .from(repositorySnapshots)

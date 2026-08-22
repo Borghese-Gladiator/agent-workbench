@@ -126,4 +126,33 @@ describe('parsePlannerOutput', () => {
     expect(plannerInstruction(contract, true)).toMatch(/"memory" array/);
     expect(plannerInstruction(contract, true)).toMatch(/pitfalls|invariants/i);
   });
+
+  it('plannerInstruction hints at the build-ui skill only when there is no existing frontend', () => {
+    expect(plannerInstruction(contract, false, false)).toMatch(/build-ui/);
+    expect(plannerInstruction(contract, false, false)).toMatch(/usesBuildUiSkill/);
+  });
+
+  it('plannerInstruction omits the build-ui hint when a frontend already exists', () => {
+    expect(plannerInstruction(contract, false, true)).not.toMatch(/build-ui/);
+    // default param (omitted arg) must also behave as "has a frontend" — never suggest the skill
+    // to a repo we know nothing about.
+    expect(plannerInstruction(contract, false)).not.toMatch(/build-ui/);
+  });
+
+  it('parses a planner-declared usesBuildUiSkill onto its slice', () => {
+    const text =
+      '```json\n' +
+      JSON.stringify({
+        slices: [{ objective: 'Build a new dashboard page', claimIds: ['claim-1'], usesBuildUiSkill: true }],
+      }) +
+      '\n```';
+    const parsed = parsePlannerOutput(text, contract);
+    expect(parsed?.slices[0]?.usesBuildUiSkill).toBe(true);
+  });
+
+  it('leaves usesBuildUiSkill undefined when the planner does not declare it', () => {
+    const text = '```json\n' + JSON.stringify({ slices: [{ objective: 'Fix a bug' }] }) + '\n```';
+    const parsed = parsePlannerOutput(text, contract);
+    expect(parsed?.slices[0]?.usesBuildUiSkill).toBeUndefined();
+  });
 });

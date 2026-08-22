@@ -28,6 +28,7 @@ import {
   resolveReviewDiff,
   resolveStartCommandForWorktree,
   resolveRepositoryPath,
+  resolveHasExistingFrontend,
   installWorktreeDependencies,
 } from './command-support.js';
 import { runBrowserQaViaServer } from './browser-qa-support.js';
@@ -357,6 +358,13 @@ const planHandler: PhaseHandler = {
       ? await loadProjectMemoryForContext(state.repositoryId).catch(() => [])
       : [];
 
+    // Drives the build-ui skill hint below: a genuinely un-styled repo (no snapshot, or a
+    // snapshot with no detected `web` unit) gets pointed at the skill; anything else (including
+    // enterprise repos, which always short-circuit to true) is left to match its existing style.
+    const hasExistingFrontend = realPlanner
+      ? await resolveHasExistingFrontend(state.repositoryId).catch(() => true)
+      : true;
+
     // A challenge replan routed its open review findings here (requirements → plan). Consume them:
     // seed the planner's first attempt so it re-plans knowing what review rejected, then clear so
     // they do NOT leak to implement — a plan-level finding is fixed at the plan altitude, not by
@@ -390,7 +398,9 @@ const planHandler: PhaseHandler = {
           durable: ctx.profile.usesDurableRunState,
         });
         const plannerStart = Date.now();
-        const plannerInstr = realPlanner ? plannerInstruction(contract, projectMemory.length > 0) : 'Produce an implementation plan for the approved contract';
+        const plannerInstr = realPlanner
+          ? plannerInstruction(contract, projectMemory.length > 0, hasExistingFrontend)
+          : 'Produce an implementation plan for the approved contract';
         const execution = await adapter.execute(
           session,
           { instruction: plannerInstr },

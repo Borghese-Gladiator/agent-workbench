@@ -70,37 +70,52 @@ async function discoverServicesAndQaSurfaces(
 export interface BuildSnapshotOptions {
   rootDir: string;
   repositoryId: string;
+  /**
+   * Enterprise repos (e.g. Klaviyo's `fender`/`app`) always have an established frontend and
+   * internal tooling, so several discovery steps that would be pointless for them are skipped:
+   * command discovery (safe: runtime tiers in `resolveStartCommandForWorktree` etc. already
+   * re-discover/infer independently at task time) and service/QA-surface discovery (nothing
+   * consumes it — see docs/TODO.md dead-code finding). `hasExistingFrontend` short-circuits to
+   * `true` without needing a `web` unit present. Unit discovery is ALSO skipped — its only other
+   * consumer is `extractFacts`' per-unit architecture facts, so enterprise repos get fewer
+   * accumulated facts as a deliberate tradeoff (large, well-known repos need less planner
+   * hand-holding than a freshly registered unknown one).
+   */
+  isEnterpriseRepo?: boolean;
 }
 
 export async function buildRepositorySnapshot({
   rootDir,
   repositoryId,
+  isEnterpriseRepo = false,
 }: BuildSnapshotOptions): Promise<RepositorySnapshot> {
   const headSha = await getHeadSha(rootDir);
-  const units = await discoverUnits(rootDir);
+  const units = isEnterpriseRepo ? [] : await discoverUnits(rootDir);
+  const hasExistingFrontend = isEnterpriseRepo || units.some((u) => u.kind === 'web');
 
-  const discoveredRoots = units.length > 0 ? units.map((u) => join(rootDir, u.root)) : [rootDir];
-  const discoveredCommands = (
-    await Promise.all(discoveredRoots.map((dir) => discoverCommands(dir)))
-  ).flat();
+  let commandsWithAmbiguity: ValidatedCommand[] = [];
+  if (!isEnterpriseRepo) {
+    const discoveredRoots = units.length > 0 ? units.map((u) => join(rootDir, u.root)) : [rootDir];
+    const discoveredCommands = (
+      await Promise.all(discoveredRoots.map((dir) => discoverCommands(dir)))
+    ).flat();
 
-  const validatedCommands: ValidatedCommand[] = discoveredCommands.map((cmd) => ({
-    id: randomUUID(),
-    repositoryId,
-    purpose: cmd.purpose,
-    command: cmd.command,
-    cwd: cmd.cwd,
-    source: cmd.source,
-    status: cmd.source === 'inferred' ? 'inferred' : 'declared',
-  }));
+    const validatedCommands: ValidatedCommand[] = discoveredCommands.map((cmd) => ({
+      id: randomUUID(),
+      repositoryId,
+      purpose: cmd.purpose,
+      command: cmd.command,
+      cwd: cmd.cwd,
+      source: cmd.source,
+      status: cmd.source === 'inferred' ? 'inferred' : 'declared',
+    }));
 
-  const commandsWithAmbiguity = markAmbiguousDuplicates(validatedCommands);
+    commandsWithAmbiguity = markAmbiguousDuplicates(validatedCommands);
+  }
 
-  const { services, qaSurfaces } = await discoverServicesAndQaSurfaces(
-    rootDir,
-    repositoryId,
-    commandsWithAmbiguity,
-  );
+  const { services, qaSurfaces } = isEnterpriseRepo
+    ? { services: [], qaSurfaces: [] }
+    : await discoverServicesAndQaSurfaces(rootDir, repositoryId, commandsWithAmbiguity);
 
   const facts = await extractFacts(rootDir, repositoryId, headSha, units, commandsWithAmbiguity);
 
@@ -114,5 +129,6 @@ export async function buildRepositorySnapshot({
     services,
     qaSurfaces,
     facts,
+    hasExistingFrontend,
   };
 }

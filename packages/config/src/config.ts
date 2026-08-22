@@ -15,6 +15,11 @@ export const WorkbenchConfigSchema = z.object({
       allowGithub: z.boolean().default(true),
     })
     .default({ allowLocalhost: true, allowGithub: true }),
+  /**
+   * Canonical-path prefixes that mark a registered repository as enterprise (see
+   * `Repository.isEnterpriseRepo`). Matched at registration time; e.g. `["~/Klaviyo/Repos"]`.
+   */
+  enterpriseRepoRoots: z.array(z.string()).default([]),
 });
 export type WorkbenchConfig = z.infer<typeof WorkbenchConfigSchema>;
 

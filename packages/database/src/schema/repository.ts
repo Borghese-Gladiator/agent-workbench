@@ -17,6 +17,7 @@ export const repositories = sqliteTable('repositories', {
   remoteUrl: text('remote_url'),
   defaultBranch: text('default_branch').notNull(),
   trusted: integer('trusted', { mode: 'boolean' }).notNull(),
+  isEnterpriseRepo: integer('is_enterprise_repo', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
@@ -28,6 +29,7 @@ export const repositorySnapshots = sqliteTable('repository_snapshots', {
     .references(() => repositories.id),
   headSha: text('head_sha').notNull(),
   createdAt: text('created_at').notNull(),
+  hasExistingFrontend: integer('has_existing_frontend', { mode: 'boolean' }).notNull().default(false),
   repositoryMapArtifactId: text('repository_map_artifact_id'),
 });
 

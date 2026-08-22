@@ -7,6 +7,7 @@ import {
   TaskContractSchema,
   AcceptanceClaimSchema,
   ImplementationPlanSchema,
+  PlanSliceSchema,
   TaskSchema,
   WorkspaceLeaseSchema,
   EvidenceSchema,
@@ -25,10 +26,12 @@ describe('domain schemas', () => {
       name: 'repo',
       defaultBranch: 'main',
       trusted: false,
+      isEnterpriseRepo: false,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
     expect(repo.trusted).toBe(false);
+    expect(repo.isEnterpriseRepo).toBe(false);
   });
 
   it('rejects a Repository missing required fields', () => {
@@ -46,8 +49,10 @@ describe('domain schemas', () => {
       services: [],
       qaSurfaces: [],
       facts: [],
+      hasExistingFrontend: false,
     });
     expect(snapshot.units).toEqual([]);
+    expect(snapshot.hasExistingFrontend).toBe(false);
   });
 
   it('validates ValidatedCommand purpose/source/status enums', () => {
@@ -113,6 +118,19 @@ describe('domain schemas', () => {
       status: 'draft',
     });
     expect(contract.claims).toHaveLength(1);
+  });
+
+  it('parses a PlanSlice with and without usesBuildUiSkill', () => {
+    const base = {
+      id: 'slice-1',
+      objective: 'do the thing',
+      claimIds: [],
+      likelyPaths: [],
+      requiredTargetedChecks: ['test'],
+      dependencies: [],
+    };
+    expect(PlanSliceSchema.parse(base).usesBuildUiSkill).toBeUndefined();
+    expect(PlanSliceSchema.parse({ ...base, usesBuildUiSkill: true }).usesBuildUiSkill).toBe(true);
   });
 
   it('parses an ImplementationPlan', () => {

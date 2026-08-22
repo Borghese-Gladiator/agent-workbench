@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import type { Command } from 'commander';
@@ -13,9 +14,17 @@ import {
 } from '@awb/repository';
 import type { Repository } from '@awb/domain';
 import { listTasks, deleteTask } from '@awb/database';
+import { loadConfig, resolveLayout } from '@awb/config';
 import { openWorkbenchDatabase } from '../db.js';
 import { rememberRepositoryId, resolveRepositoryId } from '../remembered.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
+
+/** `[]` when `awb init` hasn't run yet — registration itself doesn't require a config.yaml. */
+function loadEnterpriseRepoRoots(): string[] {
+  const layout = resolveLayout();
+  if (!existsSync(layout.configFile)) return [];
+  return loadConfig(layout).enterpriseRepoRoots;
+}
 
 /** Resolves the git top-level for a path, so `repo add .` registers the repo root, not a subdir. */
 export function gitTopLevel(path: string): string | undefined {
@@ -57,7 +66,11 @@ export function registerRepoCommands(program: Command): void {
       const db = openWorkbenchDatabase().db;
       const target = resolve(path ?? '.');
       const canonicalPath = gitTopLevel(target) ?? target;
-      const repository = await registerRepository(db, { canonicalPath, name: opts.name });
+      const repository = await registerRepository(db, {
+        canonicalPath,
+        name: opts.name,
+        enterpriseRepoRoots: loadEnterpriseRepoRoots(),
+      });
       rememberRepositoryId(repository.id);
       if (outputOptions().json) {
         emitJson(repository);

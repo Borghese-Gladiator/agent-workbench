@@ -14,7 +14,7 @@ import type {
   CreateAgentSessionInput,
 } from '@awb/agent-gateway';
 import type { PlanSlice } from '@awb/domain';
-import { runRealBuilderAttempt, buildBuilderInstruction } from './builder-support.js';
+import { runRealBuilderAttempt, buildBuilderInstruction, readBuildUiSkillContent } from './builder-support.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -109,6 +109,37 @@ describe('buildBuilderInstruction', () => {
     expect(out).toContain('[high] no target touched');
     expect(out).not.toContain('(');
     expect(out).not.toContain('fix:');
+  });
+
+  it('inlines skill content ahead of the objective when supplied', () => {
+    const out = buildBuilderInstruction('build a dashboard', undefined, 'Restrained, precise house style.');
+    expect(out).toContain('build a dashboard');
+    expect(out).toContain('Follow this skill');
+    expect(out).toContain('Restrained, precise house style.');
+  });
+
+  it('renders skill content AND prior findings together', () => {
+    const out = buildBuilderInstruction(
+      'build a dashboard',
+      [{ id: 'f', taskId: 't', severity: 'high', category: 'correctness', claimIds: [], description: 'bug', status: 'open' }],
+      'house style guidance',
+    );
+    expect(out).toContain('house style guidance');
+    expect(out).toContain('A prior attempt failed QA/review');
+    expect(out).toContain('bug');
+  });
+
+  it('omits the skill block entirely when no skill content is supplied', () => {
+    expect(buildBuilderInstruction('do the thing')).not.toContain('Follow this skill');
+  });
+});
+
+describe('readBuildUiSkillContent', () => {
+  it('reads the real build-ui skill file from agent-workbench\'s own repo and strips its frontmatter', async () => {
+    const content = await readBuildUiSkillContent();
+    expect(content).toBeDefined();
+    expect(content).not.toMatch(/^---/);
+    expect(content).toMatch(/# Build UI/);
   });
 });
 
@@ -282,5 +313,50 @@ describe('runRealBuilderAttempt (Stage 2 real builder)', () => {
     });
 
     expect(adapter.lastAssignment?.instruction).toBe(slice.objective);
+  });
+
+  // The builder agent's cwd is the TARGET repo (see makeWorktree above), never agent-workbench's
+  // own — it can never see `.claude/skills/build-ui/SKILL.md` via native discovery. Proves the
+  // real skill file's content reaches the instruction even though the session runs elsewhere.
+  it('inlines the real build-ui skill content when the plan slice sets usesBuildUiSkill', async () => {
+    const adapter = new FakeBuilderAdapter(async (cwd) => {
+      await writeFile(join(cwd, 'dashboard.tsx'), '// new dashboard\n');
+    });
+    const uiSlice: PlanSlice = { ...slice, usesBuildUiSkill: true };
+
+    await runRealBuilderAttempt({
+      adapter,
+      taskId: 'task-1',
+      worktreePath: worktree,
+      slice: uiSlice,
+      allowedTools: [],
+      tokenBudget: 1000,
+      runtimeBudgetMs: 1000,
+      eventSink: () => {},
+    });
+
+    const instruction = adapter.lastAssignment?.instruction ?? '';
+    expect(instruction).toContain(slice.objective);
+    expect(instruction).toMatch(/Follow this skill/);
+    expect(instruction).toMatch(/Build UI/);
+  });
+
+  it('does not inline any skill content when the slice leaves usesBuildUiSkill unset', async () => {
+    const adapter = new FakeBuilderAdapter(async (cwd) => {
+      await writeFile(join(cwd, 'greeting.txt'), 'hello\n');
+    });
+
+    await runRealBuilderAttempt({
+      adapter,
+      taskId: 'task-1',
+      worktreePath: worktree,
+      slice,
+      allowedTools: [],
+      tokenBudget: 1000,
+      runtimeBudgetMs: 1000,
+      eventSink: () => {},
+    });
+
+    expect(adapter.lastAssignment?.instruction).not.toMatch(/Follow this skill/);
   });
 });

@@ -6,6 +6,7 @@ import { initDataDir } from '@awb/config';
 import {
   getRepositoryCommands,
   getRepository,
+  getLatestSnapshot,
   runGit,
   getChangedPaths,
   discoverCommands,
@@ -72,6 +73,24 @@ export async function resolveRepositoryPath(repositoryId: string): Promise<strin
   try {
     const repo = await getRepository(database.db, repositoryId);
     return repo?.canonicalPath;
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Whether the repository's latest snapshot already found an established frontend (see
+ * `RepositorySnapshot.hasExistingFrontend`). Feeds the planner so it only points a from-scratch
+ * UI slice at the `build-ui` skill when there is genuinely no existing style to match. Defaults
+ * to `true` (skip the skill) when no snapshot exists yet, so an undiscovered repo never gets
+ * misclassified as greenfield.
+ */
+export async function resolveHasExistingFrontend(repositoryId: string): Promise<boolean> {
+  const { layout } = initDataDir();
+  const database = createReadOnlyDatabase(layout.workbenchSqlite);
+  try {
+    const snapshot = await getLatestSnapshot(database.db, repositoryId);
+    return snapshot?.hasExistingFrontend ?? true;
   } finally {
     database.close();
   }
