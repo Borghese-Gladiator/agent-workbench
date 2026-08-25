@@ -20,6 +20,14 @@ export interface TaskActivities {
 
 const activities = proxyActivities<TaskActivities>({
   startToCloseTimeout: '30 minutes',
+  // A phase that stops making progress (e.g. a hung verify command, a wedged agent) must be detected
+  // by liveness, not by the coarse 30-minute startToClose. This ceiling applies to EVERY phase, so
+  // runPhase beats on a wall-clock interval for its whole duration (see PHASE_HEARTBEAT_INTERVAL_MS
+  // in run-phase.ts) — a long-but-live phase keeps beating and survives; only a genuinely stuck one
+  // goes silent, times out, retries, and is counted by the workflow (below). Do NOT heartbeat only at
+  // command boundaries: a single long command then produces one silent gap wider than this ceiling
+  // and a healthy phase is killed.
+  heartbeatTimeout: '2 minutes',
   retry: {
     // Deterministic engineering failures are never Activity exceptions — only
     // transient infrastructure failures (provider timeout, GitHub blip, process crash, fs
@@ -216,7 +224,18 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
 
     state = { ...state, attemptNumber: state.attemptNumber + 1 };
     const phaseThatRan = state.phase;
-    const result = await activities.runPhase({ phase: state.phase, state });
+    let result: PhaseAttemptResult;
+    try {
+      result = await activities.runPhase({ phase: state.phase, state });
+    } catch {
+      // The Activity exhausted its retries — a genuinely stuck phase (e.g. a hung verify command that
+      // stopped heartbeating and tripped heartbeatTimeout, retried, and failed again). Temporal would
+      // otherwise fail the whole Workflow (or silently replay). Fold it into the SAME no-progress
+      // accounting a repaired failure uses: a `repair` outcome so the failure streak for this phase
+      // advances and a genuinely stuck phase surfaces as a counted `repeated-failure-no-progress` gate
+      // instead of a silent "attempt 1" replay or a workflow crash.
+      result = { outcome: 'repair', target: 'implement', findings: [] };
+    }
 
     // Accumulate the agent usage this attempt reported before routing mutates state.phase.
     // Tokens sum across the whole task; runtime accumulates per phase across its attempts/loop-backs.

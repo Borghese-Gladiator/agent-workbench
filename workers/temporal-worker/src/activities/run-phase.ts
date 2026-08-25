@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { activityInfo } from '@temporalio/activity';
+import { activityInfo, Context as ActivityContext } from '@temporalio/activity';
 import type {
   TaskPhase,
   PhaseAttemptResult,
@@ -185,6 +185,26 @@ function inheritedEnv(): Record<string, string> {
     if (value !== undefined) env[key] = value;
   }
   return env;
+}
+
+/**
+ * How often a phase proves liveness while it runs. Must be comfortably below the
+ * workflow's `heartbeatTimeout` so a live phase never trips it (see packages/workflow/src/task-workflow.ts).
+ */
+const PHASE_HEARTBEAT_INTERVAL_MS = 20_000;
+
+/**
+ * Emits a Temporal Activity heartbeat so a genuinely stuck phase (a hung command or wedged agent
+ * that stops making progress) trips the Activity's `heartbeatTimeout` promptly instead of blocking the full
+ * 30-minute startToClose. A no-op outside an Activity context (unit tests call the verify handler
+ * directly), so it never throws there.
+ */
+function emitPhaseHeartbeat(detail: Record<string, unknown>): void {
+  try {
+    ActivityContext.current().heartbeat(detail);
+  } catch {
+    // Not running inside an Activity (direct unit-test call) — nothing to heartbeat.
+  }
 }
 
 /**
@@ -992,9 +1012,27 @@ const verifyHandler: PhaseHandler = {
       env: inheritedEnv(),
     };
 
-    const results = await ctx.observability.time('testExecutionMs', () =>
-      runVerificationMatrix(commands, context, runState.artifactStore),
-    );
+    // TASK-105: heartbeat on a wall-clock interval for as long as the matrix is running, so
+    // liveness is proven CONTINUOUSLY rather than only at command boundaries. A single long-but-live
+    // command (a 10-minute `pnpm test`) must not look stuck; only a wedged worker stops the beat.
+    const verifyStartedAt = Date.now();
+    const heartbeatTimer = setInterval(() => {
+      emitPhaseHeartbeat({
+        phase: 'verify',
+        totalCommands: commands.length,
+        elapsedMs: Date.now() - verifyStartedAt,
+      });
+    }, PHASE_HEARTBEAT_INTERVAL_MS);
+    if (typeof heartbeatTimer.unref === 'function') heartbeatTimer.unref();
+
+    let results;
+    try {
+      results = await ctx.observability.time('testExecutionMs', () =>
+        runVerificationMatrix(commands, context, runState.artifactStore),
+      );
+    } finally {
+      clearInterval(heartbeatTimer);
+    }
     runState.verificationEvidence.push(...results.map((r) => r.evidence));
     const allPass = allRequiredCommandsPass(results);
 
@@ -1825,6 +1863,26 @@ const HANDLERS: Record<TaskPhase, PhaseHandler> = {
  * for the Workflow's `tokenUsageTotal` + `runtimeMsByPhase` aggregation.
  */
 export async function runPhase(input: {
+  phase: TaskPhase;
+  state: TaskWorkflowState;
+}): Promise<PhaseAttemptResult> {
+  // TASK-105: EVERY phase proves liveness on a wall-clock interval, not just verify. The
+  // `heartbeatTimeout` on the runPhase proxy applies to all phases, so a phase that never
+  // heartbeats (an agent-driven implement/plan taking longer than the ceiling) would otherwise be
+  // killed while perfectly alive. This beat runs for the whole Activity; verify additionally beats
+  // with per-matrix detail.
+  const phaseHeartbeat = setInterval(() => {
+    emitPhaseHeartbeat({ phase: input.phase, taskId: input.state.taskId });
+  }, PHASE_HEARTBEAT_INTERVAL_MS);
+  if (typeof phaseHeartbeat.unref === 'function') phaseHeartbeat.unref();
+  try {
+    return await runPhaseInner(input);
+  } finally {
+    clearInterval(phaseHeartbeat);
+  }
+}
+
+async function runPhaseInner(input: {
   phase: TaskPhase;
   state: TaskWorkflowState;
 }): Promise<PhaseAttemptResult> {
