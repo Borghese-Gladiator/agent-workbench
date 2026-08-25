@@ -13,7 +13,9 @@ describe('boundedTestEnv', () => {
     const env = boundedTestEnv('unit-test', { PATH: '/usr/bin' });
     expect(env.VITEST_MAX_THREADS).toBe('2');
     expect(env.VITEST_MIN_THREADS).toBe('2');
-    expect(env.JEST_MAX_WORKERS).toBe('2');
+    // the forks pool is configured by a separate pair — a suite on `pool: 'forks'` reads only these
+    expect(env.VITEST_MAX_FORKS).toBe('2');
+    expect(env.VITEST_MIN_FORKS).toBe('2');
     expect(env.PATH).toBe('/usr/bin'); // original env preserved
   });
 
@@ -21,6 +23,7 @@ describe('boundedTestEnv', () => {
     process.env.AWB_TEST_MAX_WORKERS = '3';
     const env = boundedTestEnv('integration-test', {});
     expect(env.VITEST_MAX_THREADS).toBe('3');
+    expect(env.VITEST_MAX_FORKS).toBe('3');
   });
 
   it('leaves non-test purposes untouched', () => {
@@ -45,7 +48,8 @@ describe('boundedTestEnv', () => {
 
   it('does not override a caller-supplied worker env', () => {
     process.env.AWB_TEST_MAX_WORKERS = '2';
-    const env = boundedTestEnv('unit-test', { VITEST_MAX_THREADS: '8' });
+    const env = boundedTestEnv('unit-test', { VITEST_MAX_THREADS: '8', VITEST_MAX_FORKS: '9' });
     expect(env.VITEST_MAX_THREADS).toBe('8');
+    expect(env.VITEST_MAX_FORKS).toBe('9');
   });
 });

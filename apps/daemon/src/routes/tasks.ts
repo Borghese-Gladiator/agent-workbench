@@ -395,10 +395,11 @@ export function registerTaskRoutes(
             'deliver-worktree: no committed candidate for this task yet (missing worktree, branch, or candidate SHA) — nothing to deliver.',
         };
       }
+      // Same base the normal release path uses (run-phase.ts: `runState.lease?.baseRef ?? 'main'`),
+      // so a recovered draft PR targets what the branch actually forked from — for a stacked child
+      // that is its parent's branch, not the repo default.
       const baseBranch =
-        getTaskDeliveredBranch(database.db, taskId) === branchName
-          ? await getDefaultBranch(worktreePath).catch(() => 'main')
-          : snapshot.lease?.baseRef ?? (await getDefaultBranch(worktreePath).catch(() => 'main'));
+        snapshot.lease?.baseRef ?? (await getDefaultBranch(worktreePath).catch(() => 'main'));
       try {
         const changedPaths = await getChangedPaths(
           worktreePath,

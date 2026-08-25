@@ -84,10 +84,12 @@ function evidenceKindForPurpose(purpose: ValidatedCommand['purpose']): Evidence[
 /**
  * Bounds a unit-test command's worker pool so one verify can't fan out to hundreds of processes
  * (TASK-112). Combined with the worker's activity-concurrency cap, this keeps N concurrent verifies
- * from thrashing the box. We set the vitest thread-pool env vars (honored by any vitest invocation
- * regardless of the runner wrapping it — npm/pnpm/yarn — so no fragile arg injection), plus the
- * generic `JEST_MAX_WORKERS`/`--maxWorkers`-equivalent env for jest. A caller-supplied value always
- * wins. Non-test purposes (build/lint/typecheck) are returned unchanged.
+ * from thrashing the box. We set vitest's pool env vars (honored by any vitest invocation regardless
+ * of the runner wrapping it — npm/pnpm/yarn — so no fragile arg injection), covering BOTH pools:
+ * `threads` (vitest's default) and `forks` (what suites needing process isolation select). A
+ * caller-supplied value always wins. Non-test purposes (build/lint/typecheck) are returned
+ * unchanged. Runners other than vitest (e.g. jest) take their worker count from a CLI flag rather
+ * than the environment, so they are out of scope here.
  */
 export function boundedTestEnv(
   purpose: ValidatedCommand['purpose'],
@@ -97,11 +99,13 @@ export function boundedTestEnv(
   const cap = readTestWorkerCap();
   if (cap === undefined) return env;
   const bounded = { ...env };
-  // vitest reads these directly; setting both min and max pins the pool size.
+  // vitest reads these directly; setting both min and max pins the pool size. The threads vars only
+  // reach poolOptions.threads/vmThreads and the forks vars only poolOptions.forks/vmForks, so both
+  // pairs are needed to bound a run whichever pool its config selects.
   if (bounded.VITEST_MAX_THREADS === undefined) bounded.VITEST_MAX_THREADS = String(cap);
   if (bounded.VITEST_MIN_THREADS === undefined) bounded.VITEST_MIN_THREADS = String(cap);
-  // jest honors JEST_WORKER_ID-style limits via --maxWorkers; expose an env hint some setups read.
-  if (bounded.JEST_MAX_WORKERS === undefined) bounded.JEST_MAX_WORKERS = String(cap);
+  if (bounded.VITEST_MAX_FORKS === undefined) bounded.VITEST_MAX_FORKS = String(cap);
+  if (bounded.VITEST_MIN_FORKS === undefined) bounded.VITEST_MIN_FORKS = String(cap);
   return bounded;
 }
 

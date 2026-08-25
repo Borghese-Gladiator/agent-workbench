@@ -33,23 +33,48 @@ describe('evaluateOverReach', () => {
 
   it('blocks a write to a protected tree even when the file count is small', () => {
     const r = evaluateOverReach({
-      changedPaths: ['dist/index.js', 'pnpm-lock.yaml'],
+      changedPaths: ['dist/index.js', 'node_modules/left-pad/index.js'],
       expectedPaths: ['src/index.ts'],
       size: 'M',
     });
     expect(r.withinScope).toBe(false);
-    expect(r.protectedHits).toEqual(['dist/index.js', 'pnpm-lock.yaml']);
+    expect(r.protectedHits).toEqual(['dist/index.js', 'node_modules/left-pad/index.js']);
   });
 
-  it('allows a protected path the contract explicitly names', () => {
+  it('allows a protected path the caller explicitly names', () => {
     const r = evaluateOverReach({
-      changedPaths: ['pnpm-lock.yaml', 'package.json'],
-      expectedPaths: ['package.json'],
+      changedPaths: ['dist/generated.js', 'src/index.ts'],
+      expectedPaths: ['src/index.ts'],
       size: 'M',
-      allowedProtectedPaths: ['pnpm-lock.yaml'],
+      allowedProtectedPaths: ['dist/generated.js'],
     });
     expect(r.withinScope).toBe(true);
     expect(r.protectedHits).toEqual([]);
+  });
+
+  it('lets a dependency-adding task write the lockfile', () => {
+    // A lockfile change is the normal consequence of `pnpm add`, not over-reach: protecting it
+    // would hard-block every dependency-adding task, since no contract field can grant an exception.
+    const r = evaluateOverReach({
+      changedPaths: ['package.json', 'pnpm-lock.yaml', 'src/uses-the-dep.ts'],
+      expectedPaths: ['package.json', 'src/uses-the-dep.ts'],
+      size: 'S',
+    });
+    expect(r.withinScope).toBe(true);
+    expect(r.protectedHits).toEqual([]);
+  });
+
+  it('still catches a lockfile churn bundled with a repo-wide sweep', () => {
+    const r = evaluateOverReach({
+      changedPaths: [
+        'pnpm-lock.yaml',
+        ...Array.from({ length: 300 }, (_, i) => `packages/x/src/f-${i}.ts`),
+      ],
+      expectedPaths: ['pnpm-lock.yaml'],
+      size: 'M',
+    });
+    expect(r.withinScope).toBe(false);
+    expect(r.reasons.some((m) => m.includes('files'))).toBe(true);
   });
 
   it('uses the size ceiling as a floor when the plan under-specifies expected paths', () => {

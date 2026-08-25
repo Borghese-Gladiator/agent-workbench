@@ -13,19 +13,16 @@
 export type TaskSize = 'S' | 'M' | 'L';
 
 /**
- * Path prefixes a task must never write to unless its contract explicitly names them: the retired
- * v4 system, build output, dependency trees, and committed lockfiles. Matched case-sensitively
- * against forward-slash repo-relative paths (git's own path format).
+ * Path prefixes a task must never write to: the retired v4 system, build output, and dependency
+ * trees. Matched case-sensitively against forward-slash repo-relative paths (git's own path format).
+ *
+ * Deliberately does NOT include lockfiles. Writing `pnpm-lock.yaml` is the normal, correct
+ * consequence of a task that adds a dependency, and this predicate cannot tell that apart from a
+ * gratuitous regeneration — with no contract field to grant an exception, protecting lockfiles would
+ * hard-block every dependency-adding task. The file-count ceiling below still catches the runaway
+ * case where a lockfile churn comes bundled with a repo-wide sweep.
  */
-export const DEFAULT_PROTECTED_PREFIXES: readonly string[] = [
-  'archive/',
-  'dist/',
-  'node_modules/',
-  '.pnp.cjs',
-  'pnpm-lock.yaml',
-  'package-lock.json',
-  'yarn.lock',
-];
+export const DEFAULT_PROTECTED_PREFIXES: readonly string[] = ['archive/', 'dist/', 'node_modules/'];
 
 /**
  * The most files a change of a given size is expected to touch before the diff is "surprisingly
@@ -55,7 +52,11 @@ export interface OverReachInput {
   size?: TaskSize;
   /** Override the protected prefixes (defaults to {@link DEFAULT_PROTECTED_PREFIXES}). */
   protectedPrefixes?: readonly string[];
-  /** Paths the contract explicitly allows despite matching a protected prefix. */
+  /**
+   * Paths allowed despite matching a protected prefix. Caller-supplied only — no contract field
+   * feeds this yet, so the production caller (the implement phase) leaves it empty; it exists as the
+   * seam for threading an explicit contract allowance through later.
+   */
   allowedProtectedPaths?: readonly string[];
 }
 
