@@ -64,22 +64,44 @@ Set these for the rest of the run so every command is unambiguous:
 
 ## 1. Choose runtime, THEN boot
 
-**`up` defaults to the MOCK runtime** — it produces a fake PR in ~90s and spends
-zero tokens. That is a dry-run of the plumbing, NOT a real implementation. To run
-a real task with a live agent doing browser QA, export the runtime env **inline
-on the same command as `up`** (shell state does not persist between separate CLI
-calls, and you must never `down`/`up` mid-task — that wipes in-memory state and
-permanently blocks the task):
+**Always pass the runtime explicitly. This is the boot command:**
 
 ```
-# LIVE run (real agent, real tokens, browser QA):
+# LIVE run (real agent, real tokens, browser QA) — use this unless told otherwise:
 AWB_AGENT_RUNTIME=claude AWB_QA_MODE=browser pnpm --filter @awb/cli cli -- up
+```
 
+Runtime env must be **inline on the same command as `up`** — shell state does not
+persist between separate CLI calls, env is read at worker spawn, and you must
+never `down`/`up` mid-task (that wipes in-memory state and permanently blocks the
+task).
+
+**A bare `up` runs MOCK, and MOCK is not a real implementation** — it produces a
+fake PR in ~90s and spends zero tokens. `mock` is the code-level fallback
+(`workers/temporal-worker/src/activities/agent-factory.ts:22-23`: an unset *or
+typo'd* runtime degrades to `mock` so deterministic tests stay offline), which
+means a misspelled runtime silently gives you a fake run rather than an error.
+Only omit the env when you explicitly want a plumbing dry-run:
+
+```
 # MOCK dry-run (plumbing check only):
 pnpm --filter @awb/cli cli -- up
 ```
 
-Wait for `ready.`. Logs stream to `~/.agentic-workbench/runtime/logs/`.
+Wait for `ready.`.
+
+**`DATA_DIR` — resolve it once, use it for every path below.** Logs, the SQLite
+DB, and worktrees all hang off one root: `AWB_DATA_DIR` if set, else
+`~/.agentic-workbench` (`packages/config/src/paths.ts:4-6`). If you booted with a
+non-default `AWB_DATA_DIR` (e.g. an isolated stack), every `~/.agentic-workbench/…`
+path in this skill must be re-rooted at that dir instead — reading the default
+root would show you a *different stack's* logs and tell you nothing about your run.
+
+```
+DATA_DIR="${AWB_DATA_DIR:-$HOME/.agentic-workbench}"
+```
+
+Logs stream to `$DATA_DIR/runtime/logs/`.
 
 **If `up` says "runtime already ready", the env you just passed did NOT take.** A warm
 stack from a prior session keeps whatever runtime/QA/cap env it booted with — your new
@@ -96,7 +118,7 @@ mid-task.
 process crashed on import — read the log first:
 
 ```
-tail -40 ~/.agentic-workbench/runtime/logs/daemon.log
+tail -40 "$DATA_DIR/runtime/logs/daemon.log"
 ```
 
 Two common crash causes on a clean checkout (both are build-state, not config):
@@ -226,13 +248,13 @@ diagnose FIRST; blind re-runs repeat the failure and waste live tokens. The real
 error is NOT in `task show`; find it here, in order:
 
 1. **Worker log** — the actual exception + stack:
-   `grep -n "Activity failed\|Error:\|returned 500" ~/.agentic-workbench/runtime/logs/worker.log | tail -30`
+   `grep -n "Activity failed\|Error:\|returned 500" "$DATA_DIR/runtime/logs/worker.log" | tail -30`
 2. **Semantic events** — the agent's turn-by-turn stream (what it actually did):
-   `sqlite3 ~/.agentic-workbench/database/workbench.sqlite "SELECT sequence, occurred_at, phase, producer, type, substr(summary,1,70) FROM semantic_events WHERE run_id='<taskId>-run' ORDER BY sequence;"`
+   `sqlite3 "$DATA_DIR/database/workbench.sqlite" "SELECT sequence, occurred_at, phase, producer, type, substr(summary,1,70) FROM semantic_events WHERE run_id='<taskId>-run' ORDER BY sequence;"`
 3. **The worktree** — code the agent wrote may be intact even if the DB write
    never fired (do NOT report "0 changes" from a DB count alone):
-   `git -C ~/.agentic-workbench/worktrees/<repoId>/<taskId> status --short`
-   `git -C ~/.agentic-workbench/worktrees/<repoId>/<taskId> diff`
+   `git -C "$DATA_DIR/worktrees/<repoId>/<taskId>" status --short`
+   `git -C "$DATA_DIR/worktrees/<repoId>/<taskId>" diff`
    Note the agent commits its work, so `status` may be clean while the branch is
    full — check `git log --oneline` and `git diff <baseSha> HEAD` too.
 4. **SQLite ground truth** — when the CLI is down (blank `task show`) or you need the
