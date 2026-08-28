@@ -54,6 +54,26 @@ export interface CreatedTaskRecord {
   updatedAt: string;
 }
 
+/**
+ * The base branch a recovered draft PR opens against. Mirrors the normal release path
+ * (run-phase.ts: `runState.lease?.baseRef ?? 'main'`) so recovery and release cannot disagree about
+ * where a branch forked from: for a stacked child that is its parent's branch, NOT the repo default.
+ *
+ * Extracted from the route so the rule is unit-testable without booting Temporal — the earlier
+ * inline form guarded this with a condition that was always true, which no route test could catch.
+ */
+export async function resolveRecoveryBaseBranch(
+  lease: { baseRef?: string } | undefined,
+  repoDefaultBranch: () => Promise<string>,
+): Promise<string> {
+  if (lease?.baseRef) return lease.baseRef;
+  try {
+    return await repoDefaultBranch();
+  } catch {
+    return 'main';
+  }
+}
+
 export function registerTaskRoutes(
   app: FastifyInstance,
   database: WorkbenchDatabase,
@@ -395,11 +415,9 @@ export function registerTaskRoutes(
             'deliver-worktree: no committed candidate for this task yet (missing worktree, branch, or candidate SHA) — nothing to deliver.',
         };
       }
-      // Same base the normal release path uses (run-phase.ts: `runState.lease?.baseRef ?? 'main'`),
-      // so a recovered draft PR targets what the branch actually forked from — for a stacked child
-      // that is its parent's branch, not the repo default.
-      const baseBranch =
-        snapshot.lease?.baseRef ?? (await getDefaultBranch(worktreePath).catch(() => 'main'));
+      const baseBranch = await resolveRecoveryBaseBranch(snapshot.lease, () =>
+        getDefaultBranch(worktreePath),
+      );
       try {
         const changedPaths = await getChangedPaths(
           worktreePath,

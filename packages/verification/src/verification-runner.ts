@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { cpus } from 'node:os';
 import { runCommand, type CommandResult } from '@awb/execution';
 import { ArtifactStore } from '@awb/evidence';
 import type { Evidence, EvidenceStatus, ValidatedCommand } from '@awb/domain';
@@ -87,7 +88,9 @@ function evidenceKindForPurpose(purpose: ValidatedCommand['purpose']): Evidence[
  * from thrashing the box. We set vitest's pool env vars (honored by any vitest invocation regardless
  * of the runner wrapping it — npm/pnpm/yarn — so no fragile arg injection), covering BOTH pools:
  * `threads` (vitest's default) and `forks` (what suites needing process isolation select). A
- * caller-supplied value always wins. Non-test purposes (build/lint/typecheck) are returned
+ * caller-supplied value always wins. Test purposes are ALWAYS bounded — the cap defaults to a value
+ * derived from the core count and the activity cap (see readTestWorkerCap), so the guard holds
+ * without an operator setting anything. Non-test purposes (build/lint/typecheck) are returned
  * unchanged. Runners other than vitest (e.g. jest) take their worker count from a CLI flag rather
  * than the environment, so they are out of scope here.
  */
@@ -97,7 +100,6 @@ export function boundedTestEnv(
 ): Record<string, string> {
   if (purpose !== 'unit-test' && purpose !== 'integration-test') return env;
   const cap = readTestWorkerCap();
-  if (cap === undefined) return env;
   const bounded = { ...env };
   // vitest reads these directly; setting both min and max pins the pool size. The threads vars only
   // reach poolOptions.threads/vmThreads and the forks vars only poolOptions.forks/vmForks, so both
@@ -110,16 +112,35 @@ export function boundedTestEnv(
 }
 
 /**
- * Per-verify test-worker cap from `AWB_TEST_MAX_WORKERS` (positive integer). Unset → undefined
- * (leave the runner's own default). Kept independent of the worker's activity cap so the two levers
- * can be tuned separately; read from env here to avoid a @awb/config dependency in this leaf package.
+ * Mirrors `DEFAULT_MAX_CONCURRENT_ACTIVITIES` in @awb/config, which is the source of truth. Copied
+ * rather than imported because this leaf package deliberately carries no config dependency.
  */
-function readTestWorkerCap(): number | undefined {
-  const raw = process.env.AWB_TEST_MAX_WORKERS;
+const FALLBACK_MAX_CONCURRENT_ACTIVITIES = 4;
+
+function readPositiveIntEnv(name: string): number | undefined {
+  const raw = process.env[name];
   if (raw === undefined || raw.trim() === '') return undefined;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1) return undefined;
   return n;
+}
+
+/**
+ * Per-verify test-worker cap. An explicit `AWB_TEST_MAX_WORKERS` always wins; otherwise it is
+ * DERIVED so the two TASK-112 levers compose rather than multiply.
+ *
+ * The invariant we want is "test workers summed across all concurrent verifies ≤ cpus". A test
+ * runner left to its own default sizes its pool to the whole box, so N concurrent activities each
+ * doing that puts N × cpus workers on a machine with cpus — the load-377 shape. Dividing the core
+ * count by the activity cap keeps the product bounded by cpus no matter how the activity cap is
+ * tuned. Floored at 1 so a small box or a large activity cap can never produce a zero-sized pool.
+ */
+function readTestWorkerCap(): number {
+  const explicit = readPositiveIntEnv('AWB_TEST_MAX_WORKERS');
+  if (explicit !== undefined) return explicit;
+  const activities =
+    readPositiveIntEnv('AWB_MAX_CONCURRENT_ACTIVITIES') ?? FALLBACK_MAX_CONCURRENT_ACTIVITIES;
+  return Math.max(1, Math.floor(cpus().length / activities));
 }
 
 function statusFor(result: CommandResult): EvidenceStatus {
