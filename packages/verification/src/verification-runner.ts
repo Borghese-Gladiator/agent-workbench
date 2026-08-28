@@ -42,6 +42,28 @@ export interface CommandEvidenceResult {
   evidence: Evidence;
 }
 
+/**
+ * Per-command continuation returned by {@link CommandExecutionRecorder.onCommandStart}, closed out on
+ * finish to stamp `ended_at`/`exit_code` on the row opened at spawn.
+ */
+export interface CommandExecutionHandle {
+  onCommandFinish(finish: { exitCode: number | null; endedAt: string }): Promise<void> | void;
+}
+
+/**
+ * Optional hook threaded into the verification matrix so @awb/verification records live per-command
+ * timing (a row on spawn, closed on finish) WITHOUT taking a hard @awb/database dependency — the
+ * worker supplies a DB-backed implementation, tests supply an in-memory one. Recorder failures are
+ * swallowed by the runner: observability is best-effort and never fails the command or the phase.
+ */
+export interface CommandExecutionRecorder {
+  onCommandStart(start: {
+    command: string;
+    cwd: string;
+    startedAt: string;
+  }): Promise<CommandExecutionHandle> | CommandExecutionHandle;
+}
+
 function evidenceKindForPurpose(purpose: ValidatedCommand['purpose']): Evidence['kind'] {
   switch (purpose) {
     case 'unit-test':
@@ -75,7 +97,21 @@ export async function runCommandAndRecordEvidence(
   command: ValidatedCommand,
   context: VerificationRunContext,
   artifactStore: ArtifactStore,
+  recorder?: CommandExecutionRecorder,
 ): Promise<CommandEvidenceResult> {
+  // Open a command_executions row before spawning so a live/failed verify shows the command running
+  // with its start time — the row is closed out below once the exit code is known. Best-effort: a
+  // recorder that throws must never block the command from actually running.
+  let handle: CommandExecutionHandle | undefined;
+  const startedAt = new Date().toISOString();
+  if (recorder) {
+    try {
+      handle = await recorder.onCommandStart({ command: command.command, cwd: command.cwd, startedAt });
+    } catch {
+      handle = undefined;
+    }
+  }
+
   // ValidatedCommand.command is a full shell-style string (e.g. "pnpm test"); @awb/execution's
   // runCommand spawns without a shell, so it needs the executable and args split apart.
   const [executable, ...args] = splitCommandString(command.command);
@@ -86,6 +122,14 @@ export async function runCommandAndRecordEvidence(
     env: context.env,
     timeoutMs: context.timeoutMs,
   });
+
+  if (handle) {
+    try {
+      await handle.onCommandFinish({ exitCode: result.exitCode, endedAt: new Date().toISOString() });
+    } catch {
+      // swallow — the row simply stays open; the command's Evidence is still authoritative.
+    }
+  }
 
   const stdoutArtifact = await artifactStore.put({
     source: Buffer.from(result.stdout, 'utf8'),
@@ -137,10 +181,11 @@ export async function runVerificationMatrix(
   commands: ValidatedCommand[],
   context: VerificationRunContext,
   artifactStore: ArtifactStore,
+  recorder?: CommandExecutionRecorder,
 ): Promise<CommandEvidenceResult[]> {
   const results: CommandEvidenceResult[] = [];
   for (const command of commands) {
-    results.push(await runCommandAndRecordEvidence(command, context, artifactStore));
+    results.push(await runCommandAndRecordEvidence(command, context, artifactStore, recorder));
   }
   return results;
 }

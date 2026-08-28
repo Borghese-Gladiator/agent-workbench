@@ -12,7 +12,7 @@ import {
   getCurrentStateQuery,
   getPendingHumanGateQuery,
 } from './task-workflow.js';
-import { createScriptedActivities } from './test-activities.js';
+import { createScriptedActivities, THROW, type ScriptEntry } from './test-activities.js';
 import type { TaskWorkflowInput } from './workflow-types.js';
 
 let testEnv: TestWorkflowEnvironment;
@@ -85,7 +85,7 @@ function replan(target: 'plan' | 'program-design' | 'specify'): PhaseAttemptResu
 }
 
 async function runWithActivities(
-  script: Partial<Record<TaskPhase, PhaseAttemptResult[]>>,
+  script: Partial<Record<TaskPhase, ScriptEntry[]>>,
   driveWorkflow: (handle: import('@temporalio/client').WorkflowHandle) => Promise<void>,
   args: TaskWorkflowInput = { taskId: 'task-1', repositoryId: 'repo-1' },
 ) {
@@ -265,6 +265,54 @@ describe('TaskWorkflow', () => {
     );
     expect(result.phase).toBe('assimilate');
   }, 30_000);
+
+  // TASK-105: a genuinely stuck phase (the runPhase Activity exhausting its retries — e.g. a hung
+  // verify command that stopped heartbeating and tripped heartbeatTimeout) must NOT crash the
+  // Workflow or silently replay. It is folded into the same no-progress accounting a repaired
+  // failure uses: the throw is caught, treated as a repair, and the run recovers on the next pass.
+  it('does not crash the workflow when runPhase throws — folds it into the repair loop (TASK-105)', async () => {
+    const { result } = await runWithActivities(
+      {
+        specify: [candidate('specify')],
+        plan: [candidate('plan')],
+        // First verify attempt throws (retries exhausted); the workflow catches it, repairs via
+        // implement, and the second verify attempt yields a candidate so the run completes.
+        verify: [THROW, candidate('verify')],
+      },
+      async () => {},
+    );
+    expect(result.phase).toBe('assimilate');
+    expect(result.condition).toBe('completed');
+  }, 60_000);
+
+  // TASK-105: a stuck-phase Activity failure is COUNTED on the same failure streak a repaired failure
+  // uses, so it drives escalation to a `repeated-failure-no-progress` human gate rather than a silent
+  // replay. Two repairs then a throw on verify reach NO_PROGRESS_THRESHOLD — the throw is the final
+  // strike (a single THROW keeps the real activity-retry backoff paid just once). createScriptedActivities
+  // holds the THROW across all of its retries before advancing, so the escalation is deterministic.
+  it('counts a stuck runPhase throw toward repeated-failure-no-progress escalation (TASK-105)', async () => {
+    let observedReason: string | undefined;
+    const { result } = await runWithActivities(
+      {
+        specify: [candidate('specify')],
+        plan: [candidate('plan')],
+        verify: [repair(), repair(), THROW, candidate('verify')],
+      },
+      async (handle) => {
+        await waitForCondition(async () => {
+          const state = await handle.query(getCurrentStateQuery);
+          if (state.condition === 'awaiting-human') {
+            observedReason = (await handle.query(getPendingHumanGateQuery))?.reason;
+            return true;
+          }
+          return false;
+        }, 60_000);
+        await handle.signal(cancelSignal);
+      },
+    );
+    expect(observedReason).toBe('repeated-failure-no-progress');
+    expect(result.condition).toBe('cancelled');
+  }, 90_000);
 
   it('routes a plan-critic rejection (replan) back to plan', async () => {
     const { result } = await runWithActivities(
