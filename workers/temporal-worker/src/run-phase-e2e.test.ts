@@ -52,32 +52,6 @@ async function waitForCondition(check: () => Promise<boolean>, timeoutMs = 20_00
   throw new Error('waitForCondition timed out');
 }
 
-/**
- * `TestWorkflowEnvironment.createLocal()` boots a real Temporal test server on a local port. When
- * that port is already held (a stale server, a parallel run), the boot can block indefinitely — the
- * observed ~30-minute hang. Race it against a short timeout so a busy port surfaces as an immediate,
- * legible failure instead of stalling the whole suite.
- */
-async function createLocalEnvFailFast(timeoutMs = 30_000): Promise<TestWorkflowEnvironment> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(
-      () =>
-        reject(
-          new Error(
-            `TestWorkflowEnvironment.createLocal() did not start within ${timeoutMs}ms — the Temporal test port is likely already in use.`,
-          ),
-        ),
-      timeoutMs,
-    );
-  });
-  try {
-    return await Promise.race([TestWorkflowEnvironment.createLocal(), timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
-
 let testEnv: TestWorkflowEnvironment;
 let repoDir: string;
 
@@ -85,7 +59,7 @@ beforeAll(async () => {
   // createLocal (real-time), matching packages/workflow/src/task-workflow.test.ts's established
   // rationale: these tests drive the workflow with wall-clock polling from outside, so
   // time-skipping fights the test driver and produces spurious timeouts.
-  testEnv = await createLocalEnvFailFast();
+  testEnv = await TestWorkflowEnvironment.createLocal();
 
   repoDir = await makeTempRepo();
   await writeFileEnsuringDir(repoDir, 'README.md', '# fixture repo for runPhase e2e test\n');

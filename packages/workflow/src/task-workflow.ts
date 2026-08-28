@@ -20,11 +20,6 @@ export interface TaskActivities {
 
 const activities = proxyActivities<TaskActivities>({
   startToCloseTimeout: '30 minutes',
-  // A phase that stops making progress (e.g. a hung verify command) must be detected by liveness, not
-  // by the coarse 30-minute startToClose. runPhase heartbeats while it works (per verify command); if
-  // heartbeats stop for this long, Temporal times the attempt out and it retries — surfacing a stuck
-  // phase in minutes instead of blocking half an hour, and letting the workflow count it (below).
-  heartbeatTimeout: '2 minutes',
   retry: {
     // Deterministic engineering failures are never Activity exceptions — only
     // transient infrastructure failures (provider timeout, GitHub blip, process crash, fs
@@ -221,18 +216,7 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
 
     state = { ...state, attemptNumber: state.attemptNumber + 1 };
     const phaseThatRan = state.phase;
-    let result: PhaseAttemptResult;
-    try {
-      result = await activities.runPhase({ phase: state.phase, state });
-    } catch {
-      // The Activity exhausted its retries — a genuinely stuck phase (e.g. a hung verify command that
-      // stopped heartbeating and tripped heartbeatTimeout, retried, and failed again). Temporal would
-      // otherwise fail the whole Workflow (or silently replay). Fold it into the SAME no-progress
-      // accounting a repaired failure uses: a `repair` outcome so the failure streak for this phase
-      // advances and a genuinely stuck phase surfaces as a counted `repeated-failure-no-progress` gate
-      // instead of a silent "attempt 1" replay or a workflow crash.
-      result = { outcome: 'repair', target: 'implement', findings: [] };
-    }
+    const result = await activities.runPhase({ phase: state.phase, state });
 
     // Accumulate the agent usage this attempt reported before routing mutates state.phase.
     // Tokens sum across the whole task; runtime accumulates per phase across its attempts/loop-backs.

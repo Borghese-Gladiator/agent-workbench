@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { activityInfo, Context as ActivityContext } from '@temporalio/activity';
+import { activityInfo } from '@temporalio/activity';
 import type {
   TaskPhase,
   PhaseAttemptResult,
@@ -53,12 +53,7 @@ import {
   runSliceLoop,
   type SliceAssignment,
 } from '@awb/planning';
-import {
-  runVerificationMatrix,
-  allRequiredCommandsPass,
-  type VerificationRunContext,
-  type CommandExecutionRecorder,
-} from '@awb/verification';
+import { runVerificationMatrix, allRequiredCommandsPass, type VerificationRunContext } from '@awb/verification';
 import {
   runCliQa,
   runBrowserQa,
@@ -92,14 +87,7 @@ import { createControlPlaneEmitter } from './control-plane-events.js';
 import { isResumableTransportError } from '@awb/agent-gateway';
 import { withSpan } from '@awb/telemetry';
 import { getDiffLineStats } from '@awb/repository';
-import {
-  runIdForTask,
-  createDatabase,
-  insertCommandExecution,
-  completeCommandExecution,
-  type WorkbenchDatabase,
-} from '@awb/database';
-import { initDataDir } from '@awb/config';
+import { runIdForTask } from '@awb/database';
 import { computeDecaySignals, decaySpanAttributes } from './decay-metrics.js';
 import {
   drivePhase,
@@ -197,96 +185,6 @@ function inheritedEnv(): Record<string, string> {
     if (value !== undefined) env[key] = value;
   }
   return env;
-}
-
-/**
- * Emits a Temporal Activity heartbeat with a per-command detail so a genuinely stuck verify phase
- * (a hung command that stops heartbeating) trips the Activity's `heartbeatTimeout` promptly instead
- * of blocking the full 30-minute startToClose. A no-op outside an Activity context (unit tests call
- * the verify handler directly), so it never throws there.
- */
-function heartbeatVerifyProgress(detail: { command: string; index: number; total: number }): void {
-  try {
-    ActivityContext.current().heartbeat(detail);
-  } catch {
-    // Not running inside an Activity (direct unit-test call) — nothing to heartbeat.
-  }
-}
-
-/**
- * Verify-path adapter: builds a {@link CommandExecutionRecorder} backed by a short-lived writable
- * `createDatabase` handle, so each verify command writes an incremental `command_executions` row
- * (open on spawn with live timing, closed on finish with exit code). The handle is opened lazily on
- * the first command and closed by the returned `close()` once the matrix finishes. Every DB touch is
- * wrapped defensively: verify observability must never fail the command or the phase. Also
- * heartbeats per command so Temporal sees liveness while the matrix runs.
- */
-function makeDbCommandExecutionRecorder(input: {
-  phaseAttemptId: string;
-  runId: string;
-  phase: TaskPhase;
-  total: number;
-}): { recorder: CommandExecutionRecorder; close: () => void } {
-  let database: WorkbenchDatabase | undefined;
-  let index = 0;
-
-  function ensureDb(): WorkbenchDatabase | undefined {
-    if (database) return database;
-    try {
-      const { layout } = initDataDir();
-      database = createDatabase(layout.workbenchSqlite);
-    } catch {
-      database = undefined;
-    }
-    return database;
-  }
-
-  const recorder: CommandExecutionRecorder = {
-    onCommandStart(start) {
-      const currentIndex = index++;
-      heartbeatVerifyProgress({ command: start.command, index: currentIndex, total: input.total });
-
-      let rowId: string | undefined;
-      const db = ensureDb();
-      if (db) {
-        try {
-          rowId = insertCommandExecution(db.db, {
-            phaseAttemptId: input.phaseAttemptId,
-            runId: input.runId,
-            phase: input.phase,
-            command: start.command,
-            cwd: start.cwd,
-            startedAt: start.startedAt,
-          });
-        } catch {
-          rowId = undefined;
-        }
-      }
-
-      return {
-        onCommandFinish(finish) {
-          heartbeatVerifyProgress({ command: start.command, index: currentIndex, total: input.total });
-          if (!rowId || !database) return;
-          try {
-            completeCommandExecution(database.db, rowId, finish);
-          } catch {
-            // swallow — the open row is still useful; verify Evidence remains authoritative.
-          }
-        },
-      };
-    },
-  };
-
-  return {
-    recorder,
-    close: () => {
-      try {
-        database?.close();
-      } catch {
-        // ignore close errors
-      }
-    },
-  };
 }
 
 /**
@@ -1094,26 +992,9 @@ const verifyHandler: PhaseHandler = {
       env: inheritedEnv(),
     };
 
-    // On the durable/real path, thread a DB-backed recorder so each verify command writes an
-    // incremental command_executions row (live timing on spawn, exit code on finish) and heartbeats
-    // Temporal per command. The mock path passes no recorder (no daemon-owned DB to write to here).
-    const recorderHandle = ctx.profile.usesDurableRunState
-      ? makeDbCommandExecutionRecorder({
-          phaseAttemptId: context.phaseAttemptId,
-          runId: context.runId,
-          phase: 'verify',
-          total: commands.length,
-        })
-      : undefined;
-
-    let results;
-    try {
-      results = await ctx.observability.time('testExecutionMs', () =>
-        runVerificationMatrix(commands, context, runState.artifactStore, recorderHandle?.recorder),
-      );
-    } finally {
-      recorderHandle?.close();
-    }
+    const results = await ctx.observability.time('testExecutionMs', () =>
+      runVerificationMatrix(commands, context, runState.artifactStore),
+    );
     runState.verificationEvidence.push(...results.map((r) => r.evidence));
     const allPass = allRequiredCommandsPass(results);
 

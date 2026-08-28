@@ -4,34 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ArtifactStore, InMemoryArtifactMetadataStore } from '@awb/evidence';
 import { runCommandAndRecordEvidence, runVerificationMatrix, allRequiredCommandsPass } from './verification-runner.js';
-import type { CommandExecutionRecorder } from './verification-runner.js';
 import type { ValidatedCommand } from '@awb/domain';
-
-interface RecordedRow {
-  command: string;
-  cwd: string;
-  startedAt: string;
-  endedAt?: string;
-  exitCode?: number | null;
-}
-
-/** In-memory recorder that captures the start/finish rows the runner drives, mirroring the DB one. */
-function makeSpyRecorder(): { recorder: CommandExecutionRecorder; rows: RecordedRow[] } {
-  const rows: RecordedRow[] = [];
-  const recorder: CommandExecutionRecorder = {
-    onCommandStart(start) {
-      const row: RecordedRow = { command: start.command, cwd: start.cwd, startedAt: start.startedAt };
-      rows.push(row);
-      return {
-        onCommandFinish(finish) {
-          row.endedAt = finish.endedAt;
-          row.exitCode = finish.exitCode;
-        },
-      };
-    },
-  };
-  return { recorder, rows };
-}
 
 const baseContext = {
   taskId: 'task-1',
@@ -126,41 +99,6 @@ describe('runCommandAndRecordEvidence', () => {
     const { evidence } = await runCommandAndRecordEvidence(buildCommand, baseContext, store);
     expect(evidence.kind).toBe('build');
   });
-
-  it('invokes the recorder with a started row then closes it with ended/exit on success', async () => {
-    const { recorder, rows } = makeSpyRecorder();
-    const command = makeCommand({ command: 'echo recorded', cwd: process.cwd() });
-    const { result } = await runCommandAndRecordEvidence(command, baseContext, store, recorder);
-    expect(result.exitCode).toBe(0);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.command).toBe('echo recorded');
-    expect(rows[0]?.cwd).toBe(process.cwd());
-    expect(rows[0]?.startedAt).toBeTruthy();
-    // The finish row was written: ended_at + exit_code closed out the open row.
-    expect(rows[0]?.endedAt).toBeTruthy();
-    expect(rows[0]?.exitCode).toBe(0);
-  });
-
-  it('records the non-zero exit code on the recorder row for a failed command', async () => {
-    const { recorder, rows } = makeSpyRecorder();
-    const failing = makeCommand({ command: 'node -e "process.exit(3)"' });
-    await runCommandAndRecordEvidence(failing, baseContext, store, recorder);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.exitCode).toBe(3);
-    expect(rows[0]?.endedAt).toBeTruthy();
-  });
-
-  it('runs the command even when the recorder throws on start (best-effort observability)', async () => {
-    const throwingRecorder: CommandExecutionRecorder = {
-      onCommandStart() {
-        throw new Error('db unavailable');
-      },
-    };
-    const command = makeCommand({ command: 'echo still-runs' });
-    const { result, evidence } = await runCommandAndRecordEvidence(command, baseContext, store, throwingRecorder);
-    expect(result.exitCode).toBe(0);
-    expect(evidence.status).toBe('passed');
-  });
 });
 
 describe('runVerificationMatrix / allRequiredCommandsPass', () => {
@@ -197,21 +135,5 @@ describe('runVerificationMatrix / allRequiredCommandsPass', () => {
   it('reports all-pass false for an empty command matrix (nothing was actually verified)', async () => {
     const results = await runVerificationMatrix([], baseContext, store);
     expect(allRequiredCommandsPass(results)).toBe(false);
-  });
-
-  it('records one started/ended recorder row per command in order across the matrix', async () => {
-    const { recorder, rows } = makeSpyRecorder();
-    const commands = [
-      makeCommand({ id: 'c1', command: 'echo first' }),
-      makeCommand({ id: 'c2', command: 'node -e "process.exit(1)"', purpose: 'lint' }),
-    ];
-    await runVerificationMatrix(commands, baseContext, store, recorder);
-    expect(rows).toHaveLength(2);
-    const [first, second] = rows;
-    expect(first?.command).toBe('echo first');
-    expect(first?.exitCode).toBe(0);
-    expect(second?.command).toBe('node -e "process.exit(1)"');
-    expect(second?.exitCode).toBe(1);
-    expect(rows.every((r) => r.endedAt)).toBe(true);
   });
 });
