@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { WorkbenchDatabase } from '@awb/database';
+import type { WorkbenchDatabase, TaskSummaryContext } from '@awb/database';
 import { upsertTask, persistRunStateSnapshot, insertSemanticEvent, persistPhaseObservability } from '@awb/database';
 import { RunStateSnapshotSchema, SemanticEventSchema, PhaseObservabilitySchema } from '@awb/domain';
 import { getRepository, refreshRepositorySnapshot, persistValidatedStartCommand } from '@awb/repository';
@@ -64,11 +64,24 @@ export function registerInternalRoutes(
     }
     try {
       // The task row must exist before its lifecycle children (FK); upsert it from the snapshot.
-      upsertTask(database.db, {
-        id: parsed.data.taskId,
-        repositoryId: parsed.data.repositoryId,
-        prompt: parsed.data.prompt ?? '',
-      });
+      // The run-state snapshot is authoritative for the current gate state, so push it into the
+      // projection on every write: a present `pendingHumanGate` sets the reason, its absence clears it
+      // (gate resolved). This keeps task_summary fresh once the bare `tasks` row stops moving at a
+      // human gate. `candidateSha` is only forwarded when the snapshot carries it (undefined preserves
+      // the prior value — a run-state write without a candidate must not wipe the last known SHA).
+      const summaryContext: TaskSummaryContext = {
+        pendingGateReason: parsed.data.pendingHumanGate ?? null,
+      };
+      if (parsed.data.candidateSha !== undefined) summaryContext.candidateSha = parsed.data.candidateSha;
+      upsertTask(
+        database.db,
+        {
+          id: parsed.data.taskId,
+          repositoryId: parsed.data.repositoryId,
+          prompt: parsed.data.prompt ?? '',
+        },
+        summaryContext,
+      );
       persistRunStateSnapshot(database.db, parsed.data);
       return { ok: true };
     } catch (err) {

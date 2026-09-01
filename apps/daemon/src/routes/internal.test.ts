@@ -7,6 +7,7 @@ import {
   createDatabase,
   repositories,
   getTask,
+  getTaskSummary,
   getContract,
   listEvidenceByTask,
   listArtifactsByTask,
@@ -130,6 +131,38 @@ describe('internal worker→daemon routes', () => {
     expect(getContract(database.db, 'contract-1')?.objective).toBe('obj');
     expect(listEvidenceByTask(database.db, TASK_ID)).toHaveLength(1);
     expect(listArtifactsByTask(database.db, TASK_ID)).toHaveLength(1);
+  });
+
+  it('PUT /internal/run-state pushes gate + candidate context into task_summary', async () => {
+    const snapshot: RunStateSnapshot = {
+      taskId: TASK_ID,
+      repositoryId: REPO_ID,
+      prompt: 'do the thing',
+      candidateSha: 'a'.repeat(40),
+      pendingHumanGate: 'task-contract-approval',
+      verificationEvidence: [],
+      qaEvidence: [],
+      reviewFindings: [],
+      artifacts: [],
+    };
+
+    const res = await app.inject({ method: 'PUT', url: `/internal/run-state/${TASK_ID}`, payload: snapshot });
+    expect(res.statusCode).toBe(200);
+
+    const summary = getTaskSummary(database.db, TASK_ID);
+    expect(summary).toMatchObject({
+      candidateSha: 'a'.repeat(40),
+      pendingGateReason: 'task-contract-approval',
+    });
+
+    // A later run-state write with the gate resolved clears the pending reason.
+    const cleared = await app.inject({
+      method: 'PUT',
+      url: `/internal/run-state/${TASK_ID}`,
+      payload: { ...snapshot, pendingHumanGate: undefined },
+    });
+    expect(cleared.statusCode).toBe(200);
+    expect(getTaskSummary(database.db, TASK_ID)?.pendingGateReason).toBeNull();
   });
 
   it('PUT /internal/run-state rejects a mismatched taskId', async () => {

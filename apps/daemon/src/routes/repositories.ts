@@ -8,6 +8,7 @@ import {
   getLatestSnapshot,
 } from '@awb/repository';
 import type { WorkbenchDatabase } from '@awb/database';
+import { getRepositoryCommands, listTaskSummaries } from '@awb/database';
 import { RepositoryDiscoveryWorkflow, discoveryWorkflowIdFor } from '@awb/workflow';
 import { loadConfig, resolveLayout } from '@awb/config';
 import { getTemporalClient } from '../temporal-client.js';
@@ -47,7 +48,22 @@ export function registerRepositoryRoutes(app: FastifyInstance, database: Workben
       return { error: `No repository with id ${request.params.id}` };
     }
     const latestSnapshot = await getLatestSnapshot(database.db, request.params.id);
-    return { repository, latestSnapshot };
+    // Surface the discovered/validated commands and the repo-scoped tasks (from the durable
+    // projection) plus a scoped token-usage rollup, so the repo detail page reads one route.
+    const commands = getRepositoryCommands(database.db, request.params.id);
+    const tasks = listTaskSummaries(database.db, { repositoryId: request.params.id });
+    const scopedTokenUsage = tasks.reduce(
+      (acc, t) => {
+        acc.inputTokens += t.inputTokens;
+        acc.outputTokens += t.outputTokens;
+        if (t.costUsd != null) {
+          acc.costUsd = (acc.costUsd ?? 0) + t.costUsd;
+        }
+        return acc;
+      },
+      { inputTokens: 0, outputTokens: 0, costUsd: null as number | null },
+    );
+    return { repository, latestSnapshot, commands, tasks, scopedTokenUsage };
   });
 
   app.post<{ Params: { id: string } }>('/api/repositories/:id/refresh', async (request, reply) => {

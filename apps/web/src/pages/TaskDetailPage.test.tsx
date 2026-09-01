@@ -1,92 +1,141 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SemanticEvent } from '../api/events.js';
-import type { TaskStateResponse, TaskWorkflowState } from '../api/tasks.js';
-
-vi.mock('react-router-dom', () => ({
-  useParams: () => ({ repositoryId: 'repo-1', taskId: 'task-1' }),
-  Link: ({ children }: { children: React.ReactNode }) => children,
-}));
-
-const getStateMock = vi.fn();
-vi.mock('../api/tasks.js', () => ({
-  tasksApi: {
-    getState: (...args: unknown[]) => getStateMock(...args),
-    cancel: vi.fn(),
-  },
-}));
-
-// Drive the timeline: TaskDetailPage reads `events` from useEventStream; we control what it returns.
-let streamedEvents: SemanticEvent[] = [];
-vi.mock('../hooks/useEventStream.js', () => ({
-  useEventStream: () => ({ events: streamedEvents, status: 'connected' }),
-}));
-
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type {
+  ExecutionTreeResponse,
+  TaskMediaArtifact,
+  TaskStateResponse,
+  TaskSummary,
+} from '../api/tasks.js';
 import { TaskDetailPage } from './TaskDetailPage.js';
 
-function baseState(overrides: Partial<TaskWorkflowState> = {}): TaskWorkflowState {
-  return {
+const getState = vi.fn();
+const executionTree = vi.fn();
+const listMedia = vi.fn();
+const list = vi.fn();
+
+vi.mock('../api/tasks.js', () => ({
+  tasksApi: {
+    getState: (...a: unknown[]) => getState(...a),
+    executionTree: (...a: unknown[]) => executionTree(...a),
+    listMedia: (...a: unknown[]) => listMedia(...a),
+    list: (...a: unknown[]) => list(...a),
+    cancel: vi.fn(),
+    create: vi.fn(),
+  },
+  artifactContentUrl: (id: string) => `/api/artifacts/${id}/content`,
+}));
+
+vi.mock('../hooks/useEventStream.js', () => ({
+  useEventStream: () => ({ events: [], status: 'connected' }),
+}));
+
+const stateResponse: TaskStateResponse = {
+  state: {
     taskId: 'task-1',
     repositoryId: 'repo-1',
-    phase: 'plan',
+    phase: 'qa',
     condition: 'running',
     deliveryState: 'none',
-    attemptNumber: 1,
-    latestCandidateEvidenceIds: [],
+    attemptNumber: 2,
+    size: 'M',
+    phaseSet: ['specify', 'plan', 'implement', 'qa'],
+    latestCandidateEvidenceIds: ['ev-1'],
     openFindingIds: [],
-    tokenUsageTotal: { inputTokens: 0, outputTokens: 0 },
-    runtimeMsByPhase: {},
-    ...overrides,
-  };
-}
+    tokenUsageTotal: { inputTokens: 1200, outputTokens: 800 },
+    runtimeMsByPhase: { implement: 5000 },
+  },
+  openFindings: [],
+  pendingHumanGate: undefined,
+};
 
-function stateResponse(state: TaskWorkflowState): TaskStateResponse {
-  return { state, openFindings: [], pendingHumanGate: undefined, maintainabilityFindings: [] };
-}
+const tree: ExecutionTreeResponse = {
+  taskId: 'task-1',
+  phaseAttempts: [
+    {
+      id: 'pa-1',
+      phase: 'implement',
+      attemptNumber: 1,
+      retryOf: null,
+      startedAt: '2026-08-17T00:00:00.000Z',
+      endedAt: '2026-08-17T00:01:00.000Z',
+      outcome: 'succeeded',
+      sessions: [],
+    },
+  ],
+};
 
-function ev(sequence: number): SemanticEvent {
-  return {
-    id: `e${sequence}`,
-    runId: 'task-1-run',
-    sequence,
-    occurredAt: '2026-08-04T00:00:00.000Z',
-    phase: 'plan',
-    phaseAttemptId: 'task-1-plan-1',
-    producer: 'planner',
-    type: 'phase-started',
-    summary: 'x',
-  };
-}
+const media: TaskMediaArtifact[] = [
+  { id: 'art-1', kind: 'qa-video', mediaType: 'video/webm', byteSize: 1000 },
+];
 
-beforeEach(() => {
-  streamedEvents = [];
-  getStateMock.mockReset();
-});
+const summary: TaskSummary = {
+  taskId: 'task-1',
+  repositoryId: 'repo-1',
+  repositoryName: 'demo',
+  workflowId: 'wf-1',
+  prompt: 'Add a widget',
+  phase: 'qa',
+  condition: 'running',
+  deliveryState: 'none',
+  size: 'M',
+  createdAt: 'x',
+  updatedAt: 'x',
+  derivedStatus: 'running',
+  attemptCount: 2,
+  openFindingCount: 0,
+  inputTokens: 1200,
+  outputTokens: 800,
+  costUsd: null,
+  pendingGateReason: null,
+  candidateSha: 'abc123def456',
+  pullRequestUrl: null,
+  title: 'Add a widget',
+  retryOfTaskId: null,
+  rootTaskId: null,
+  indexedAt: 'x',
+};
 
 afterEach(() => {
-  vi.useRealTimers();
+  vi.clearAllMocks();
 });
 
-describe('TaskDetailPage live status header', () => {
-  it('re-queries getState within the debounce when a new event arrives, and the badge updates', async () => {
-    getStateMock.mockResolvedValueOnce(stateResponse(baseState({ condition: 'running' })));
+function renderPage(initial = '/tasks/repo-1/task-1') {
+  getState.mockResolvedValue(stateResponse);
+  executionTree.mockResolvedValue(tree);
+  listMedia.mockResolvedValue(media);
+  list.mockResolvedValue([summary]);
+  return render(
+    <MemoryRouter initialEntries={[initial]}>
+      <Routes>
+        <Route path="/tasks/:repositoryId/:taskId" element={<TaskDetailPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
 
-    const { rerender } = render(<TaskDetailPage />);
+describe('TaskDetailPage', () => {
+  it('uses "Phase attempt" language distinct from "Retry as new task"', async () => {
+    renderPage();
+    expect(await screen.findByText(/Phase attempt 1/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry as new task' })).toBeInTheDocument();
+  });
 
-    // Initial poll load.
-    await waitFor(() => expect(screen.getByText('running')).toBeInTheDocument());
-    const callsAfterMount = getStateMock.mock.calls.length;
+  it('renders the Verification tab absorbing evidence and QA media', async () => {
+    const user = userEvent.setup();
+    const { container } = renderPage();
+    await screen.findByText(/Phase attempt 1/);
 
-    // A new streamed event arrives; the next getState reflects the advanced condition.
-    getStateMock.mockResolvedValueOnce(stateResponse(baseState({ condition: 'completed' })));
-    vi.useFakeTimers();
-    streamedEvents = [ev(0)];
-    rerender(<TaskDetailPage />);
+    await user.click(screen.getByRole('button', { name: 'Verification' }));
 
-    act(() => vi.advanceTimersByTime(300));
-    vi.useRealTimers();
+    await waitFor(() => expect(screen.getByText('ev-1')).toBeInTheDocument());
+    expect(screen.getByText('QA media')).toBeInTheDocument();
+    expect(container.querySelector('video')).not.toBeNull();
+  });
 
-    await waitFor(() => expect(getStateMock.mock.calls.length).toBe(callsAfterMount + 1));
-    await waitFor(() => expect(screen.getByText('completed')).toBeInTheDocument());
+  it('deep-links to the Verification tab via ?tab=verification', async () => {
+    renderPage('/tasks/repo-1/task-1?tab=verification');
+    await waitFor(() => expect(screen.getByText('ev-1')).toBeInTheDocument());
   });
 });
