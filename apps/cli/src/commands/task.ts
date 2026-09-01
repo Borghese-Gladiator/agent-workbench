@@ -28,6 +28,24 @@ interface TaskShowResponse {
   pendingHumanGate?: { reason: string } | null;
 }
 
+/**
+ * Cheap, model-free readable title for a task, derived from its prompt (TASK-103). Collapses
+ * whitespace, takes the first sentence (up to a `.`/`!`/`?` followed by a space or end), drops a lone
+ * trailing sentence terminator, and truncates to `maxLength` with an ellipsis. No DB change: this is
+ * computed client-side from the stored prompt so the CLI list/show stay scannable.
+ */
+export function deriveTaskTitle(prompt: string, maxLength = 72): string {
+  const collapsed = prompt.replace(/\s+/g, ' ').trim();
+  if (collapsed.length === 0) return '(no prompt)';
+  const match = collapsed.match(/^.*?[.!?](?:\s|$)/);
+  let title = (match ? match[0] : collapsed).trim();
+  title = title.replace(/[.!?]+$/, '').trim();
+  if (title.length > maxLength) {
+    title = `${title.slice(0, maxLength - 1).trimEnd()}…`;
+  }
+  return title === '' ? '(no prompt)' : title;
+}
+
 const TERMINAL_CONDITIONS = new Set(['completed', 'failed', 'cancelled']);
 // Conditions where the task will not progress without a human/external action — `wait` should
 // return control to the caller rather than block forever.
@@ -196,7 +214,8 @@ export function registerTaskCommands(program: Command): void {
           printInfo('No matching tasks. Use `awb task create`.');
           return;
         }
-        for (const t of tasks) printResult(`${t.taskId}  ${t.repositoryId}  ${t.createdAt}  ${t.prompt}`);
+        for (const t of tasks)
+          printResult(`${t.taskId}  ${t.repositoryId}  ${t.createdAt}  ${deriveTaskTitle(t.prompt)}`);
       } catch (err) {
         handleError(err);
       }
@@ -210,7 +229,22 @@ export function registerTaskCommands(program: Command): void {
         const repoId = resolveRepositoryId(repositoryId);
         const tId = resolveTaskId(taskId);
         const result = await daemonClient.get<TaskShowResponse>(`/api/tasks/${repoId}/${tId}`);
-        emitJson(result);
+        if (outputOptions().json) {
+          emitJson(result);
+          return;
+        }
+        // Human-readable: a derived title (from the prompt) above the live state. The prompt is not on
+        // the state response, so look it up from the task list; fall back gracefully if unavailable.
+        const list = await daemonClient.get<TaskListItem[]>('/api/tasks').catch(() => [] as TaskListItem[]);
+        const prompt = list.find((t) => t.taskId === tId)?.prompt;
+        if (prompt !== undefined) printResult(deriveTaskTitle(prompt));
+        printResult(`${tId}  ${repoId}`);
+        printResult(`${result.state.phase} — ${result.state.condition} (delivery: ${result.state.deliveryState})`);
+        if (result.pendingHumanGate) printInfo(`awaiting human: ${result.pendingHumanGate.reason}`);
+        if (result.openFindings.length > 0) {
+          printInfo(`open findings: ${result.openFindings.length}`);
+          for (const f of result.openFindings) printInfo(`  - ${f}`);
+        }
       } catch (err) {
         handleError(err);
       }

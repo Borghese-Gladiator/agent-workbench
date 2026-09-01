@@ -200,6 +200,43 @@ describe('OpenCodeAgentAdapter', () => {
     expect(args[args.length - 1]).toContain('do the thing');
   });
 
+  it('passes --agent <persona> when a persona is set, else keeps the SHA1 capability-hash agent', async () => {
+    // With a persona: --agent is the exact persona name, not the awb-<hash> agent.
+    const withPersona = fakeRunner(ocLines);
+    await drive(new OpenCodeAgentAdapter({ runCliStreaming: withPersona.run, persona: 'senior-reviewer', writeAgent }));
+    const pArgs = withPersona.invocations[0]!.args;
+    expect(pArgs[pArgs.indexOf('--agent') + 1]).toBe('senior-reviewer');
+
+    // Without a persona: the SHA1 capability-hash agent is retained.
+    const noPersona = fakeRunner(ocLines);
+    await drive(new OpenCodeAgentAdapter({ runCliStreaming: noPersona.run, writeAgent }));
+    const nArgs = noPersona.invocations[0]!.args;
+    expect(nArgs[nArgs.indexOf('--agent') + 1]).toMatch(/^awb-[0-9a-f]{10}$/);
+  });
+
+  it('materializes a persona file layering a role prompt over the capability permission block', async () => {
+    const captured = new Map<string, string>();
+    const capture = (name: string, contents: string) => captured.set(name, contents);
+    const { run } = fakeRunner(ocLines);
+    const adapter = new OpenCodeAgentAdapter({
+      runCliStreaming: run,
+      persona: 'grill-master',
+      rolePrompt: 'You are an adversarial interrogator.',
+      writeAgent: capture,
+    });
+    const session = await adapter.createSession({
+      role: 'adversarial-reviewer',
+      taskId: 't',
+      cwd: '/tmp/w',
+      contextPayload: {},
+      allowedTools: ['repository.read'],
+    });
+    await adapter.execute(session, { instruction: 'grill' }, () => {}, new AbortController().signal);
+    // The persona file carries the role prompt AND still enforces the capability boundary (edit denied).
+    expect(captured.get('grill-master')).toContain('You are an adversarial interrogator.');
+    expect(captured.get('grill-master')).toContain('edit: deny');
+  });
+
   it('materializes a capability-scoped agent: read-only role denies edit/bash, builder allows them', async () => {
     const captured = new Map<string, string>();
     const capture = (name: string, contents: string) => captured.set(name, contents);

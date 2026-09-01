@@ -1,0 +1,11 @@
+# Keep the build context small and force a clean in-image install/build.
+node_modules
+**/node_modules
+dist
+**/dist
+data
+**/*.tsbuildinfo
+.git
+archive
+LOCAL_worktrees
+*.log

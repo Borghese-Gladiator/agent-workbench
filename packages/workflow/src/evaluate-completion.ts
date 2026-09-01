@@ -140,6 +140,9 @@ function evaluateExercise(ctx: CompletionContext['exercise']): CompletionDecisio
     );
   }
   if (!ctx.structuredAssertionsPass) missing.push('structured assertions do not pass');
+  if (ctx.scenarioStrengthSufficient === false) {
+    missing.push('the QA scenario is all-liveness (weak) and cannot cover a behavioral claim');
+  }
   if (!ctx.requiredRecordingExists) missing.push('required video or terminal recording does not exist');
   if (!ctx.browserScenariosHaveTraces) missing.push('a browser scenario is missing a Playwright trace');
   if (!ctx.evidenceTiedToCandidateSha) missing.push('QA evidence is not tied to the exact candidate SHA');

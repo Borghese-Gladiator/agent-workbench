@@ -77,10 +77,32 @@ describe('runtime-profile registry', () => {
     expect(pi.modelForPhase('challenge', { model: 'ollama/custom' })).toBe('ollama/custom');
   });
 
-  it('one-model runtimes return the configured model (or undefined) for every phase', () => {
+  it('frontier runtimes route by phase tier when no project model is set (drives >=2 runtimes)', () => {
+    // A configured model overrides the table for every phase (operator override).
     for (const runtime of ['claude', 'codex', 'opencode'] as const) {
-      expect(runtimeProfile(runtime).modelForPhase('challenge', {})).toBeUndefined();
       expect(runtimeProfile(runtime).modelForPhase('implement', { model: 'm' })).toBe('m');
     }
+    // Unset → the phase's tier picks the model: heavy phases get a distinct (stronger) model than
+    // light phases, and both are defined. Asserted across all three frontier runtimes.
+    for (const runtime of ['claude', 'codex', 'opencode'] as const) {
+      const heavy = runtimeProfile(runtime).modelForPhase('implement', {});
+      const light = runtimeProfile(runtime).modelForPhase('verify', {});
+      expect(heavy).toBeTruthy();
+      expect(light).toBeTruthy();
+      expect(heavy).not.toBe(light);
+      // Same tier → same model (plan is also heavy).
+      expect(runtimeProfile(runtime).modelForPhase('plan', {})).toBe(heavy);
+    }
+  });
+
+  it('providerBaseUrl on RuntimeConfig threads to the CLI adapters that honor it (not the Claude SDK)', () => {
+    const url = 'https://proxy.internal/v1';
+    const codex = runtimeProfile('codex').createAdapter({ providerBaseUrl: url }) as CodexAgentAdapter;
+    const opencode = runtimeProfile('opencode').createAdapter({ providerBaseUrl: url }) as OpenCodeAgentAdapter;
+    expect(codex.providerBaseUrl).toBe(url);
+    expect(opencode.providerBaseUrl).toBe(url);
+    // Claude ignores it — the SDK base URL is env-only (ANTHROPIC_BASE_URL), no adapter field.
+    const claude = runtimeProfile('claude').createAdapter({ providerBaseUrl: url });
+    expect((claude as unknown as { providerBaseUrl?: string }).providerBaseUrl).toBeUndefined();
   });
 });

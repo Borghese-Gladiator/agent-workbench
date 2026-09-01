@@ -1,0 +1,125 @@
+# Agentic Workbench — full local stack in containers.
+#
+#   docker compose config          # validate + print the resolved config
+#   docker compose up --build      # otel + temporal + worker + daemon + web
+#   docker compose down            # stop (the ./data bind mount persists SQLite)
+#
+# The service set MIRRORS `RUNTIME_SERVICES` in apps/cli/src/services.ts
+# (`otel` → `temporal` → `worker` → `daemon`) plus the optional `web` UI. Start
+# order is expressed with `depends_on` so the worker + daemon see Temporal and
+# the OTLP endpoint before they boot, exactly as `awb up` sequences them.
+#
+# Not archive/ v4: that image ran a single `tsx` daemon+web with no Temporal and
+# no OTel collector as compose services. Here worker + daemon run the COMPILED
+# `dist/` (`node …/dist/index.js`, the `pinned` mode), Temporal runs its own
+# SQLite dev server, and the OTel collector is a first-class service.
+#
+# No k8s, no postgres, no redis: Temporal uses its embedded SQLite dev server
+# (`server start-dev --db-filename`), the same store `awb up` uses.
+#
+# ── The daemon's loopback invariant ──────────────────────────────────────────
+# apps/daemon/src/server.ts binds 127.0.0.1 ONLY (it owns GitHub creds + the DB),
+# so it is unreachable across the compose network and its API port is NOT
+# host-published. The `web` service therefore JOINS the daemon's network
+# namespace (`network_mode: service:daemon`) so its Vite `/api` proxy reaches the
+# daemon at 127.0.0.1:4417. Only the web UI port (5317) is published to the host.
+
+services:
+  # OTel collector FIRST — worker + daemon export spans from their first turn.
+  # grafana/otel-lgtm all-in-one: OTLP/HTTP receiver (4318) + Grafana UI (3000).
+  # The gRPC receiver (4317) is intentionally not published (services.ts does the
+  # same) so it never collides with an unrelated collector on the host.
+  otel:
+    image: grafana/otel-lgtm:latest
+    container_name: awb-otel-lgtm
+    ports:
+      - "${AWB_OTEL_OTLP_PORT:-4318}:4318"
+      - "${AWB_OTEL_UI_PORT:-3000}:3000"
+
+  # Local Temporal, SQLite-backed — the `temporal server start-dev` dev server,
+  # the same one apps/cli/src/services.ts spawns. No postgres/elasticsearch.
+  # `--ip 0.0.0.0` binds the frontend on all interfaces so the worker + daemon
+  # reach it by the `temporal` service name; the bundled Web UI is disabled.
+  temporal:
+    image: temporalio/temporal:latest
+    command:
+      - server
+      - start-dev
+      - --db-filename
+      - /data/temporal.sqlite
+      - --port
+      - "7233"
+      - --ip
+      - 0.0.0.0
+      - --ui-port
+      - "0"
+    ports:
+      - "${AWB_TEMPORAL_PORT:-7233}:7233"
+    volumes:
+      - ./data:/data
+
+  # Temporal worker — the compiled worker dist. Connects to Temporal by service
+  # name and exports OTLP to the collector.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agentic-workbench
+    command: ["node", "workers/temporal-worker/dist/index.js"]
+    environment:
+      AWB_DATA_DIR: /app/data
+      AWB_TEMPORAL_ADDRESS: temporal:7233
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - otel
+      - temporal
+
+  # Daemon (Fastify API) — compiled daemon dist. Binds 127.0.0.1 ONLY, so its
+  # port is not host-published; the web service reaches it via the shared
+  # namespace. Its healthcheck runs inside the container against loopback.
+  daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: agentic-workbench
+    command: ["node", "apps/daemon/dist/index.js"]
+    environment:
+      AWB_DAEMON_PORT: "4417"
+      AWB_DATA_DIR: /app/data
+      AWB_TEMPORAL_ADDRESS: temporal:7233
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel:4318
+    # Publish the web UI port HERE because `web` joins this namespace below.
+    ports:
+      - "${AWB_UI_PORT:-5317}:5317"
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - otel
+      - temporal
+      - worker
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4417/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  # Web UI (Vite dev server). Shares the daemon's network namespace so the
+  # `/api` proxy target (127.0.0.1:4417) resolves to the loopback-bound daemon.
+  # Because it shares the namespace it declares no ports/networks of its own —
+  # the daemon service publishes 5317.
+  web:
+    image: agentic-workbench
+    command: ["pnpm", "--filter", "@awb/web", "dev", "--", "--host", "0.0.0.0", "--port", "5317"]
+    environment:
+      AWB_DAEMON_URL: http://127.0.0.1:4417
+    network_mode: "service:daemon"
+    depends_on:
+      daemon:
+        condition: service_healthy

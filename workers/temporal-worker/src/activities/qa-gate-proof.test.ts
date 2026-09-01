@@ -9,7 +9,12 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { ArtifactStore, InMemoryArtifactMetadataStore } from '@awb/evidence';
-import { runBrowserQa, evaluateBehavioralClaimCoverage, type QaEvidenceContext } from '@awb/qa';
+import {
+  runBrowserQa,
+  evaluateBehavioralClaimCoverage,
+  scenarioStrength,
+  type QaEvidenceContext,
+} from '@awb/qa';
 import { classifyExerciseBlock, evaluatePhaseCompletion } from '@awb/workflow';
 
 // BROKEN: clicking "Join" does NOT perform the behavioral state transition — the room panel stays
@@ -63,6 +68,7 @@ function buildExerciseContext(qaResult: Awaited<ReturnType<typeof runBrowserQa>>
       everyBehavioralClaimCovered: coverage.everyBehavioralClaimCovered,
       behavioralClaimsMissingStrongAssertion: coverage.missing,
       structuredAssertionsPass: qaResult.assertions.every((a) => a.passed),
+      scenarioStrengthSufficient: scenarioStrength(qaResult.assertions) === 'strong',
       requiredRecordingExists: qaResult.artifacts.length > 0,
       browserScenariosHaveTraces: qaResult.artifacts.some((a) => a.kind === 'browser-trace'),
       evidenceTiedToCandidateSha: qaResult.evidence.candidateSha === candidateSha,

@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
+import type { Duplex } from 'node:stream';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,17 +31,63 @@ const CONSOLE_ERROR_HTML = `<!doctype html>
   </body>
 </html>`;
 
+// A fixture whose "connect" button opens a NEW WebSocket on every click (the socket-leak bug):
+// no idempotency guard, so a repeat click opens a duplicate connection. The socket connects back
+// to this test's own http server (which completes a real RFC6455 handshake on upgrade) so the
+// connection actually opens and closes cleanly instead of hanging on an unreachable port.
+const SOCKET_LEAK_HTML = `<!doctype html>
+<html>
+  <head><title>QA Fixture (socket leak)</title></head>
+  <body>
+    <button id="connect" onclick="new WebSocket('ws://' + location.host + '/leak')">Connect</button>
+  </body>
+</html>`;
+
+// A fixture whose "connect" button opens a WebSocket only once, then guards against re-opening —
+// the correct, idempotent behaviour.
+const SOCKET_IDEMPOTENT_HTML = `<!doctype html>
+<html>
+  <head><title>QA Fixture (socket idempotent)</title></head>
+  <body>
+    <button id="connect" onclick="if(!window.__ws){window.__ws=new WebSocket('ws://' + location.host + '/ok');}">Connect</button>
+  </body>
+</html>`;
+
+// Minimal RFC6455 server handshake so the browser's WebSocket actually opens (and can close
+// cleanly) — avoids the hang a connection to a dead port causes during context/video teardown.
+const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+function acceptWebSocket(socket: Duplex, key: string): void {
+  const accept = createHash('sha1').update(key + WS_GUID).digest('base64');
+  socket.write(
+    'HTTP/1.1 101 Switching Protocols\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Connection: Upgrade\r\n' +
+      `Sec-WebSocket-Accept: ${accept}\r\n\r\n`,
+  );
+}
+
 describe('runBrowserQa', () => {
   let root: string;
   let store: ArtifactStore;
   let server: Server;
   let baseUrl: string;
+  const wsSockets = new Set<Duplex>();
 
   beforeAll(async () => {
     server = createServer((req, res) => {
       if (req.url === '/console-error') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(CONSOLE_ERROR_HTML);
+        return;
+      }
+      if (req.url === '/socket-leak') {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(SOCKET_LEAK_HTML);
+        return;
+      }
+      if (req.url === '/socket-idempotent') {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(SOCKET_IDEMPOTENT_HTML);
         return;
       }
       if (req.url !== '/' && req.url !== '/index.html') {
@@ -50,6 +98,16 @@ describe('runBrowserQa', () => {
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(FIXTURE_HTML);
     });
+    // Complete a real WebSocket handshake for the socket fixtures so the browser's connection opens
+    // and closes cleanly (an un-upgraded/dead socket would hang context teardown).
+    server.on('upgrade', (req, socket) => {
+      const key = req.headers['sec-websocket-key'];
+      if (typeof key === 'string') {
+        acceptWebSocket(socket, key);
+        wsSockets.add(socket);
+        socket.on('close', () => wsSockets.delete(socket));
+      } else socket.destroy();
+    });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const address = server.address();
     if (address === null || typeof address === 'string') throw new Error('expected address info');
@@ -57,6 +115,8 @@ describe('runBrowserQa', () => {
   });
 
   afterAll(async () => {
+    for (const socket of wsSockets) socket.destroy();
+    wsSockets.clear();
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   });
 
@@ -216,5 +276,54 @@ describe('runBrowserQa', () => {
       expect(result.evidence.status).toBe('failed');
     },
     20_000,
+  );
+
+  it(
+    'fails no-duplicate-socket when a repeat click on a socket-opening control opens a second socket',
+    async () => {
+      const result = await runBrowserQa(
+        {
+          baseUrl,
+          steps: [
+            { kind: 'navigate', url: '/socket-leak' },
+            { kind: 'expectNoDuplicateSocket', selector: '#connect', settleMs: 300 },
+          ],
+        },
+        makeQaEvidenceContext(),
+        store,
+      );
+
+      const socketAssertion = result.assertions.find((a) => a.name.startsWith('no-duplicate-socket:'));
+      expect(socketAssertion?.passed).toBe(false);
+      expect(result.socketOpensByInteraction).toEqual([1]);
+      expect(result.evidence.status).toBe('failed');
+    },
+    // Two clicks + two settle waits + full video/trace teardown, so a larger budget than the
+    // single-interaction sibling tests.
+    30_000,
+  );
+
+  it(
+    'passes no-duplicate-socket when the control guards against re-opening the WebSocket',
+    async () => {
+      const result = await runBrowserQa(
+        {
+          baseUrl,
+          steps: [
+            { kind: 'navigate', url: '/socket-idempotent' },
+            { kind: 'expectNoDuplicateSocket', selector: '#connect', settleMs: 300 },
+          ],
+        },
+        makeQaEvidenceContext(),
+        store,
+      );
+
+      const socketAssertion = result.assertions.find((a) => a.name.startsWith('no-duplicate-socket:'));
+      expect(socketAssertion?.passed).toBe(true);
+      expect(result.socketOpensByInteraction).toEqual([0]);
+      // A state-transition assertion — the scenario is strong.
+      expect(scenarioStrength(result.assertions)).toBe('strong');
+    },
+    30_000,
   );
 });

@@ -16,6 +16,11 @@ export interface CodexAdapterOptions {
   /** Model id to run on. Omit to use Codex's own default. */
   model?: string;
   stallTimeoutMs?: number;
+  /**
+   * A credential-free provider base URL (a self-hosted/proxy endpoint). Threaded from
+   * {@link RuntimeConfig.providerBaseUrl}; never a credential. Exposed for the agent-factory seam.
+   */
+  providerBaseUrl?: string;
 }
 
 /**
@@ -27,9 +32,12 @@ export interface CodexAdapterOptions {
 export class CodexAgentAdapter extends CliStreamAdapter {
   readonly id = 'codex';
   protected readonly defaultBin = 'codex';
+  /** Exposed for the agent-factory seam / tests; Codex reads its base URL from its provider config. */
+  readonly providerBaseUrl?: string;
 
   constructor(opts: CodexAdapterOptions = {}) {
     super(opts);
+    this.providerBaseUrl = opts.providerBaseUrl;
   }
 
   protected buildArgv(ctx: CliArgvContext): string[] {
