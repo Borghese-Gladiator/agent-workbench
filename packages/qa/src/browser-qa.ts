@@ -24,9 +24,16 @@ export type BrowserQaStep =
   // State-transition / value-match steps that observe real behaviour rather than
   // "the action did not throw". `expectVisible`/`expectHidden` assert a post-action DOM state;
   // `expectText` compares an element's text to an expected value.
-  | { kind: 'expectVisible'; selector: string; timeoutMs?: number }
+  // `livenessOnly` downgrades an `expectVisible` to a `liveness` assertion — used for the landmark
+  // "the page rendered *some* structural element" check, which proves the page is alive but is NOT
+  // a behavioral state transition and so must not be able to cover a behavior claim on its own.
+  | { kind: 'expectVisible'; selector: string; timeoutMs?: number; livenessOnly?: boolean }
   | { kind: 'expectHidden'; selector: string; timeoutMs?: number }
-  | { kind: 'expectText'; selector: string; equals: string };
+  | { kind: 'expectText'; selector: string; equals: string }
+  // Repeatable-click socket-idempotency step: click a socket-opening control twice and assert the
+  // second click did NOT open a second WebSocket. `settleMs` is how long we wait after each click
+  // for a socket to open (the `page.on('websocket')` listener fires asynchronously).
+  | { kind: 'expectNoDuplicateSocket'; selector: string; settleMs?: number };
 
 export interface BrowserQaScenario {
   baseUrl: string;
@@ -39,13 +46,19 @@ export interface BrowserQaResult {
   consoleErrors: string[];
   failedRequests: string[];
   /**
-   * Convenience — whether any frontend-observable error (an unhandled console error or a
-   * failed/4xx+ network request) should block the gate. We do NOT inspect the transport (e.g.
-   * WebSocket) directly: QA validates the frontend's observable behaviour and lets the app make
-   * whatever connections it makes. A transport-level bug (e.g. a duplicate socket) is caught via
-   * its observable symptom — a console/network error, or a failing state/value assertion.
+   * Convenience — whether any frontend-observable console/network error (an unhandled console
+   * error or a failed/4xx+ network request) should block the gate. Scoped to the console/network
+   * surface; transport-level duplicate-socket defects are detected separately via a real
+   * `page.on('websocket')` listener and surface as a failing `no-duplicate-socket` assertion
+   * (see `socketOpensByInteraction`), NOT through this flag.
    */
   policyBlockingErrorsPresent: boolean;
+  /**
+   * WebSocket opens observed during each `expectNoDuplicateSocket` interaction — the count of new
+   * sockets the second click opened. A value > 0 means a socket-opening control opened a duplicate
+   * connection on repeat click, which fails the corresponding assertion.
+   */
+  socketOpensByInteraction: number[];
   evidence: ReturnType<typeof produceQaEvidence>;
 }
 
@@ -65,6 +78,11 @@ export async function runBrowserQa(
   const artifacts: ArtifactRecord[] = [];
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
+  const socketOpensByInteraction: number[] = [];
+  // Running total of WebSocket opens seen so far, incremented by the `page.on('websocket')`
+  // listener. `expectNoDuplicateSocket` snapshots this before/after the repeat click to count how
+  // many new sockets that click opened (a duplicate connection).
+  const socketTracker = { totalOpens: 0 };
   let executionErrored = false;
   let videoProduced = false;
   let traceProduced = false;
@@ -89,10 +107,25 @@ export async function runBrowserQa(
         failedRequests.push(`${res.request().method()} ${res.url()} - ${res.status()}`);
       }
     });
+    // Real transport inspection: count every WebSocket the page opens. `expectNoDuplicateSocket`
+    // reads this total before/after a repeat click to detect a duplicate connection.
+    page.on('websocket', () => {
+      socketTracker.totalOpens += 1;
+    });
 
     try {
       for (const step of scenario.steps) {
-        await executeStep(page, scenario.baseUrl, step, assertions, artifactStore, context, artifacts);
+        await executeStep(
+          page,
+          scenario.baseUrl,
+          step,
+          assertions,
+          artifactStore,
+          context,
+          artifacts,
+          socketTracker,
+          socketOpensByInteraction,
+        );
       }
     } catch (err) {
       executionErrored = true;
@@ -169,9 +202,10 @@ export async function runBrowserQa(
     await rm(join(tracePath, '..'), { recursive: true, force: true });
   }
 
-  // Surface captured console/network errors and socket leaks as real failing
-  // assertions, so a page that throws errors or opens duplicate sockets fails QA instead of
-  // silently passing.
+  // Surface captured console/network errors as real failing assertions, so a page that throws
+  // errors or fails a request fails QA instead of silently passing. Duplicate-socket detection is
+  // NOT here — it is an inline `no-duplicate-socket` assertion emitted by the
+  // `expectNoDuplicateSocket` step, driven by the real `page.on('websocket')` listener above.
   for (const err of consoleErrors) {
     assertions.push({ name: 'no-console-error', passed: false, detail: err, strength: 'state-transition' });
   }
@@ -195,6 +229,7 @@ export async function runBrowserQa(
     consoleErrors,
     failedRequests,
     policyBlockingErrorsPresent: policyBlockingErrorsPresent({ consoleErrors, failedRequests }),
+    socketOpensByInteraction,
     evidence,
   };
 }
@@ -207,6 +242,8 @@ async function executeStep(
   artifactStore: ArtifactStore,
   context: QaEvidenceContext,
   artifacts: ArtifactRecord[],
+  socketTracker: { totalOpens: number },
+  socketOpensByInteraction: number[],
 ): Promise<void> {
   switch (step.kind) {
     case 'navigate': {
@@ -246,7 +283,11 @@ async function executeStep(
       } catch {
         visible = false;
       }
-      assertions.push({ name: `expectVisible:${step.selector}`, passed: visible, strength: 'state-transition' });
+      assertions.push({
+        name: `expectVisible:${step.selector}`,
+        passed: visible,
+        strength: step.livenessOnly ? 'liveness' : 'state-transition',
+      });
       return;
     }
     case 'expectHidden': {
@@ -268,6 +309,30 @@ async function executeStep(
         passed: actual === step.equals,
         detail: `expected "${step.equals}", got "${actual}"`,
         strength: 'value-match',
+      });
+      return;
+    }
+    case 'expectNoDuplicateSocket': {
+      // Socket idempotency: click a socket-opening control twice; the second click must NOT open a
+      // second WebSocket. First click primes the connection; we then snapshot the running open count,
+      // click again, wait for any late socket to fire, and assert no new socket opened.
+      const settleMs = step.settleMs ?? 500;
+      const control = page.locator(step.selector);
+      await control.click();
+      await page.waitForTimeout(settleMs);
+      const before = socketTracker.totalOpens;
+      await control.click();
+      await page.waitForTimeout(settleMs);
+      const opensOnRepeat = socketTracker.totalOpens - before;
+      socketOpensByInteraction.push(opensOnRepeat);
+      assertions.push({
+        name: `no-duplicate-socket:${step.selector}`,
+        passed: opensOnRepeat === 0,
+        detail:
+          opensOnRepeat === 0
+            ? 'repeat click opened no additional WebSocket'
+            : `repeat click opened ${opensOnRepeat} additional WebSocket(s) — duplicate connection`,
+        strength: 'state-transition',
       });
       return;
     }

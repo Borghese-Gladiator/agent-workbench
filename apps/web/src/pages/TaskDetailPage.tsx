@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { cn } from '@/lib/utils';
 import { shortId } from '@/lib/format';
 import { tasksApi, type MaintainabilityFinding, type TaskWorkflowState } from '../api/tasks.js';
+import { useDebouncedRefresh } from '../hooks/useDebouncedRefresh.js';
 import { useEventStream } from '../hooks/useEventStream.js';
 import { GatePanel } from './GatePanel.js';
 
@@ -56,13 +57,23 @@ export function TaskDetailPage() {
     }
   }
 
-  // Workflow state (phase/gate) is polled; the semantic-event timeline streams over the WebSocket
-  // (useEventStream) with reconnect catch-up — so the timeline is live, not on the 2s poll.
+  // Workflow state (phase/gate) is polled as a fallback; the semantic-event timeline streams over the
+  // WebSocket (useEventStream) with reconnect catch-up. The 2s poll only guarantees eventual freshness.
   useEffect(() => {
     void refresh();
     const interval = setInterval(() => void refresh(), POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [repositoryId, taskId]);
+
+  // A streamed event for this task means its state advanced — re-query getState immediately (debounced)
+  // instead of waiting for the poll, so the status header is live. `events` is already scoped to this
+  // task's run by useEventStream. The 2s poll above stays as a fallback when the socket is down.
+  const scheduleRefresh = useDebouncedRefresh(() => void refresh());
+  const latestSequence = events.length > 0 ? events[events.length - 1]!.sequence : -1;
+  useEffect(() => {
+    if (latestSequence < 0) return;
+    scheduleRefresh();
+  }, [latestSequence, scheduleRefresh]);
 
   async function withBusy(fn: () => Promise<unknown>): Promise<void> {
     setBusy(true);

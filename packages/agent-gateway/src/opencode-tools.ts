@@ -102,10 +102,20 @@ export function capabilitiesToOpenCodePermission(
 /**
  * Render the ephemeral agent markdown OpenCode discovers (a `permission:` frontmatter block). Written
  * to `~/.config/opencode/agent/<name>.md` by the adapter and selected via `opencode run --agent`.
+ * An optional `rolePrompt` layers a persona's role instructions on top of the capability permission
+ * block (the body below the frontmatter), so a named persona is a role prompt over the same enforced
+ * tool boundary rather than a hand-authored, unbounded agent.
  */
-export function renderOpenCodeAgentFile(name: string, capabilities: readonly string[]): string {
+export function renderOpenCodeAgentFile(
+  name: string,
+  capabilities: readonly string[],
+  rolePrompt?: string,
+): string {
   const permission = capabilitiesToOpenCodePermission(capabilities);
   const lines = ALL_OPENCODE_TOOLS.map((tool) => `  ${tool}: ${permission[tool]}`);
+  const body = rolePrompt?.trim()
+    ? rolePrompt.trim()
+    : `Agentic-workbench role \`${name}\`. Tool access is scoped to this role's granted capabilities.`;
   return [
     '---',
     `description: AWB role ${name} (capability-scoped, generated)`,
@@ -113,7 +123,7 @@ export function renderOpenCodeAgentFile(name: string, capabilities: readonly str
     'permission:',
     ...lines,
     '---',
-    `Agentic-workbench role \`${name}\`. Tool access is scoped to this role's granted capabilities.`,
+    body,
     '',
   ].join('\n');
 }

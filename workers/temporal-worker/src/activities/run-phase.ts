@@ -8,6 +8,7 @@ import type {
   ProgramDesign,
   ValidatedCommand,
   Finding,
+  ClaimCoverage,
 } from '@awb/domain';
 import type { TaskWorkflowState } from '@awb/workflow';
 import { classifyExerciseBlock, evaluatePhaseCompletion, routeLoop, type CompletionContext } from '@awb/workflow';
@@ -66,7 +67,10 @@ import {
   runLibraryQa,
   evaluateBehavioralClaimCoverage,
   behavioralClaimsWithUntouchedTarget,
+  buildInteractiveScenarioSteps,
+  scenarioStrength,
   type QaEvidenceContext,
+  type BrowserQaStep,
 } from '@awb/qa';
 import {
   runAdversarialReview,
@@ -313,6 +317,34 @@ function slugForId(text: string): string {
       .replace(/^-+|-+$/g, '')
       .slice(0, 40) || 'slice'
   );
+}
+
+/** The framework-agnostic landmark liveness scenario, used when a plan declared no expected
+ *  per-claim assertions to derive interactive steps from. A navigate + landmark `expectVisible`
+ *  proves the page rendered real content; it is (deliberately) all-liveness/structural, so a plan
+ *  that relies on it alone scores `weak` at the exercise gate and cannot cover a behavior claim. */
+const LANDMARK_FALLBACK_STEPS: BrowserQaStep[] = [
+  { kind: 'navigate', url: '/' },
+  {
+    kind: 'expectVisible',
+    selector: 'h1, h2, header, nav, main, [role="banner"], [role="main"]',
+    livenessOnly: true,
+  },
+  { kind: 'screenshot', name: 'landing' },
+];
+
+/**
+ * Build the browser exercise scenario from the plan's per-claim expected assertions. Each claim
+ * with declared `expectedAssertions` contributes real interactive steps (click the control + a
+ * strong assertion, plus a repeated-click socket-idempotency check when applicable) via
+ * `buildInteractiveScenarioSteps`; a claim with none contributes nothing on its own. When the plan
+ * declares no expected assertions at all, we fall back to the landmark liveness scenario — which
+ * is deliberately weak, so `scenarioStrength` scores it `weak` and it cannot cover a behavior claim.
+ */
+function buildExerciseScenarioSteps(claimCoverage: ClaimCoverage[]): BrowserQaStep[] {
+  const expected = claimCoverage.flatMap((c) => c.expectedAssertions ?? []);
+  if (expected.length === 0) return LANDMARK_FALLBACK_STEPS;
+  return [{ kind: 'navigate', url: '/' }, ...buildInteractiveScenarioSteps(expected)];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1261,17 +1293,7 @@ const exerciseHandler: PhaseHandler = {
           baseUrl,
           scenario: {
             baseUrl,
-            // A navigate + screenshot are only liveness ("the page loaded"); the exercise gate
-            // requires a passing STRONG assertion (state-transition/value-match) to consider a
-            // behavioral claim covered. So we also assert the app actually rendered real, visible
-            // content: a served-but-blank/error page (root has no visible landmark/heading) fails
-            // this — a genuine QA failure that loops back to implement — while a real page passes it
-            // honestly. These are framework-agnostic (any rendered page has one of these landmarks).
-            steps: [
-              { kind: 'navigate', url: '/' },
-              { kind: 'expectVisible', selector: 'h1, h2, header, nav, main, [role="banner"], [role="main"]' },
-              { kind: 'screenshot', name: 'landing' },
-            ],
+            steps: buildExerciseScenarioSteps(runState.plan?.claimCoverage ?? []),
           },
           context,
           artifactStore: runState.artifactStore,
@@ -1414,12 +1436,20 @@ const exerciseHandler: PhaseHandler = {
       });
     }
 
+    // A behavioral claim can only be covered by a `strong` scenario (>=1 passing
+    // state-transition/value-match assertion). An all-liveness scenario (navigate + landmark only)
+    // scores `weak`, so when a behavioral claim requires coverage the gate must not clear on it.
+    // With no behavioral claim to over-claim (mock/CLI/fixtures), a weak scenario is fine.
+    const scenarioStrengthSufficient =
+      behavioralClaimIds.length === 0 || scenarioStrength(qaResult.assertions) === 'strong';
+
     const exercise = {
       everyRequiredScenarioHasResult: true,
       everyBehavioralClaimCovered: coverage.everyBehavioralClaimCovered,
       behavioralClaimsMissingStrongAssertion: coverage.missing,
       behavioralClaimsWithUntouchedTarget: untouchedTargetClaims,
       structuredAssertionsPass,
+      scenarioStrengthSufficient,
       requiredRecordingExists: qaResult.artifacts.length > 0,
       // A browser run must have produced a real trace artifact; a CLI run has no browser scenarios.
       browserScenariosHaveTraces: ranBrowserQa ? hasTraceArtifact : true,

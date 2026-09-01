@@ -5,6 +5,7 @@ import { ClaudeAgentAdapter } from './claude-adapter.js';
 import { CodexAgentAdapter } from './codex-adapter.js';
 import { PiAgentAdapter, piModelForPhase, PI_DEFAULT_MODEL } from './pi-adapter.js';
 import { OpenCodeAgentAdapter } from './opencode-adapter.js';
+import { defaultModelForPhase } from './phase-model-routing.js';
 
 /**
  * How much external-tool documentation a runtime's models can digest. Frontier hosted models
@@ -32,6 +33,14 @@ export interface RuntimeConfig {
   model?: string;
   /** Path/name of the CLI binary, when the runtime shells out to one. */
   binary?: string;
+  /**
+   * A credential-free provider base URL — a self-hosted or proxy endpoint the runtime should target
+   * instead of the vendor default. NEVER a credential (the standing runtime-config rule). Threaded to
+   * the CLI adapters that honor it (Codex/OpenCode read it from their provider config). The Claude SDK
+   * base URL is env-only (`ANTHROPIC_BASE_URL`) — there is NO adapter code path for it, so `claude`
+   * ignores this field and the seam is scoped to the CLI runtimes.
+   */
+  providerBaseUrl?: string;
 }
 
 /**
@@ -96,8 +105,9 @@ export interface RuntimeProfile {
   /**
    * The model to run a given phase under, in THIS runtime's own naming, or `undefined` for the
    * runtime/adapter default. A project-configured `config.model` overrides the per-phase table for
-   * every phase (operator override). Claude/Codex/OpenCode use one model for all phases today (return
-   * `config.model`); Pi routes heavy reasoning phases to a fast model that doesn't stall locally.
+   * every phase (operator override). When unset, Claude/Codex/OpenCode route by the phase's tier via
+   * the shared runtime-agnostic table (cheap model for light phases, strong for heavy); Pi keeps its
+   * own local-model routing (heavy reasoning phases to a fast model that doesn't stall locally).
    */
   modelForPhase(phase: TaskPhase, config: RuntimeConfig): string | undefined;
 
@@ -129,7 +139,11 @@ const claudeProfile: RuntimeProfile = {
   usesSdkToolNames: true,
   toolDocTier: 'full',
   needsStringentCandidateChecks: false,
-  modelForPhase: (_phase, config) => config.model,
+  // An explicit project model wins for every phase; otherwise route by the phase's tier (cheap for
+  // light phases, strong for heavy) via the shared runtime-agnostic table.
+  modelForPhase: (phase, config) => defaultModelForPhase('claude', phase, config),
+  // The Claude SDK base URL is env-only (ANTHROPIC_BASE_URL) — no adapter code path, so
+  // config.providerBaseUrl is intentionally not threaded here.
   createAdapter: () => new ClaudeAgentAdapter(),
 };
 
@@ -141,8 +155,13 @@ const codexProfile: RuntimeProfile = {
   usesSdkToolNames: false,
   toolDocTier: 'full',
   needsStringentCandidateChecks: false,
-  modelForPhase: (_phase, config) => config.model,
-  createAdapter: (config) => new CodexAgentAdapter({ model: config.model, bin: config.binary }),
+  modelForPhase: (phase, config) => defaultModelForPhase('codex', phase, config),
+  createAdapter: (config, phase) =>
+    new CodexAgentAdapter({
+      model: phase ? defaultModelForPhase('codex', phase, config) : config.model,
+      bin: config.binary,
+      providerBaseUrl: config.providerBaseUrl,
+    }),
 };
 
 const piProfile: RuntimeProfile = {
@@ -174,8 +193,13 @@ const openCodeProfile: RuntimeProfile = {
   // Hosted-capable, so full tool docs; but commonly driven with a local ollama model in practice.
   toolDocTier: 'full',
   needsStringentCandidateChecks: true,
-  modelForPhase: (_phase, config) => config.model,
-  createAdapter: (config) => new OpenCodeAgentAdapter({ model: config.model, bin: config.binary }),
+  modelForPhase: (phase, config) => defaultModelForPhase('opencode', phase, config),
+  createAdapter: (config, phase) =>
+    new OpenCodeAgentAdapter({
+      model: phase ? defaultModelForPhase('opencode', phase, config) : config.model,
+      bin: config.binary,
+      providerBaseUrl: config.providerBaseUrl,
+    }),
 };
 
 const PROFILES: Record<AgentRuntime, RuntimeProfile> = {

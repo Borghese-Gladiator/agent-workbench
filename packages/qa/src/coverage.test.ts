@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateBehavioralClaimCoverage, behavioralClaimsWithUntouchedTarget } from './coverage.js';
-import type { QaAssertionResult } from './shared.js';
+import type { ExpectedAssertion } from '@awb/domain';
+import {
+  evaluateBehavioralClaimCoverage,
+  behavioralClaimsWithUntouchedTarget,
+  buildInteractiveScenarioSteps,
+} from './coverage.js';
+import { scenarioStrength, type QaAssertionResult } from './shared.js';
 
 const liveness: QaAssertionResult = { name: 'navigate:/', passed: true, strength: 'liveness' };
 
@@ -125,5 +130,77 @@ describe('behavioralClaimsWithUntouchedTarget (TASK-63)', () => {
         changedPaths: ['src/games/rank.ts'],
       }),
     ).toEqual([]);
+  });
+});
+
+describe('buildInteractiveScenarioSteps (TASK-90/91)', () => {
+  it('translates a behavior claim into >=1 click + >=1 strong assertion derived from the expected assertion', () => {
+    const expected: ExpectedAssertion[] = [
+      { claimId: 'claim-1', observes: 'a higher rank beats a lower one', kind: 'state-transition' },
+    ];
+    const steps = buildInteractiveScenarioSteps(expected, {
+      'claim-1': { observes: 'a higher rank beats a lower one', controlSelector: '#play', assertionSelector: '#result' },
+    });
+
+    const clicks = steps.filter((s) => s.kind === 'click');
+    const strong = steps.filter((s) => s.kind === 'expectVisible' || s.kind === 'expectText' || s.kind === 'expectHidden');
+    expect(clicks.length).toBeGreaterThanOrEqual(1);
+    expect(strong.length).toBeGreaterThanOrEqual(1);
+    expect(clicks[0]).toEqual({ kind: 'click', selector: '#play' });
+    expect(strong[0]).toEqual({ kind: 'expectVisible', selector: '#result' });
+  });
+
+  it('emits an expectText value-match when the hint declares a target value', () => {
+    const steps = buildInteractiveScenarioSteps(
+      [{ claimId: 'c', observes: 'the score reads 42', kind: 'value-match' }],
+      { c: { observes: 'the score reads 42', controlSelector: '#roll', assertionSelector: '#score', assertionText: '42' } },
+    );
+    expect(steps).toContainEqual({ kind: 'expectText', selector: '#score', equals: '42' });
+  });
+
+  it('adds a repeated-click expectNoDuplicateSocket step for a socket-opening control', () => {
+    const steps = buildInteractiveScenarioSteps(
+      [{ claimId: 'c', observes: 'joining opens the room', kind: 'state-transition' }],
+      { c: { observes: 'joining opens the room', controlSelector: '#join', assertionSelector: '#room', socketOpening: true } },
+    );
+    expect(steps).toContainEqual({ kind: 'expectNoDuplicateSocket', selector: '#join' });
+  });
+
+  it('falls back to a text selector derived from observes when no hint is given', () => {
+    const steps = buildInteractiveScenarioSteps([
+      { claimId: 'c', observes: 'Submit', kind: 'state-transition' },
+    ]);
+    expect(steps).toContainEqual({ kind: 'click', selector: 'text=Submit' });
+    expect(steps).toContainEqual({ kind: 'expectVisible', selector: 'text=Submit' });
+  });
+});
+
+describe('scenarioStrength gating (TASK-90/91)', () => {
+  it('scores an all-liveness scenario weak, so it cannot cover a behavior claim', () => {
+    const livenessOnly: QaAssertionResult[] = [
+      { name: 'navigate:/', passed: true, strength: 'liveness' },
+      { name: 'expectVisible:main', passed: true, strength: 'liveness' },
+      { name: 'screenshot:landing', passed: true, strength: 'liveness' },
+    ];
+    expect(scenarioStrength(livenessOnly)).toBe('weak');
+
+    const coverage = evaluateBehavioralClaimCoverage({
+      behavioralClaimIds: ['claim-1'],
+      assertions: livenessOnly,
+    });
+    expect(coverage.everyBehavioralClaimCovered).toBe(false);
+    expect(coverage.missing).toEqual(['claim-1']);
+  });
+
+  it('scores a scenario with a passing strong assertion strong, covering the claim', () => {
+    const strong: QaAssertionResult[] = [
+      { name: 'navigate:/', passed: true, strength: 'liveness' },
+      { name: 'expectText:#result', passed: true, strength: 'value-match' },
+    ];
+    expect(scenarioStrength(strong)).toBe('strong');
+    expect(
+      evaluateBehavioralClaimCoverage({ behavioralClaimIds: ['claim-1'], assertions: strong })
+        .everyBehavioralClaimCovered,
+    ).toBe(true);
   });
 });

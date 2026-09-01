@@ -139,6 +139,12 @@ export interface CliArgvContext {
   allowedTools: readonly string[];
   /** The complement the caller wants denied, if it computed one (unused by runtimes that derive deny from allow). */
   disallowedTools: readonly string[];
+  /**
+   * An optional named persona/agent to run under. When set, an adapter that supports a named agent
+   * (OpenCode's `--agent`) selects it instead of the capability-hash agent it would otherwise
+   * materialize. Runtimes with no named-agent surface ignore it.
+   */
+  persona?: string;
 }
 
 interface CliSessionState {

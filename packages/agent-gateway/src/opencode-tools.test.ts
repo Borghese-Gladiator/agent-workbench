@@ -51,4 +51,16 @@ describe('renderOpenCodeAgentFile', () => {
     expect(md).toContain('bash: deny'); // no command.run-scoped granted
     expect(md).toContain('task: deny');
   });
+
+  it('layers a persona role prompt over the same capability permission block when provided', () => {
+    const md = renderOpenCodeAgentFile('persona-x', ['repository.read'], 'You are a careful auditor.');
+    // The role prompt is the body; the capability boundary still applies (edit denied — read-only).
+    expect(md).toContain('You are a careful auditor.');
+    expect(md).toContain('edit: deny');
+    expect(md).toContain('read: allow');
+    // Without a role prompt, the generic body is used instead.
+    expect(renderOpenCodeAgentFile('persona-x', ['repository.read'])).toContain(
+      "Tool access is scoped to this role's granted capabilities",
+    );
+  });
 });

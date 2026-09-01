@@ -1,10 +1,12 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { ContextComposition, PhaseObservability, TaskPhase, TokenBreakdown } from '@awb/domain';
 import {
   agentSessions,
   modelInvocations,
   runtimeAttribution,
   contextComposition,
+  tasks,
+  phaseAttempts,
 } from '../schema/index.js';
 import type { DrizzleDb } from '../connection.js';
 import { ensureRunAndPhaseAttempt } from './tasks.js';
@@ -144,6 +146,119 @@ export function getTokenBreakdown(db: DrizzleDb, taskId: string): TokenBreakdown
 
 export function getRuntimeAttribution(db: DrizzleDb, taskId: string) {
   return db.select().from(runtimeAttribution).where(eq(runtimeAttribution.taskId, taskId)).all();
+}
+
+/** One rollup row: tokens summed by repo/task/model/phase/outcome, with the task's retry-lineage parent. */
+export interface CrossRepoTokenAggregate {
+  repositoryId: string;
+  taskId: string;
+  model: string;
+  phase: string;
+  outcome: string;
+  /** The task's lineage edge (`tasks.parent_task_id`) — the task this one was stacked on / retried from. */
+  retryOfTaskId: string | null;
+  sessions: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+}
+
+export interface CrossRepoTokenReport {
+  rows: CrossRepoTokenAggregate[];
+  totals: { tokensIn: number; tokensOut: number; sessions: number };
+}
+
+/**
+ * Cross-repo/cross-task token report. Joins model_invocations → agent_sessions → tasks (for the repo
+ * and the retry-lineage parent) → phase_attempts (for the attempt outcome), then rolls up by
+ * repo/task/model/phase/outcome. Distinct agent_sessions are counted per bucket. Optional filter
+ * restricts to a set of repos and/or tasks; omit it to report across everything.
+ */
+export function getCrossRepoTokenReport(
+  db: DrizzleDb,
+  filter?: { repositoryIds?: string[]; taskIds?: string[] },
+): CrossRepoTokenReport {
+  const conditions: ReturnType<typeof inArray>[] = [];
+  if (filter?.repositoryIds && filter.repositoryIds.length > 0) {
+    conditions.push(inArray(tasks.repositoryId, filter.repositoryIds));
+  }
+  if (filter?.taskIds && filter.taskIds.length > 0) {
+    conditions.push(inArray(agentSessions.taskId, filter.taskIds));
+  }
+
+  const rows = db
+    .select({
+      repositoryId: tasks.repositoryId,
+      taskId: agentSessions.taskId,
+      parentTaskId: tasks.parentTaskId,
+      phase: agentSessions.phase,
+      outcome: phaseAttempts.outcome,
+      sessionId: agentSessions.id,
+      model: modelInvocations.model,
+      inputTokens: modelInvocations.inputTokens,
+      outputTokens: modelInvocations.outputTokens,
+      cachedInputTokens: modelInvocations.cachedInputTokens,
+      cacheCreationInputTokens: modelInvocations.cacheCreationInputTokens,
+    })
+    .from(modelInvocations)
+    .innerJoin(agentSessions, eq(agentSessions.id, modelInvocations.agentSessionId))
+    .innerJoin(tasks, eq(tasks.id, agentSessions.taskId))
+    .leftJoin(phaseAttempts, eq(phaseAttempts.id, agentSessions.phaseAttemptId))
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .all();
+
+  const byKey = new Map<string, CrossRepoTokenAggregate>();
+  const sessionsSeen = new Map<string, Set<string>>();
+  const totals = { tokensIn: 0, tokensOut: 0, sessions: 0 };
+  const totalSessions = new Set<string>();
+
+  for (const r of rows) {
+    const outcome = r.outcome ?? 'unknown';
+    const key = `${r.repositoryId}\0${r.taskId}\0${r.model}\0${r.phase}\0${outcome}`;
+    let agg = byKey.get(key);
+    if (!agg) {
+      agg = {
+        repositoryId: r.repositoryId,
+        taskId: r.taskId,
+        model: r.model,
+        phase: r.phase,
+        outcome,
+        retryOfTaskId: r.parentTaskId,
+        sessions: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      };
+      byKey.set(key, agg);
+      sessionsSeen.set(key, new Set());
+    }
+    agg.tokensIn += r.inputTokens;
+    agg.tokensOut += r.outputTokens;
+    agg.cacheReadTokens += r.cachedInputTokens ?? 0;
+    agg.cacheWriteTokens += r.cacheCreationInputTokens ?? 0;
+    const seen = sessionsSeen.get(key)!;
+    if (!seen.has(r.sessionId)) {
+      seen.add(r.sessionId);
+      agg.sessions += 1;
+    }
+    totals.tokensIn += r.inputTokens;
+    totals.tokensOut += r.outputTokens;
+    totalSessions.add(r.sessionId);
+  }
+
+  totals.sessions = totalSessions.size;
+  const collator = new Intl.Collator();
+  const sorted = [...byKey.values()].sort(
+    (a, b) =>
+      collator.compare(a.repositoryId, b.repositoryId) ||
+      collator.compare(a.taskId, b.taskId) ||
+      collator.compare(a.model, b.model) ||
+      collator.compare(a.phase, b.phase) ||
+      collator.compare(a.outcome, b.outcome),
+  );
+  return { rows: sorted, totals };
 }
 
 /**
