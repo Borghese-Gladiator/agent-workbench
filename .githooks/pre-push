@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+#
+# pre-push — block pushes that don't build or don't pass the test suite.
+#
+# This repo has no CI. Nothing runs on a PR and nothing runs on main, so the
+# push is the last moment a broken tree can be caught before it becomes some
+# other checkout's problem. Build + test is too slow for pre-commit (which
+# stays at the millisecond docs audit), but once per push is the right price.
+#
+# Bypass in an emergency with:  git push --no-verify
+# Or for a single push:         AWB_SKIP_PREPUSH=1 git push
+#
+# Installed via `git config core.hooksPath .githooks`, which the package.json
+# `prepare` script sets on `pnpm install`.
+
+set -uo pipefail
+
+if [ "${AWB_SKIP_PREPUSH:-}" = "1" ]; then
+  echo "pre-push: skipped (AWB_SKIP_PREPUSH=1)"
+  exit 0
+fi
+
+zero='0000000000000000000000000000000000000000'
+has_content=0
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  if [ -n "${local_sha:-}" ] && [ "$local_sha" != "$zero" ]; then
+    has_content=1
+  fi
+done
+
+if [ "$has_content" -eq 0 ]; then
+  exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root" || exit 1
+
+echo "pre-push: building..."
+if ! pnpm build; then
+  echo >&2
+  echo "pre-push: build FAILED (see above). Push aborted." >&2
+  echo "          Bypass with 'git push --no-verify' if intentional." >&2
+  exit 1
+fi
+
+echo "pre-push: running tests..."
+if ! pnpm test; then
+  echo >&2
+  echo "pre-push: tests FAILED (see above). Push aborted." >&2
+  echo "          Bypass with 'git push --no-verify' if intentional." >&2
+  exit 1
+fi
+
+echo "pre-push: build and tests green."
+exit 0
