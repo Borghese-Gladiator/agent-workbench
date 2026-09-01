@@ -1,7 +1,8 @@
-import { eq, inArray } from 'drizzle-orm';
+import { eq, inArray, or } from 'drizzle-orm';
 import type { TaskPhase, RunCondition, DeliveryState, ScheduleState, TaskSize } from '@awb/domain';
 import {
   tasks,
+  taskDependencies,
   runs,
   phaseAttempts,
   programDesigns,
@@ -30,7 +31,7 @@ import {
   repositories,
 } from '../schema/index.js';
 import type { DrizzleDb } from '../connection.js';
-import type { TaskRow } from '../row-types.js';
+import type { TaskRow, TaskDependencyRow } from '../row-types.js';
 
 /** The deterministic single-run id for a task (see ensureRun). */
 export function runIdForTask(taskId: string): string {
@@ -131,6 +132,32 @@ export function listTasks(db: DrizzleDb): TaskRow[] {
  *  `parentTaskId` is this task. Used by the scheduler to unblock dependents when a parent releases. */
 export function listTasksByParent(db: DrizzleDb, parentTaskId: string): TaskRow[] {
   return db.select().from(tasks).where(eq(tasks.parentTaskId, parentTaskId)).all();
+}
+
+/**
+ * Persist one task-dependency edge (TASK-102). Idempotent on (task_id, depends_on_task_id): a
+ * repeated declaration re-asserts the mode rather than duplicating the edge.
+ */
+export function insertTaskDependency(db: DrizzleDb, edge: TaskDependencyRow): void {
+  db.insert(taskDependencies)
+    .values(edge)
+    .onConflictDoUpdate({
+      target: [taskDependencies.taskId, taskDependencies.dependsOnTaskId],
+      set: { mode: edge.mode },
+    })
+    .run();
+}
+
+/** All predecessor edges of a task (both 'stack' and 'after') — used for fan-in eligibility and
+ *  base-branch resolution. */
+export function listParentsOf(db: DrizzleDb, taskId: string): TaskDependencyRow[] {
+  return db.select().from(taskDependencies).where(eq(taskDependencies.taskId, taskId)).all();
+}
+
+/** All edges whose `depends_on_task_id` is this task — used by onParentReleased to reconcile the
+ *  fan-in children a release may have unblocked. */
+export function listDependentsOf(db: DrizzleDb, taskId: string): TaskDependencyRow[] {
+  return db.select().from(taskDependencies).where(eq(taskDependencies.dependsOnTaskId, taskId)).all();
 }
 
 /** Tasks whose workflow has not been started yet, awaiting their parent's release. */
@@ -353,6 +380,10 @@ export function deleteTask(db: DrizzleDb, taskId: string): boolean {
     // 20-22. scaffolding parents last
     tx.delete(phaseAttempts).where(eq(phaseAttempts.taskId, taskId)).run();
     tx.delete(runs).where(eq(runs.taskId, taskId)).run();
+    // Task DAG edges (TASK-102) FK tasks on both ends — drop any edge touching this task first.
+    tx.delete(taskDependencies)
+      .where(or(eq(taskDependencies.taskId, taskId), eq(taskDependencies.dependsOnTaskId, taskId)))
+      .run();
     tx.delete(tasks).where(eq(tasks.id, taskId)).run();
   });
 

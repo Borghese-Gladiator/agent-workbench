@@ -30,6 +30,28 @@ describe('phaseSetForSize (TASK-51)', () => {
   });
 });
 
+describe('phaseSetForSize disableProgramDesign (TASK-61)', () => {
+  it('L with the flag omits program-design but keeps every other phase and ordering', () => {
+    const full = phaseSetForSize('L');
+    const set = phaseSetForSize('L', { disableProgramDesign: true });
+    expect(set).not.toContain('program-design');
+    expect(set).toEqual(full.filter((p) => p !== 'program-design'));
+    // ordering preserved
+    const indices = set.map((p) => TASK_PHASE_ORDER.indexOf(p));
+    expect(indices).toEqual([...indices].sort((a, b) => a - b));
+  });
+
+  it('is a no-op for M/S (program-design already absent)', () => {
+    expect(phaseSetForSize('M', { disableProgramDesign: true })).toEqual(phaseSetForSize('M'));
+    expect(phaseSetForSize('S', { disableProgramDesign: true })).toEqual(phaseSetForSize('S'));
+  });
+
+  it('defaults to the full L set when the flag is false/absent', () => {
+    expect(phaseSetForSize('L', { disableProgramDesign: false })).toEqual(TASK_PHASE_ORDER);
+    expect(phaseSetForSize('L')).toEqual(TASK_PHASE_ORDER);
+  });
+});
+
 describe('nextPhaseIn (TASK-51)', () => {
   it('walks the run phase set, not the full order', () => {
     const set = phaseSetForSize('S'); // no plan / program-design

@@ -25,20 +25,16 @@ export function plannerInstruction(
   // When project memory was injected into the context payload, point the
   // planner at it so accumulated pitfalls/conventions/commands actually inform the plan.
   const memoryLine = hasMemory
-    ? 'The context includes a "memory" array of facts prior runs learned about this repository ' +
-      '(pitfalls, invariants, conventions, build/test commands). Use it: avoid known pitfalls, respect ' +
-      'invariants/conventions, and prefer the recorded commands over guessing.'
+    ? 'The context has a "memory" array of facts prior runs learned (pitfalls, invariants, conventions, ' +
+      'build/test commands). Respect it and prefer recorded commands over guessing.'
     : '';
   const behavioralClaimIds = contract.claims
     .filter((c) => c.category === 'behavior' && c.qaEvidenceRequired)
     .map((c) => c.id);
   const qaLine =
     behavioralClaimIds.length > 0
-      ? [
-          `The contract has behavioral claim(s) requiring QA evidence: ${behavioralClaimIds.join(', ')}.`,
-          'At least one slice that lists such a claim in its "claimIds" MUST also declare a non-empty',
-          '"qaScenarioIds" naming the QA scenario(s) that exercise it, or the plan will be rejected.',
-        ].join(' ')
+      ? `Behavioral claim(s) needing QA evidence: ${behavioralClaimIds.join(', ')}. At least one slice ` +
+        'listing such a claim in "claimIds" MUST also declare a non-empty "qaScenarioIds", or the plan is rejected.'
       : '';
   // hasExistingFrontend is false only for a genuinely un-styled repo (no `web` unit detected,
   // and not an enterprise repo, which is always assumed to have one). Point such a slice at the
@@ -56,7 +52,7 @@ export function plannerInstruction(
     : '';
   return [
     `Produce an implementation plan for this contract objective: ${contract.objective}.`,
-    'Decompose the work into ordered slices. Respond with a JSON object of the form',
+    'Respond with a fenced ```json code block of the form',
     '{"summary": string, "slices": [{"objective": string, "likelyPaths": string[],',
     '"requiredTargetedChecks": string[] (non-empty), "claimIds": string[], "dependencies": string[],',
     '"qaScenarioIds": string[], "usesBuildUiSkill": boolean (optional)}]}',

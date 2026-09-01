@@ -7,7 +7,7 @@ import type {
   CodingAgentAdapter,
   CreateAgentSessionInput,
 } from '@awb/agent-gateway';
-import { classifyTaskSize, SIZE_CLASSIFIER_MODEL } from './classifier-support.js';
+import { classifyTaskSize, scoreSizeComparison, SIZE_CLASSIFIER_MODEL } from './classifier-support.js';
 
 class FakeClassifierAdapter implements CodingAgentAdapter {
   readonly id = 'fake-classifier';
@@ -67,6 +67,26 @@ describe('classifyTaskSize (TASK-51 authoritative path)', () => {
     const adapter = new FakeClassifierAdapter('I really cannot tell.');
     const result = await classifyTaskSize({ ...baseInput, adapter, useModel: true, model: SIZE_CLASSIFIER_MODEL });
     expect(result).toBeUndefined();
+  });
+});
+
+describe('scoreSizeComparison (TASK-62 cost-weighted scoring)', () => {
+  it('scores an exact match as correct with zero cost', () => {
+    expect(scoreSizeComparison('L', 'L')).toEqual({ correct: true, underSized: false, costWeight: 0 });
+  });
+
+  it('penalizes under-sizing (predicting smaller) more than over-sizing by rank', () => {
+    // L expected, predicted S → under-sized by 2 ranks → 2 * 2 = 4.
+    expect(scoreSizeComparison('L', 'S')).toEqual({ correct: false, underSized: true, costWeight: 4 });
+    // S expected, predicted L → over-sized by 2 ranks → 2.
+    expect(scoreSizeComparison('S', 'L')).toEqual({ correct: false, underSized: false, costWeight: 2 });
+    // One rank each way: under (M→S from L) costs more than over.
+    expect(scoreSizeComparison('L', 'M').costWeight).toBeGreaterThan(scoreSizeComparison('M', 'L').costWeight);
+  });
+
+  it('treats an unavailable prediction as a max under-size miss', () => {
+    expect(scoreSizeComparison('L', undefined)).toEqual({ correct: false, underSized: true, costWeight: 6 });
+    expect(scoreSizeComparison('S', undefined).costWeight).toBe(2);
   });
 });
 

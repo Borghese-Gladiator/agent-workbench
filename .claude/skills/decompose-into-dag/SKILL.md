@@ -29,15 +29,18 @@ Do NOT use for a single self-contained change — create one ordinary task inste
 
 - **Node = one workbench task = one draft PR.** Scope each node so its diff is one
   coherent, reviewable change.
-- **Edge (`child depends on parent`) means TWO things at once**, because this is a
-  *stacking* DAG:
-  1. the child's branch is **based on** the parent's delivered branch, and
-  2. the child does not **start** until the parent opens its **draft PR**.
-- **Stacking is a forest** — a git branch has exactly one base, so **each node has at
-  most ONE parent.** Fan-OUT is fine (two children both stacked on one parent, run in
-  parallel). Fan-IN is NOT expressible (a node can't stack on two branches) — if work
-  logically needs two predecessors, **linearize it**: pick the primary parent to stack
-  on and order the other before it.
+- **Edges come in TWO modes** (TASK-102):
+  - **`stack`** — the child's branch is **based on** the parent's delivered branch AND the
+    child does not **start** until that parent opens its **draft PR**. Because a git branch
+    has exactly one base, **each node has at most ONE `stack` parent.**
+  - **`after`** — scheduling-only fan-in: the child does not **start** until the predecessor
+    opens its draft PR, but it does **not** branch off it. A node may have **many `after`
+    parents.**
+- So the graph is a DAG, not just a forest: **fan-OUT** is fine (children sharing a base),
+  and **fan-IN** is now expressible — a node with one `stack` base and one or more `after`
+  predecessors, e.g. a **diamond** (D `after` B and C, both `after`/`stack` on A). Use
+  `after` when a node must wait on extra predecessors it does not branch from; still pick a
+  single `stack` base (or none, for a root that fans in purely for ordering).
 - **Root(s)** have no parent → their PR base is the repo default branch, and they start
   immediately.
 
@@ -100,6 +103,14 @@ POST /api/task-dags
     { "key": "ui",  "prompt": "...", "dependsOn": "api" } ] }
 ```
 
+`dependsOn` accepts a plain key string (a single `stack` edge, back-compat) OR an array of
+typed edges for fan-in, e.g. a diamond where `d` stacks on `b` and also waits on `c`:
+
+```
+{ "key": "d", "prompt": "...",
+  "dependsOn": [ { "ref": "b", "mode": "stack" }, { "ref": "c", "mode": "after" } ] }
+```
+
 The response lists each node's real `taskId`, `parentTaskId`, and `scheduleState`
 (`ready` for roots, `blocked` for children).
 
@@ -117,7 +128,9 @@ The response lists each node's real `taskId`, `parentTaskId`, and `scheduleState
 
 ## Guardrails
 
-- **Never fan-in.** If you catch yourself wanting two parents for one node, linearize.
+- **At most one `stack` parent per node.** A node branches from exactly one base. If work
+  needs extra predecessors it does not branch from, add them as `after` edges (fan-in) —
+  do not force a second `stack` parent.
 - **Never create a throwaway umbrella task.** The first slice is a root node.
 - **Never push a node's base off `master` by hand** — declare the edge and let the
   scheduler resolve it lazily when the parent releases.

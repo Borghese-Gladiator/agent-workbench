@@ -1,0 +1,249 @@
+{
+  "version": 1,
+  "description": "Curated size-classifier evaluation corpus (TASK-62). Each case is judged by the WORK the prompt implies, per packages/planning/src/sizing.ts. `expected` is the reference label; `rationale` states the deciding evidence (design decision / blast radius / boundary crossed), never prompt length. Buckets: clear-S, clear-L, borderline-s-m, borderline-m-l. M is the 'when unsure' default, so the borderline buckets deliberately straddle the S/M and M/L lines.",
+  "cases": [
+    {
+      "prompt": "Fix the typo 'recieve' -> 'receive' in the account settings page header.",
+      "expected": "S",
+      "bucket": "clear-s",
+      "rationale": "Atomic, local, one obvious direction; no contract/schema/security boundary."
+    },
+    {
+      "prompt": "Bump the default request timeout constant from 30s to 45s in the HTTP client config.",
+      "expected": "S",
+      "bucket": "clear-s",
+      "rationale": "Single config value change with obvious local validation."
+    },
+    {
+      "prompt": "Add a `formatCurrency(cents: number): string` helper and use it in the invoice total cell.",
+      "expected": "S",
+      "bucket": "clear-s",
+      "rationale": "One well-specified helper, locally scoped, no design decision."
+    },
+    {
+      "prompt": "Change the empty-state copy on the dashboard from 'No data' to 'Nothing here yet'.",
+      "expected": "S",
+      "bucket": "clear-s",
+      "rationale": "Copy tweak; no logic or boundary involved."
+    },
+    {
+      "prompt": "Add a unit test for the existing `slugify` utility covering leading/trailing dashes.",
+      "expected": "S",
+      "bucket": "clear-s",
+      "rationale": "Single obvious test against an existing pure function."
+    },
+    {
+      "prompt": "Disable the 'Export' button when the results table is empty.",
+      "expected": "S",
+      "bucket": "clear-s",
+      "rationale": "One conditional on an existing component; obvious and local."
+    },
+    {
+      "prompt": "Add a `--verbose` flag to the CLI that also prints the resolved config path.",
+      "expected": "S",
+      "bucket": "clear-s",
+      "rationale": "One flag, one extra log line; no cross-system or contract change."
+    },
+    {
+      "prompt": "Correct the sort order of the 'Recent' list so newest appears first.",
+      "expected": "S",
+      "bucket": "clear-s",
+      "rationale": "Single comparator fix, obvious local validation."
+    },
+    {
+      "prompt": "Rename the internal variable `tmp` to `pendingRows` across the reducer file.",
+      "expected": "S",
+      "bucket": "clear-s",
+      "rationale": "Mechanical local rename; no behavior or contract change."
+    },
+    {
+      "prompt": "Add an aria-label to the icon-only close button in the modal.",
+      "expected": "S",
+      "bucket": "clear-s",
+      "rationale": "Single accessibility attribute; local and obvious."
+    },
+
+    {
+      "prompt": "Migrate authentication from session cookies to OAuth 2.0 with refresh-token rotation.",
+      "expected": "L",
+      "bucket": "clear-l",
+      "rationale": "Security-sensitive, touches public auth contract and persistence; design alternatives to resolve."
+    },
+    {
+      "prompt": "Make the application multi-tenant: isolate data per organization across all queries and caches.",
+      "expected": "L",
+      "bucket": "clear-l",
+      "rationale": "Cross-system blast radius, data-model change, persistence + authorization boundary."
+    },
+    {
+      "prompt": "Change the public webhook payload schema to v2 and provide a migration for existing subscribers.",
+      "expected": "L",
+      "bucket": "clear-l",
+      "rationale": "Public contract + data migration + rollout/rollback concerns."
+    },
+    {
+      "prompt": "Introduce a read replica and route read-only queries to it with failover.",
+      "expected": "L",
+      "bucket": "clear-l",
+      "rationale": "Persistence/infra design decision spanning subsystems with rollback risk."
+    },
+    {
+      "prompt": "Add role-based authorization to every admin endpoint, including a new permissions model.",
+      "expected": "L",
+      "bucket": "clear-l",
+      "rationale": "Security/authorization boundary with a new model touching many endpoints."
+    },
+    {
+      "prompt": "Diagnose and fix the intermittent data corruption when two workers process the same job.",
+      "expected": "L",
+      "bucket": "clear-l",
+      "rationale": "Substantial uncertainty and diagnosis across components; concurrency/persistence blast radius."
+    },
+    {
+      "prompt": "Split the monolithic billing service into a separate deployable with its own database.",
+      "expected": "L",
+      "bucket": "clear-l",
+      "rationale": "Architectural decomposition, data migration, deployment and rollback."
+    },
+    {
+      "prompt": "Encrypt PII columns at rest and update all readers/writers plus the backfill.",
+      "expected": "L",
+      "bucket": "clear-l",
+      "rationale": "Security + schema migration + coordinated readers/writers + backfill."
+    },
+    {
+      "prompt": "Redesign the rate limiter to be distributed across instances with a shared token bucket.",
+      "expected": "L",
+      "bucket": "clear-l",
+      "rationale": "Cross-system design alternatives and correctness under distribution."
+    },
+    {
+      "prompt": "Replace the bespoke job queue with a durable workflow engine and port all existing jobs.",
+      "expected": "L",
+      "bucket": "clear-l",
+      "rationale": "Dependent phases, migration, and cross-cutting coordination."
+    },
+
+    {
+      "prompt": "Add a 'status' filter dropdown to the orders list and wire it to the existing query param.",
+      "expected": "M",
+      "bucket": "borderline-s-m",
+      "rationale": "Several coordinated edits in one area; more than atomic but no design decision. Straddles S/M."
+    },
+    {
+      "prompt": "Add pagination controls to the users table using the API's existing cursor support.",
+      "expected": "M",
+      "bucket": "borderline-s-m",
+      "rationale": "Coordinated UI + data-fetch edits in one area; bounded, no new contract."
+    },
+    {
+      "prompt": "Add a 'last login' timestamp column to the admin user list, reading an existing field.",
+      "expected": "M",
+      "bucket": "borderline-s-m",
+      "rationale": "Field surfaced end-to-end within one surface; borderline above a pure S add."
+    },
+    {
+      "prompt": "Refactor the notification formatting into a single module and update its three call sites.",
+      "expected": "M",
+      "bucket": "borderline-s-m",
+      "rationale": "One-module refactor with several call-site edits; bounded, no architecture change."
+    },
+    {
+      "prompt": "Add client-side validation to the signup form for email, password length, and match.",
+      "expected": "M",
+      "bucket": "borderline-s-m",
+      "rationale": "Multiple coordinated rules in one form; more than a single obvious check."
+    },
+    {
+      "prompt": "Add a retry with exponential backoff around the existing outbound email call.",
+      "expected": "M",
+      "bucket": "borderline-s-m",
+      "rationale": "Localized reliability change; borderline S but has a small design choice (backoff params)."
+    },
+    {
+      "prompt": "Add a settings toggle that persists to localStorage and gates an existing feature.",
+      "expected": "M",
+      "bucket": "borderline-s-m",
+      "rationale": "Coordinated state + persistence-lite + gating; above atomic, no real boundary."
+    },
+    {
+      "prompt": "Add a CSV export of the current filtered table using data already loaded on the page.",
+      "expected": "M",
+      "bucket": "borderline-s-m",
+      "rationale": "Bounded feature spanning a few edits; no server/schema change."
+    },
+    {
+      "prompt": "Add a loading skeleton and error state to the reports panel.",
+      "expected": "M",
+      "bucket": "borderline-s-m",
+      "rationale": "Two coordinated UI states in one panel; borderline above a single S tweak."
+    },
+    {
+      "prompt": "Add a debounce to the search box and cancel in-flight requests on new input.",
+      "expected": "M",
+      "bucket": "borderline-s-m",
+      "rationale": "Coordinated timing + request-cancellation logic; small design choice, bounded scope."
+    },
+
+    {
+      "prompt": "Add a new `archived` state to tasks and update filtering, counts, and the state machine.",
+      "expected": "M",
+      "bucket": "borderline-m-l",
+      "rationale": "Bounded but touches a state machine and several readers; straddles M/L without a migration."
+    },
+    {
+      "prompt": "Add soft-delete to comments: a deleted_at column, query filtering, and a restore action.",
+      "expected": "L",
+      "bucket": "borderline-m-l",
+      "rationale": "Schema change plus coordinated readers and a backfill concern pushes it to L."
+    },
+    {
+      "prompt": "Add an `email` field end-to-end for contacts, including a nullable DB column and API output.",
+      "expected": "M",
+      "bucket": "borderline-m-l",
+      "rationale": "Additive nullable field with no migration risk stays M; would be L if the API contract were frozen."
+    },
+    {
+      "prompt": "Introduce feature flags for the checkout flow and gate two experiments behind them.",
+      "expected": "M",
+      "bucket": "borderline-m-l",
+      "rationale": "Bounded plumbing in one flow; borderline L only if it became a cross-system rollout system."
+    },
+    {
+      "prompt": "Add optimistic concurrency (version column) to the document editor's save path.",
+      "expected": "L",
+      "bucket": "borderline-m-l",
+      "rationale": "Persistence + correctness-under-conflict design decision tips it into L."
+    },
+    {
+      "prompt": "Cache the expensive dashboard aggregation with a 5-minute TTL and manual invalidation.",
+      "expected": "M",
+      "bucket": "borderline-m-l",
+      "rationale": "Localized caching with a small design choice; stays M absent cross-system invalidation."
+    },
+    {
+      "prompt": "Add server-side pagination to an endpoint that currently returns everything, keeping the client working.",
+      "expected": "L",
+      "bucket": "borderline-m-l",
+      "rationale": "Changes a public response contract with a compatibility concern; blast radius pushes L."
+    },
+    {
+      "prompt": "Move date handling to UTC everywhere and store timezone per user, updating existing rows.",
+      "expected": "L",
+      "bucket": "borderline-m-l",
+      "rationale": "Data migration + cross-cutting correctness; clearly above bounded M work."
+    },
+    {
+      "prompt": "Add an audit log for admin actions written on each mutation across three services.",
+      "expected": "L",
+      "bucket": "borderline-m-l",
+      "rationale": "Cross-system coordination and a new persistence surface; above single-area M."
+    },
+    {
+      "prompt": "Extract shared validation into a package consumed by both the API and the worker.",
+      "expected": "M",
+      "bucket": "borderline-m-l",
+      "rationale": "Bounded extraction; borderline L only if it forced a public package contract and coordinated release."
+    }
+  ]
+}

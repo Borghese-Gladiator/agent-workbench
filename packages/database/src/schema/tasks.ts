@@ -1,5 +1,5 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
-import type { TaskPhase, RunCondition, DeliveryState, ScheduleState, TaskSize } from '@awb/domain';
+import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core';
+import type { TaskPhase, RunCondition, DeliveryState, ScheduleState, TaskSize, TaskDagEdgeMode } from '@awb/domain';
 import { repositories } from './repository.js';
 
 export const tasks = sqliteTable('tasks', {
@@ -21,6 +21,29 @@ export const tasks = sqliteTable('tasks', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+/**
+ * Task DAG edges-as-rows (TASK-102). Each row is one dependency: `taskId` depends on
+ * `dependsOnTaskId` with a `mode`:
+ *  - 'stack' = git-base stacking (also mirrored on tasks.parent_task_id, the special case); ≤1 per task.
+ *  - 'after' = scheduling-only fan-in predecessor; N per task.
+ * Unique on (task_id, depends_on_task_id) so an edge is idempotent.
+ */
+export const taskDependencies = sqliteTable(
+  'task_dependencies',
+  {
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id),
+    dependsOnTaskId: text('depends_on_task_id')
+      .notNull()
+      .references(() => tasks.id),
+    mode: text('mode').notNull().$type<TaskDagEdgeMode>(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.taskId, t.dependsOnTaskId] }),
+  }),
+);
 
 export const runs = sqliteTable('runs', {
   id: text('id').primaryKey(),

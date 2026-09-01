@@ -36,6 +36,8 @@ function defaultConfigYaml(): string {
     'network:',
     '  allowLocalhost: true',
     '  allowGithub: true',
+    'planning:',
+    '  disableProgramDesign: false',
     '',
   ].join('\n');
 }

@@ -112,3 +112,32 @@ export const TokenBreakdownSchema = z.object({
   ),
 });
 export type TokenBreakdown = z.infer<typeof TokenBreakdownSchema>;
+
+/**
+ * Per-phase token spend (TASK-79): one row per phase with the cache split (fresh / cache-read /
+ * cache-write) and the context-composition split (static instruction/prompt scaffolding vs injected
+ * task-specific context). `phase` is `'(totals)'` on the aggregate row. Used to rank the top-offender
+ * phases for prompt/context reduction.
+ */
+export const PhaseTokenSpendSchema = z.object({
+  phase: z.string(),
+  /** Fresh (uncached) input tokens billed at the base input rate. */
+  freshInputTokens: z.number().int().nonnegative(),
+  /** Cache READ input tokens (a re-sent cached prefix; ~0.1× input). */
+  cacheReadTokens: z.number().int().nonnegative(),
+  /** Cache WRITE input tokens (first-seen prefix written to cache; ~1.25× input). */
+  cacheCreationTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  costUsd: z.number().nonnegative(),
+  /** Static context: the fixed prompt/instruction scaffolding (`instructionTokens`). */
+  staticContextTokens: z.number().int().nonnegative(),
+  /** Injected context: task-specific material (contract/plan/diff/evidence/findings/repo-map/memory). */
+  injectedContextTokens: z.number().int().nonnegative(),
+});
+export type PhaseTokenSpend = z.infer<typeof PhaseTokenSpendSchema>;
+
+export const TokenSpendByPhaseSchema = z.object({
+  byPhase: z.array(PhaseTokenSpendSchema),
+  totals: PhaseTokenSpendSchema,
+});
+export type TokenSpendByPhase = z.infer<typeof TokenSpendByPhaseSchema>;

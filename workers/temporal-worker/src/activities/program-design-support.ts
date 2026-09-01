@@ -15,14 +15,13 @@ interface ProgramDesignJson {
 export function programDesignInstruction(plan: ImplementationPlan): string {
   return [
     `Produce a PROGRAM DESIGN for this plan: ${plan.summary}.`,
-    'Decide the structure BEFORE any code: which files are added/changed, the key type/interface',
-    'definitions, and the function signatures — each with a one-line intent, and NO implementation',
-    'bodies. Respond with a JSON object as a fenced ```json code block of the form',
+    'Give the structure BEFORE any code — files added/changed, key type/interface definitions, and',
+    'function signatures, each with a one-line intent and NO implementation bodies. Respond with a',
+    'fenced ```json code block of the form',
     '{"fileTreeDiff": string[] (each "+ path (note)" or "~ path (note)"),',
     '"typeSignatures": [{"signature": string, "intent": string}],',
     '"functionSignatures": [{"signature": string, "intent": string}]}.',
-    'Signatures ONLY — if a "signature" contains a function body (a "{ ... }" block with statements),',
-    'the design will be rejected. Keep it to declarations + intents.',
+    'Signatures ONLY: a "signature" containing a statement body (a "{ ... }" block) is rejected.',
   ].join(' ');
 }
 

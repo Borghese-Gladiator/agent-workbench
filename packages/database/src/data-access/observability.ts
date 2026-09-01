@@ -1,5 +1,12 @@
 import { and, eq, inArray } from 'drizzle-orm';
-import type { ContextComposition, PhaseObservability, TaskPhase, TokenBreakdown } from '@awb/domain';
+import type {
+  ContextComposition,
+  PhaseObservability,
+  PhaseTokenSpend,
+  TaskPhase,
+  TokenBreakdown,
+  TokenSpendByPhase,
+} from '@awb/domain';
 import {
   agentSessions,
   modelInvocations,
@@ -142,6 +149,109 @@ export function getTokenBreakdown(db: DrizzleDb, taskId: string): TokenBreakdown
     m.costUsd += r.costUsd ?? 0;
   }
   return { totals, byModel };
+}
+
+/**
+ * Per-phase token spend for a task (TASK-79). Joins model_invocations → agent_sessions for the
+ * cache split (fresh / cache-read / cache-write / output / cost) grouped by phase, and
+ * context_composition → agent_sessions for the static-vs-injected context split. The two sources are
+ * aggregated separately (never cross-joined) so a phase with multiple invocations and one context row
+ * — or vice versa — is never double-counted. Rows are ranked by total spend (fresh + cache) descending
+ * so the top-offender phases surface first. `static` = the fixed instruction/prompt scaffolding;
+ * `injected` = task-specific context (contract/plan/diff/evidence/findings/repo-map/memory).
+ */
+export function getTokenSpendByPhase(db: DrizzleDb, taskId: string): TokenSpendByPhase {
+  const emptyRow = (phase: string): PhaseTokenSpend => ({
+    phase,
+    freshInputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    outputTokens: 0,
+    costUsd: 0,
+    staticContextTokens: 0,
+    injectedContextTokens: 0,
+  });
+
+  const byPhase = new Map<string, PhaseTokenSpend>();
+  const rowFor = (phase: string): PhaseTokenSpend => {
+    let row = byPhase.get(phase);
+    if (!row) {
+      row = emptyRow(phase);
+      byPhase.set(phase, row);
+    }
+    return row;
+  };
+
+  const invRows = db
+    .select({
+      phase: agentSessions.phase,
+      inputTokens: modelInvocations.inputTokens,
+      outputTokens: modelInvocations.outputTokens,
+      cachedInputTokens: modelInvocations.cachedInputTokens,
+      cacheCreationInputTokens: modelInvocations.cacheCreationInputTokens,
+      costUsd: modelInvocations.costUsd,
+    })
+    .from(modelInvocations)
+    .innerJoin(agentSessions, eq(agentSessions.id, modelInvocations.agentSessionId))
+    .where(eq(agentSessions.taskId, taskId))
+    .all();
+
+  for (const r of invRows) {
+    const row = rowFor(r.phase);
+    row.freshInputTokens += r.inputTokens;
+    row.cacheReadTokens += r.cachedInputTokens ?? 0;
+    row.cacheCreationTokens += r.cacheCreationInputTokens ?? 0;
+    row.outputTokens += r.outputTokens;
+    row.costUsd += r.costUsd ?? 0;
+  }
+
+  const ccRows = db
+    .select({
+      phase: contextComposition.phase,
+      contractTokens: contextComposition.contractTokens,
+      planTokens: contextComposition.planTokens,
+      diffTokens: contextComposition.diffTokens,
+      evidenceTokens: contextComposition.evidenceTokens,
+      findingsTokens: contextComposition.findingsTokens,
+      repositoryMapTokens: contextComposition.repositoryMapTokens,
+      memoryTokens: contextComposition.memoryTokens,
+      instructionTokens: contextComposition.instructionTokens,
+    })
+    .from(contextComposition)
+    .where(eq(contextComposition.taskId, taskId))
+    .all();
+
+  for (const r of ccRows) {
+    const row = rowFor(r.phase);
+    row.staticContextTokens += r.instructionTokens;
+    row.injectedContextTokens +=
+      r.contractTokens +
+      r.planTokens +
+      r.diffTokens +
+      r.evidenceTokens +
+      r.findingsTokens +
+      r.repositoryMapTokens +
+      r.memoryTokens;
+  }
+
+  const rows = [...byPhase.values()].sort(
+    (a, b) =>
+      b.freshInputTokens + b.cacheReadTokens + b.cacheCreationTokens -
+      (a.freshInputTokens + a.cacheReadTokens + a.cacheCreationTokens),
+  );
+
+  const totals = rows.reduce((acc, r) => {
+    acc.freshInputTokens += r.freshInputTokens;
+    acc.cacheReadTokens += r.cacheReadTokens;
+    acc.cacheCreationTokens += r.cacheCreationTokens;
+    acc.outputTokens += r.outputTokens;
+    acc.costUsd += r.costUsd;
+    acc.staticContextTokens += r.staticContextTokens;
+    acc.injectedContextTokens += r.injectedContextTokens;
+    return acc;
+  }, emptyRow('(totals)'));
+
+  return { byPhase: rows, totals };
 }
 
 export function getRuntimeAttribution(db: DrizzleDb, taskId: string) {
