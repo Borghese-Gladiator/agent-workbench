@@ -497,6 +497,26 @@ function registerTaskSignalCommands(task: Command): void {
         handleError(err);
       }
     });
+
+  task
+    .command('deliver-worktree [repositoryId] [taskId]')
+    .description(
+      "Recover-and-land: open a DRAFT PR from the task's committed worktree branch when the run " +
+        'never reached release (verify hung/was killed). Verification is NOT run; review before merge.',
+    )
+    .action(async (repositoryId: string | undefined, taskId: string | undefined) => {
+      try {
+        const repoId = resolveRepositoryId(repositoryId);
+        const tId = resolveTaskId(taskId);
+        const res = await daemonClient.post<{ ok: boolean; prNumber: number; prUrl?: string; title: string }>(
+          `/api/tasks/${repoId}/${tId}/deliver-worktree`,
+        );
+        if (outputOptions().json) emitJson(res);
+        else printInfo(`Draft PR #${res.prNumber} opened${res.prUrl ? ` — ${res.prUrl}` : ''} (verification NOT run).`);
+      } catch (err) {
+        handleError(err);
+      }
+    });
 }
 
 /** Opens the daemon's WebSocket event stream and invokes onEvent for each parsed message. */

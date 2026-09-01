@@ -24,10 +24,17 @@ import {
   getRuntimeAttribution,
   listFindingsByTask,
   getFleetStatus,
+  loadRunStateSnapshot,
 } from '@awb/database';
 import type { TaskSize } from '@awb/domain';
 import { validateTaskDag, TaskDagValidationError, type TaskDagSpec } from '@awb/domain';
-import { routeFeedback, NO_ROUTING_SIGNAL, type FeedbackRoutingSignal } from '@awb/github';
+import { getChangedPaths, getDefaultBranch } from '@awb/repository';
+import {
+  routeFeedback,
+  NO_ROUTING_SIGNAL,
+  recoverAndDeliverDraft,
+  type FeedbackRoutingSignal,
+} from '@awb/github';
 import { getTemporalClient, workflowIdFor } from '../temporal-client.js';
 import { taskQueueName } from '../temporal-worker-constants.js';
 import type { TaskScheduler } from '../scheduler.js';
@@ -45,6 +52,26 @@ export interface CreatedTaskRecord {
   size: TaskSize | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * The base branch a recovered draft PR opens against. Mirrors the normal release path
+ * (run-phase.ts: `runState.lease?.baseRef ?? 'main'`) so recovery and release cannot disagree about
+ * where a branch forked from: for a stacked child that is its parent's branch, NOT the repo default.
+ *
+ * Extracted from the route so the rule is unit-testable without booting Temporal — the earlier
+ * inline form guarded this with a condition that was always true, which no route test could catch.
+ */
+export async function resolveRecoveryBaseBranch(
+  lease: { baseRef?: string } | undefined,
+  repoDefaultBranch: () => Promise<string>,
+): Promise<string> {
+  if (lease?.baseRef) return lease.baseRef;
+  try {
+    return await repoDefaultBranch();
+  } catch {
+    return 'main';
+  }
 }
 
 export function registerTaskRoutes(
@@ -367,4 +394,51 @@ export function registerTaskRoutes(
     // human-gate: the caller (UI/poller) surfaces a gate for a human to resolve; no auto signal.
     return { category: decision.category, action: decision.action };
   });
+
+  // Recover-and-land (TASK-114): open a DRAFT PR straight from a task's committed worktree branch,
+  // for when implement completed but the run never reached `release` (verify hung/was killed, or the
+  // stack was torn down). Reads the durable run-state snapshot for the worktree/branch/candidate SHA
+  // + evidence, computes the changed paths, and delivers via the same primitive the release phase
+  // uses. Never merges, never marks ready. This is the programmatic form of the hand-run rescue.
+  app.post<{ Params: { repositoryId: string; taskId: string } }>(
+    '/api/tasks/:repositoryId/:taskId/deliver-worktree',
+    async (request, reply) => {
+      const { repositoryId, taskId } = request.params;
+      const snapshot = loadRunStateSnapshot(database.db, { taskId, repositoryId });
+      const worktreePath = snapshot.worktreePath;
+      const branchName = snapshot.lease?.branchName;
+      const candidateSha = snapshot.candidateSha;
+      if (!worktreePath || !branchName || !candidateSha) {
+        reply.code(409);
+        return {
+          error:
+            'deliver-worktree: no committed candidate for this task yet (missing worktree, branch, or candidate SHA) — nothing to deliver.',
+        };
+      }
+      const baseBranch = await resolveRecoveryBaseBranch(snapshot.lease, () =>
+        getDefaultBranch(worktreePath),
+      );
+      try {
+        const changedPaths = await getChangedPaths(
+          worktreePath,
+          snapshot.baseSha ?? '0'.repeat(40),
+          candidateSha,
+        );
+        const result = await recoverAndDeliverDraft({
+          worktreePath,
+          branchName,
+          baseBranch,
+          candidateSha,
+          objective: snapshot.contract?.objective ?? snapshot.prompt ?? `Task ${taskId}`,
+          changedPaths,
+          evidence: snapshot.verificationEvidence ?? [],
+          unmetReason: 'delivered via recover-and-land (verify did not complete)',
+        });
+        return { ok: true, prNumber: result.prNumber, prUrl: result.prUrl, title: result.title };
+      } catch (err) {
+        reply.code(502);
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    },
+  );
 }

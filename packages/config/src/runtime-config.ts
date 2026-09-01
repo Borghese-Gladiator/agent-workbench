@@ -21,6 +21,13 @@ export interface RuntimeConfig {
   readonly daemonUrl: string;
   /** OTLP/HTTP endpoint the worker + daemon export spans to. */
   readonly otelEndpoint: string;
+  /**
+   * Max `runPhase` activities the worker executes at once (TASK-112). Each heavy phase
+   * (implement/verify) can spawn a `vitest` worker pool, so an unbounded default lets N concurrent
+   * tasks fork hundreds of processes and thrash the box (observed: load ~377 with 10 tasks). Small by
+   * default so a single-developer machine stays responsive; raise it on a bigger box.
+   */
+  readonly maxConcurrentActivities: number;
 }
 
 export const DEFAULT_DAEMON_PORT = 4417;
@@ -30,6 +37,7 @@ export const DEFAULT_OTEL_OTLP_PORT = 4318;
 export const DEFAULT_OTEL_UI_PORT = 3000;
 export const DEFAULT_OTEL_CONTAINER = 'awb-otel-lgtm';
 export const DEFAULT_TASK_QUEUE = 'awb-task-queue';
+export const DEFAULT_MAX_CONCURRENT_ACTIVITIES = 4;
 
 function envPort(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -37,6 +45,17 @@ function envPort(name: string, fallback: number): number {
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1 || n > 65535) {
     throw new Error(`${name} must be an integer port in 1–65535, got "${raw}"`);
+  }
+  return n;
+}
+
+/** A positive-integer env knob (not a port), for bounded counts like the activity-concurrency cap. */
+function envPositiveInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`${name} must be a positive integer, got "${raw}"`);
   }
   return n;
 }
@@ -63,6 +82,10 @@ export function resolveRuntimeConfig(): RuntimeConfig {
     temporalAddress: envString('AWB_TEMPORAL_ADDRESS', `127.0.0.1:${temporalPort}`),
     daemonUrl: envString('AWB_DAEMON_URL', `http://127.0.0.1:${daemonPort}`),
     otelEndpoint: envString('OTEL_EXPORTER_OTLP_ENDPOINT', `http://127.0.0.1:${otelOtlpPort}`),
+    maxConcurrentActivities: envPositiveInt(
+      'AWB_MAX_CONCURRENT_ACTIVITIES',
+      DEFAULT_MAX_CONCURRENT_ACTIVITIES,
+    ),
   };
 }
 

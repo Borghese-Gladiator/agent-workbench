@@ -17,6 +17,7 @@
   "dependencies": {
     "@awb/domain": "workspace:*",
     "@awb/evidence": "workspace:*",
+    "@awb/repository": "workspace:*",
     "@octokit/rest": "^21.0.2"
   },
   "devDependencies": {

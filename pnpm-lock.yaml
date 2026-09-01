@@ -345,6 +345,9 @@ importers:
       '@awb/evidence':
         specifier: workspace:*
         version: link:../evidence
+      '@awb/repository':
+        specifier: workspace:*
+        version: link:../repository
       '@octokit/rest':
         specifier: ^21.0.2
         version: 21.1.1
@@ -672,6 +675,9 @@ importers:
       '@awb/planning':
         specifier: workspace:*
         version: link:../../packages/planning
+      '@awb/policy':
+        specifier: workspace:*
+        version: link:../../packages/policy
       '@awb/qa':
         specifier: workspace:*
         version: link:../../packages/qa

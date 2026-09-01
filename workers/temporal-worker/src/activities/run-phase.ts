@@ -91,7 +91,8 @@ import { createDaemonClient } from '../daemon-client.js';
 import { createControlPlaneEmitter } from './control-plane-events.js';
 import { isResumableTransportError } from '@awb/agent-gateway';
 import { withSpan } from '@awb/telemetry';
-import { getDiffLineStats } from '@awb/repository';
+import { getDiffLineStats, getChangedPaths } from '@awb/repository';
+import { evaluateOverReach, type TaskSize } from '@awb/policy';
 import {
   runIdForTask,
   createDatabase,
@@ -1028,6 +1029,34 @@ const implementHandler: PhaseHandler = {
     const candidateCommitExists = realBuilder ? candidateSha !== runState.baseSha : true;
     const targetedChecksPass = realBuilder ? everySliceAccountedFor : true;
 
+    // Over-reach guard (TASK-113): compare the ACTUAL diff against the change's declared scope so a
+    // run that swept `archive/`/`packages/` or ballooned far past its size can't sail through. Only
+    // meaningful on the real path with a genuine candidate commit; the mock path keeps this true.
+    // The check itself never throws the run — a failure to read the diff leaves the field true (the
+    // gate is a guard against gross over-reach, not a hard dependency of the phase).
+    let diffWithinApprovedScope = true;
+    if (realBuilder && candidateCommitExists && runState.worktreePath) {
+      try {
+        const changedPaths = await getChangedPaths(
+          runState.worktreePath,
+          runState.baseSha,
+          candidateSha,
+        );
+        const expectedPaths = plan.slices.flatMap((s) => s.likelyPaths);
+        const over = evaluateOverReach({
+          changedPaths,
+          expectedPaths,
+          size: runState.contract?.size as TaskSize | undefined,
+        });
+        diffWithinApprovedScope = over.withinScope;
+        if (!over.withinScope) {
+          console.warn(`implement over-reach (task ${state.taskId}): ${over.reasons.join('; ')}`);
+        }
+      } catch {
+        // Diff unreadable (e.g. shallow worktree) — do not fabricate an over-reach; leave the guard open.
+      }
+    }
+
     return {
       kind: 'evaluate',
       completion: {
@@ -1036,7 +1065,7 @@ const implementHandler: PhaseHandler = {
           candidateCommitExists,
           targetedChecksPass,
           builderBlockerOpen: false,
-          diffWithinApprovedScope: true,
+          diffWithinApprovedScope,
         },
       },
       evidenceIds: [`implement-${candidateSha}`],
