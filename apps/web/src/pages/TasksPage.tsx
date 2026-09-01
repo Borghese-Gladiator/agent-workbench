@@ -16,8 +16,8 @@ import {
 } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { deriveTaskStatus, STATUS_FILTER_OPTIONS } from '@/lib/task-status';
-import { relativeTime, shortId } from '@/lib/format';
+import { statusPresentation, STATUS_FILTER_OPTIONS } from '@/lib/task-status';
+import { deriveTaskTitle, formatTokens, relativeTime, shortId } from '@/lib/format';
 import { api, type Repository } from '../api/client.js';
 import { tasksApi, type TaskSummary } from '../api/tasks.js';
 import { useTaskListLiveRefresh } from '../hooks/useTaskListLiveRefresh.js';
@@ -73,10 +73,11 @@ export function TasksPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const rows = tasks.filter((t) => {
-      const status = deriveTaskStatus(t.condition, t.phase);
+      const status = statusPresentation(t.derivedStatus);
       if (statusFilter !== 'All' && status.label !== statusFilter) return false;
       if (repoFilter !== 'All' && t.repositoryId !== repoFilter) return false;
-      if (q && ![t.prompt, t.taskId, repoLabel(t)].join(' ').toLowerCase().includes(q)) return false;
+      if (q && ![t.prompt, t.title ?? '', t.taskId, repoLabel(t)].join(' ').toLowerCase().includes(q))
+        return false;
       return true;
     });
     rows.sort((a, b) =>
@@ -183,33 +184,52 @@ export function TasksPage() {
             <TableRow>
               <TableHead>Task</TableHead>
               <TableHead>Repository</TableHead>
-              <TableHead>Size</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Created</TableHead>
+              <TableHead>Phase</TableHead>
+              <TableHead className="text-right">Tokens</TableHead>
+              <TableHead className="text-right">Findings</TableHead>
+              <TableHead>Updated</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.map((task) => {
-              const status = deriveTaskStatus(task.condition, task.phase);
+              const status = statusPresentation(task.derivedStatus);
+              const totalTokens = task.inputTokens + task.outputTokens;
               return (
                 <TableRow
-                  key={task.workflowId}
+                  key={task.taskId}
                   className="cursor-pointer"
                   onClick={() => navigate(`/tasks/${task.repositoryId}/${task.taskId}`)}
                 >
                   <TableCell className="max-w-md align-top">
-                    <div className="font-mono text-xs text-primary">{shortId(task.taskId)}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-xs text-primary">{shortId(task.taskId)}</span>
+                      {task.retryOfTaskId && (
+                        <Badge variant="outline" className="text-[10px]">
+                          retry
+                        </Badge>
+                      )}
+                    </div>
                     <div className="mt-1 line-clamp-2 text-sm font-medium leading-snug text-foreground">
-                      {task.prompt}
+                      {task.title ?? deriveTaskTitle(task.prompt)}
                     </div>
                   </TableCell>
                   <TableCell className="align-top text-sm">{repoLabel(task)}</TableCell>
-                  <TableCell className="align-top text-sm text-muted-foreground">{task.size ?? '—'}</TableCell>
                   <TableCell className="align-top">
-                    <Badge variant={status.variant}>{status.label}</Badge>
+                    <Badge variant={status.badgeVariant}>{status.label}</Badge>
+                  </TableCell>
+                  <TableCell className="align-top text-sm capitalize text-muted-foreground">
+                    {task.phase}
+                    {task.attemptCount > 1 ? ` · ${task.attemptCount}` : ''}
+                  </TableCell>
+                  <TableCell className="align-top text-right font-mono text-sm tabular-nums text-muted-foreground">
+                    {formatTokens(totalTokens)}
+                  </TableCell>
+                  <TableCell className="align-top text-right font-mono text-sm tabular-nums text-muted-foreground">
+                    {task.openFindingCount}
                   </TableCell>
                   <TableCell className="align-top text-sm text-muted-foreground">
-                    {relativeTime(task.createdAt)}
+                    {relativeTime(task.updatedAt)}
                   </TableCell>
                 </TableRow>
               );

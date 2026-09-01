@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyWebsocket from '@fastify/websocket';
 import type { WorkbenchDatabase } from '@awb/database';
+import { backfillTaskSummaries } from '@awb/database';
 import { initDataDir } from '@awb/config';
 import { openWorkbenchDatabase } from './db.js';
 import { SemanticEventBus } from './event-bus.js';
@@ -10,6 +11,8 @@ import { registerWebSocketRoute } from './routes/websocket.js';
 import { registerInternalRoutes } from './routes/internal.js';
 import { registerStatusRoute } from './routes/status.js';
 import { registerMediaRoutes } from './routes/media.js';
+import { registerOverviewRoute } from './routes/overview.js';
+import { registerExecutionTreeRoute } from './routes/execution-tree.js';
 import { createTaskScheduler } from './scheduler-runtime.js';
 import type { TaskScheduler } from './scheduler.js';
 
@@ -30,11 +33,17 @@ export async function buildServer(): Promise<DaemonServer> {
   const eventBus = new SemanticEventBus();
   const scheduler = createTaskScheduler(database);
 
+  // Project a summary for any task created before the projection existed, so the list/board/overview
+  // show every task immediately on boot rather than only after its next workflow write.
+  backfillTaskSummaries(database.db);
+
   app.get('/api/health', async () => ({ status: 'ok' }));
   registerStatusRoute(app);
 
   registerRepositoryRoutes(app, database);
   registerTaskRoutes(app, database, scheduler);
+  registerOverviewRoute(app, database);
+  registerExecutionTreeRoute(app, database);
   registerWebSocketRoute(app, eventBus, database);
   registerInternalRoutes(app, database, eventBus, scheduler);
   registerMediaRoutes(app, database, layout.artifactsDir);

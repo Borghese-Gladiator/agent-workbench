@@ -1,8 +1,17 @@
 import { eq, inArray, or } from 'drizzle-orm';
-import type { TaskPhase, RunCondition, DeliveryState, ScheduleState, TaskSize } from '@awb/domain';
+import type {
+  TaskPhase,
+  RunCondition,
+  DeliveryState,
+  ScheduleState,
+  TaskSize,
+  HumanGateReason,
+} from '@awb/domain';
+import { deriveTaskStatus } from '@awb/domain';
 import {
   tasks,
   taskDependencies,
+  taskSummary,
   runs,
   phaseAttempts,
   programDesigns,
@@ -66,9 +75,15 @@ export interface UpsertTaskInput {
   /** Scheduler-owned DAG state (task DAG orchestration). Written authoritatively by the daemon
    *  scheduler; a lifecycle sync that omits it must not change it. */
   scheduleState?: ScheduleState;
+  /** Optional concise title (set at create). Lineage/title are insert-only — later syncs ignore them. */
+  title?: string;
+  /** The task this one retries; set at create for a retry, establishing cross-task lineage. */
+  retryOfTaskId?: string;
+  /** Head of the retry chain; set at create (defaults to this task's own id for an original). */
+  rootTaskId?: string;
 }
 
-export function upsertTask(db: DrizzleDb, input: UpsertTaskInput): void {
+export function upsertTask(db: DrizzleDb, input: UpsertTaskInput, summaryContext?: TaskSummaryContext): void {
   const now = new Date().toISOString();
   const existing = db.select().from(tasks).where(eq(tasks.id, input.id)).all()[0];
 
@@ -83,6 +98,11 @@ export function upsertTask(db: DrizzleDb, input: UpsertTaskInput): void {
     parentTaskId: input.parentTaskId ?? existing?.parentTaskId ?? null,
     baseBranch: input.baseBranch ?? existing?.baseBranch ?? null,
     scheduleState: input.scheduleState ?? existing?.scheduleState ?? 'ready',
+    // Title + lineage are set once, at first insert. Preserve the existing values on any later sync
+    // (a sync-update never carries them), and default an original's root to its own id.
+    title: existing?.title ?? input.title ?? null,
+    retryOfTaskId: existing?.retryOfTaskId ?? input.retryOfTaskId ?? null,
+    rootTaskId: existing?.rootTaskId ?? input.rootTaskId ?? input.id,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -106,6 +126,10 @@ export function upsertTask(db: DrizzleDb, input: UpsertTaskInput): void {
       },
     })
     .run();
+
+  // Keep the durable read model in lock-step with the task row on every transition — this is what
+  // stops the list/board going stale once a task parks awaiting-human.
+  refreshTaskSummary(db, input.id, summaryContext ?? {});
 }
 
 export function getTask(db: DrizzleDb, taskId: string): TaskRow | undefined {
@@ -192,6 +216,211 @@ export function listTasksWithRepository(db: DrizzleDb): TaskWithRepository[] {
     .from(tasks)
     .leftJoin(repositories, eq(tasks.repositoryId, repositories.id))
     .all() as TaskWithRepository[];
+}
+
+/**
+ * Extra, non-`tasks`-row context a summary recompute can be given by the caller when it is already in
+ * hand (e.g. the run-state snapshot carries the pending gate). Everything here is OPTIONAL: when a
+ * field is omitted, refreshTaskSummary keeps whatever the previous summary row had, so a partial
+ * update (a plain task upsert with no gate info) never clobbers a gate reason set by an earlier
+ * run-state write. Passing `null` explicitly clears the field (e.g. gate resolved).
+ */
+export interface TaskSummaryContext {
+  pendingGateReason?: HumanGateReason | null;
+  candidateSha?: string | null;
+  pullRequestUrl?: string | null;
+}
+
+/** Row shape returned to summary readers (list/board/approvals), repo name joined in. */
+export interface TaskSummaryWithRepository {
+  taskId: string;
+  repositoryId: string;
+  repositoryName: string | null;
+  prompt: string;
+  /** Concise title (null → the client derives one from the prompt). */
+  title: string | null;
+  /** Cross-task retry lineage, joined from the tasks row. */
+  retryOfTaskId: string | null;
+  rootTaskId: string | null;
+  phase: TaskPhase;
+  condition: RunCondition;
+  deliveryState: DeliveryState;
+  size: TaskSize | null;
+  derivedStatus: string;
+  attemptCount: number;
+  openFindingCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number | null;
+  pendingGateReason: HumanGateReason | null;
+  candidateSha: string | null;
+  pullRequestUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+  indexedAt: string;
+}
+
+/**
+ * Recomputes the durable `task_summary` row for a task from current SQLite state. The daemon calls it
+ * on EVERY workflow transition it persists (task upsert, run-state snapshot, observability), so the
+ * list/board/approval read model tracks the workflow even after a task parks awaiting-human (when the
+ * bare `tasks` row stopped moving).
+ *
+ * Rollups are computed here, not stored incrementally, so the row is always internally consistent
+ * with the child tables: tokens summed from model_invocations→agent_sessions, open findings counted,
+ * phase-attempt count, latest candidate SHA and PR url. `context` supplies values not derivable from
+ * the `tasks` row (the pending gate reason); omitted context fields preserve the prior row's value.
+ * No-op when the task row is absent.
+ */
+export function refreshTaskSummary(db: DrizzleDb, taskId: string, context: TaskSummaryContext = {}): void {
+  const task = db.select().from(tasks).where(eq(tasks.id, taskId)).all()[0];
+  if (!task) return;
+
+  const prior = db.select().from(taskSummary).where(eq(taskSummary.taskId, taskId)).all()[0];
+
+  // Token totals — sum invocations through their sessions to this task (same join as getTokenBreakdown).
+  const invRows = db
+    .select({
+      inputTokens: modelInvocations.inputTokens,
+      outputTokens: modelInvocations.outputTokens,
+      costUsd: modelInvocations.costUsd,
+    })
+    .from(modelInvocations)
+    .innerJoin(agentSessions, eq(agentSessions.id, modelInvocations.agentSessionId))
+    .where(eq(agentSessions.taskId, taskId))
+    .all();
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let costUsd = 0;
+  let anyCost = false;
+  for (const r of invRows) {
+    inputTokens += r.inputTokens;
+    outputTokens += r.outputTokens;
+    if (r.costUsd != null) {
+      costUsd += r.costUsd;
+      anyCost = true;
+    }
+  }
+
+  const attemptCount = db
+    .select({ id: phaseAttempts.id })
+    .from(phaseAttempts)
+    .where(eq(phaseAttempts.taskId, taskId))
+    .all().length;
+  const openFindingCount = db
+    .select({ status: findings.status })
+    .from(findings)
+    .where(eq(findings.taskId, taskId))
+    .all()
+    .filter((r) => r.status === 'open').length;
+
+  const now = new Date().toISOString();
+  const derivedStatus = deriveTaskStatus(task.condition, task.phase);
+
+  // Preserve prior context values when the caller didn't supply them (a plain task upsert must not
+  // wipe a gate reason a run-state write recorded). `null` in context explicitly clears.
+  const pendingGateReason =
+    context.pendingGateReason !== undefined
+      ? context.pendingGateReason
+      : (prior?.pendingGateReason as HumanGateReason | null | undefined) ?? null;
+  const candidateSha =
+    context.candidateSha !== undefined ? context.candidateSha : prior?.candidateSha ?? null;
+  const pullRequestUrl =
+    context.pullRequestUrl !== undefined ? context.pullRequestUrl : prior?.pullRequestUrl ?? null;
+
+  const row = {
+    taskId,
+    repositoryId: task.repositoryId,
+    phase: task.phase,
+    condition: task.condition,
+    deliveryState: task.deliveryState,
+    size: task.size ?? null,
+    derivedStatus,
+    attemptCount,
+    openFindingCount,
+    inputTokens,
+    outputTokens,
+    costUsd: anyCost ? costUsd : null,
+    pendingGateReason,
+    candidateSha,
+    pullRequestUrl,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    indexedAt: now,
+  };
+
+  db.insert(taskSummary).values(row).onConflictDoUpdate({ target: taskSummary.taskId, set: row }).run();
+}
+
+/** Reads the durable task-summary projection joined to repo name — the list/board/approval read model. */
+export function listTaskSummaries(
+  db: DrizzleDb,
+  filter?: { repositoryId?: string },
+): TaskSummaryWithRepository[] {
+  const rows = db
+    .select({
+      taskId: taskSummary.taskId,
+      repositoryId: taskSummary.repositoryId,
+      repositoryName: repositories.name,
+      prompt: tasks.prompt,
+      title: tasks.title,
+      retryOfTaskId: tasks.retryOfTaskId,
+      rootTaskId: tasks.rootTaskId,
+      phase: taskSummary.phase,
+      condition: taskSummary.condition,
+      deliveryState: taskSummary.deliveryState,
+      size: taskSummary.size,
+      derivedStatus: taskSummary.derivedStatus,
+      attemptCount: taskSummary.attemptCount,
+      openFindingCount: taskSummary.openFindingCount,
+      inputTokens: taskSummary.inputTokens,
+      outputTokens: taskSummary.outputTokens,
+      costUsd: taskSummary.costUsd,
+      pendingGateReason: taskSummary.pendingGateReason,
+      candidateSha: taskSummary.candidateSha,
+      pullRequestUrl: taskSummary.pullRequestUrl,
+      createdAt: taskSummary.createdAt,
+      updatedAt: taskSummary.updatedAt,
+      indexedAt: taskSummary.indexedAt,
+    })
+    .from(taskSummary)
+    .leftJoin(tasks, eq(taskSummary.taskId, tasks.id))
+    .leftJoin(repositories, eq(taskSummary.repositoryId, repositories.id))
+    .all() as TaskSummaryWithRepository[];
+
+  return filter?.repositoryId ? rows.filter((r) => r.repositoryId === filter.repositoryId) : rows;
+}
+
+/** Reads one durable task-summary row (for the freshness comparison on the detail page). */
+export function getTaskSummary(db: DrizzleDb, taskId: string): TaskSummaryWithRepository | undefined {
+  return listTaskSummaries(db).find((r) => r.taskId === taskId);
+}
+
+/**
+ * Projects a summary row for every task that lacks one — run once at daemon startup so tasks created
+ * before the projection existed (or before this migration) appear in the list/board immediately,
+ * rather than only after their next workflow write. Idempotent: recomputes from current SQLite state.
+ */
+export function backfillTaskSummaries(db: DrizzleDb): number {
+  const allTaskIds = db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .all()
+    .map((r) => r.id);
+  const summarized = new Set(
+    db
+      .select({ id: taskSummary.taskId })
+      .from(taskSummary)
+      .all()
+      .map((r) => r.id),
+  );
+  let created = 0;
+  for (const id of allTaskIds) {
+    if (summarized.has(id)) continue;
+    refreshTaskSummary(db, id);
+    created += 1;
+  }
+  return created;
 }
 
 /**
@@ -384,6 +613,8 @@ export function deleteTask(db: DrizzleDb, taskId: string): boolean {
     tx.delete(taskDependencies)
       .where(or(eq(taskDependencies.taskId, taskId), eq(taskDependencies.dependsOnTaskId, taskId)))
       .run();
+    // task_summary FKs tasks(id), so drop the projection row before the task row.
+    tx.delete(taskSummary).where(eq(taskSummary.taskId, taskId)).run();
     tx.delete(tasks).where(eq(tasks.id, taskId)).run();
   });
 

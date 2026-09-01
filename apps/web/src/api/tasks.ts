@@ -33,12 +33,125 @@ export interface MaintainabilityFinding {
   description: string;
 }
 
+/**
+ * By-model token/cost rollup for a task. Computed server-side (getTokenBreakdown) and already on the
+ * wire — main's client types dropped it, so the Usage & Time section never saw it. Re-added here.
+ */
+export interface TokenBreakdown {
+  totals: {
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+    cacheCreationInputTokens: number;
+    costUsd: number | null;
+  };
+  byModel: Record<
+    string,
+    {
+      inputTokens: number;
+      outputTokens: number;
+      cachedInputTokens: number;
+      cacheCreationInputTokens: number;
+      costUsd: number | null;
+    }
+  >;
+}
+
+/** The 12 runtime-attribution buckets per phase attempt (where wall-clock went). One row per attempt. */
+export interface RuntimeAttributionRow {
+  phase: string;
+  environmentSetupMs: number;
+  dependencyInstallMs: number;
+  modelWaitMs: number;
+  modelGenerationMs: number;
+  toolExecutionMs: number;
+  testExecutionMs: number;
+  serviceStartupMs: number;
+  qaExecutionMs: number;
+  artifactProcessingMs: number;
+  githubOperationMs: number;
+  humanWaitMs: number;
+  retryBackoffMs: number;
+}
+
+/**
+ * Freshness envelope: whether the daemon answered from live Temporal state or fell back to the durable
+ * projection, and whether the projection is known to lag the live workflow.
+ */
+export interface TaskFreshness {
+  liveWorkflowAvailable: boolean;
+  workflowUpdatedAt: string | null;
+  indexedAt: string;
+  isIndexBehind: boolean;
+}
+
 export interface TaskStateResponse {
   state: TaskWorkflowState;
   openFindings: string[];
   pendingHumanGate: TaskWorkflowState['pendingHumanGate'];
   /** Advisory maintainability findings (category maintainability, severity note). */
   maintainabilityFindings?: MaintainabilityFinding[];
+  /** By-model token/cost rollup (already computed server-side; previously dropped by client types). */
+  tokenBreakdown?: TokenBreakdown;
+  /** Per-phase-attempt runtime buckets (already computed server-side; previously dropped). */
+  runtimeAttribution?: RuntimeAttributionRow[];
+  /** Freshness of this response (live vs durable-projection fallback). */
+  freshness?: TaskFreshness;
+}
+
+/** Leaf of the execution tree: one model invocation's token/cost/time facts. */
+export interface ModelInvocationNode {
+  id: string;
+  provider: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number | null;
+  cacheCreationInputTokens: number | null;
+  costUsd: number | null;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+/** Per-session context-composition buckets (token count by source). */
+export interface ContextCompositionNode {
+  contractTokens: number;
+  planTokens: number;
+  diffTokens: number;
+  evidenceTokens: number;
+  findingsTokens: number;
+  repositoryMapTokens: number;
+  memoryTokens: number;
+  instructionTokens: number;
+}
+
+/** Execution-tree level 2: an agent session with its model invocations + context composition. */
+export interface AgentSessionNode {
+  id: string;
+  phase: string;
+  runtime: string;
+  model: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  invocations: ModelInvocationNode[];
+  contextComposition: ContextCompositionNode | null;
+}
+
+/** Execution-tree level 1: a phase attempt with its child agent sessions. */
+export interface PhaseAttemptNode {
+  id: string;
+  phase: string;
+  attemptNumber: number;
+  retryOf: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  outcome: string | null;
+  sessions: AgentSessionNode[];
+}
+
+export interface ExecutionTreeResponse {
+  taskId: string;
+  phaseAttempts: PhaseAttemptNode[];
 }
 
 /** A committed QA-media artifact the Evidence Viewer can play/preview locally. */
@@ -71,6 +184,21 @@ export interface TaskSummary {
   size: TaskSize | null;
   createdAt: string;
   updatedAt: string;
+  // Projection fields from the durable task_summary read model (TASK-80/81). The list/board/overview
+  // read these so they keep advancing after a task parks awaiting-human.
+  derivedStatus: string;
+  attemptCount: number;
+  openFindingCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number | null;
+  pendingGateReason: string | null;
+  candidateSha: string | null;
+  pullRequestUrl: string | null;
+  title: string | null;
+  retryOfTaskId: string | null;
+  rootTaskId: string | null;
+  indexedAt: string;
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -89,10 +217,22 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const tasksApi = {
   list: () => request<TaskSummary[]>('GET', '/tasks'),
-  create: (repositoryId: string, prompt: string) =>
-    request<{ taskId: string; workflowId: string }>('POST', '/tasks', { repositoryId, prompt }),
+  create: (
+    repositoryId: string,
+    prompt: string,
+    opts?: { size?: TaskSize; title?: string; retryOfTaskId?: string },
+  ) =>
+    request<{ taskId: string; workflowId: string }>('POST', '/tasks', {
+      repositoryId,
+      prompt,
+      ...(opts?.size ? { size: opts.size } : {}),
+      ...(opts?.title ? { title: opts.title } : {}),
+      ...(opts?.retryOfTaskId ? { retryOfTaskId: opts.retryOfTaskId } : {}),
+    }),
   getState: (repositoryId: string, taskId: string) =>
     request<TaskStateResponse>('GET', `/tasks/${repositoryId}/${taskId}`),
+  executionTree: (repositoryId: string, taskId: string) =>
+    request<ExecutionTreeResponse>('GET', `/tasks/${repositoryId}/${taskId}/execution-tree`),
   listMedia: (repositoryId: string, taskId: string) =>
     request<TaskMediaArtifact[]>('GET', `/tasks/${repositoryId}/${taskId}/media`),
   approveContract: (repositoryId: string, taskId: string, contractVersion: number, size?: TaskSize) =>

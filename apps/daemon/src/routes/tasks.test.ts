@@ -20,7 +20,10 @@ interface RecordedSignal {
   args: unknown[];
 }
 
-function makeStubClient(recorded: RecordedSignal[], opts: { failWith?: Error; starts?: unknown[][] } = {}): Client {
+function makeStubClient(
+  recorded: RecordedSignal[],
+  opts: { failWith?: Error; starts?: unknown[][]; queryFailsWith?: Error; queryState?: unknown } = {},
+): Client {
   return {
     workflow: {
       async start(_wf: unknown, options: { args: unknown[] }) {
@@ -31,6 +34,12 @@ function makeStubClient(recorded: RecordedSignal[], opts: { failWith?: Error; st
           async signal(signalDef: { name: string }, ...args: unknown[]) {
             if (opts.failWith) throw opts.failWith;
             recorded.push({ workflowId, signal: signalDef.name, args });
+          },
+          async query(queryDef: { name: string }) {
+            if (opts.queryFailsWith) throw opts.queryFailsWith;
+            if (queryDef.name === 'getCurrentState') return opts.queryState ?? {};
+            if (queryDef.name === 'getOpenFindings') return [];
+            return undefined;
           },
         };
       },
@@ -171,6 +180,86 @@ describe('task PR-lifecycle signal routes', () => {
     expect(res.statusCode).toBe(201);
     expect(res.json().baseBranch).toBeUndefined();
     expect((starts[0]?.[0] as { baseBranch?: string })?.baseBranch).toBeUndefined();
+  });
+
+  it('GET /api/tasks reads the projection: additive derived-status/rollup/lineage fields', async () => {
+    upsertTask(database.db, { id: 'task-p', repositoryId: 'repo-1', prompt: 'projected', condition: 'awaiting-human', phase: 'implement' });
+    const res = await app.inject({ method: 'GET', url: '/api/tasks' });
+    expect(res.statusCode).toBe(200);
+    const rows = res.json() as Array<Record<string, unknown>>;
+    const row = rows.find((r) => r.taskId === 'task-p')!;
+    // Base shape preserved…
+    expect(row).toMatchObject({ taskId: 'task-p', repositoryId: 'repo-1', prompt: 'projected', repositoryName: 'repo' });
+    // …plus the additive projection fields.
+    expect(row.derivedStatus).toBe('awaiting-human');
+    expect(row).toHaveProperty('attemptCount', 0);
+    expect(row).toHaveProperty('openFindingCount', 0);
+    expect(row).toHaveProperty('inputTokens', 0);
+    expect(row).toHaveProperty('rootTaskId', 'task-p');
+    expect(row).toHaveProperty('indexedAt');
+  });
+
+  it('POST /api/tasks accepts title + retryOfTaskId and resolves rootTaskId from the parent summary', async () => {
+    setTemporalClientForTesting(makeStubClient(recorded, { starts: [] }));
+    // An original task whose own root is itself.
+    upsertTask(database.db, { id: 'task-orig', repositoryId: 'repo-1', prompt: 'orig' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { repositoryId: 'repo-1', prompt: 'retry', title: 'A retry', retryOfTaskId: 'task-orig' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ retryOfTaskId: 'task-orig', rootTaskId: 'task-orig' });
+
+    const child = res.json().taskId as string;
+    expect(getTask(database.db, child)).toMatchObject({
+      title: 'A retry',
+      retryOfTaskId: 'task-orig',
+      rootTaskId: 'task-orig',
+    });
+  });
+
+  it('POST /api/tasks retry-of-a-retry keeps pointing at the original root', async () => {
+    setTemporalClientForTesting(makeStubClient(recorded, { starts: [] }));
+    upsertTask(database.db, { id: 'task-root', repositoryId: 'repo-1', prompt: 'root' });
+    upsertTask(database.db, { id: 'task-mid', repositoryId: 'repo-1', prompt: 'mid', retryOfTaskId: 'task-root', rootTaskId: 'task-root' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { repositoryId: 'repo-1', prompt: 'again', retryOfTaskId: 'task-mid' },
+    });
+    expect(res.statusCode).toBe(201);
+    // Root resolves through the parent summary's rootTaskId, not the immediate parent.
+    expect(res.json()).toMatchObject({ retryOfTaskId: 'task-mid', rootTaskId: 'task-root' });
+  });
+
+  it('GET task-state emits a freshness envelope when Temporal is live', async () => {
+    setTemporalClientForTesting(makeStubClient(recorded, { queryState: { phase: 'implement', condition: 'running', deliveryState: 'not-started' } }));
+    upsertTask(database.db, { id: 'task-live', repositoryId: 'repo-1', prompt: 'live' });
+    const res = await app.inject({ method: 'GET', url: '/api/tasks/repo-1/task-live' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.freshness.liveWorkflowAvailable).toBe(true);
+    expect(body.freshness).toHaveProperty('indexedAt');
+  });
+
+  it('GET task-state stays responsive from the projection when Temporal is degraded (liveUnavailable)', async () => {
+    setTemporalClientForTesting(makeStubClient(recorded, { queryFailsWith: new Error('temporal down') }));
+    upsertTask(database.db, { id: 'task-deg', repositoryId: 'repo-1', prompt: 'deg', condition: 'awaiting-human', phase: 'implement' });
+    const res = await app.inject({ method: 'GET', url: '/api/tasks/repo-1/task-deg' });
+    // No 404 — durable fallback keeps the detail page alive.
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.freshness.liveWorkflowAvailable).toBe(false);
+    expect(body.state).toMatchObject({ condition: 'awaiting-human', phase: 'implement' });
+  });
+
+  it('GET task-state 404s only when Temporal is degraded AND there is no projection row', async () => {
+    setTemporalClientForTesting(makeStubClient(recorded, { queryFailsWith: new Error('temporal down') }));
+    const res = await app.inject({ method: 'GET', url: '/api/tasks/repo-1/task-missing' });
+    expect(res.statusCode).toBe(404);
   });
 
   it('returns 404 when the target workflow signal fails', async () => {

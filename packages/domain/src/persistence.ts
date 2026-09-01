@@ -3,6 +3,7 @@ import { TaskContractSchema, TaskSizeSchema } from './contract.js';
 import { ImplementationPlanSchema, ProgramDesignSchema } from './plan.js';
 import { WorkspaceLeaseSchema } from './workspace.js';
 import { EvidenceSchema, FindingSchema, ArtifactRecordSchema } from './evidence.js';
+import { HumanGateReasonSchema } from './lifecycle.js';
 
 /**
  * The serializable snapshot of the worker's per-task run-state that crosses the worker→daemon
@@ -23,6 +24,13 @@ export const RunStateSnapshotSchema = z.object({
   programDesign: ProgramDesignSchema.optional(),
   baseSha: z.string().optional(),
   candidateSha: z.string().optional(),
+  /**
+   * The gate reason the task is currently parked on (awaiting-human), carried so the daemon can push
+   * it into the task_summary projection on a run-state write — the state where the bare `tasks` row
+   * stops moving and the list/board would otherwise go stale on the pending reason. Absent when the
+   * task is not gated.
+   */
+  pendingHumanGate: HumanGateReasonSchema.optional(),
   worktreePath: z.string().optional(),
   lease: WorkspaceLeaseSchema.optional(),
   verificationEvidence: z.array(EvidenceSchema),
