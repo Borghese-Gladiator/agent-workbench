@@ -33,11 +33,23 @@ const SKIPPABLE_PLANNING_PHASES: Record<TaskSize, TaskPhase[]> = {
 };
 
 /**
- * The ordered subset of `TASK_PHASE_ORDER` a run of the given size walks. A subset of the
- * full order with the size's skippable planning phases removed; ordering is preserved.
+ * Optional shaping input for {@link phaseSetForSize}. `disableProgramDesign` additionally removes
+ * the `program-design` phase from the set (on top of the size skip-set) so an A/B run can compare
+ * program-design vs no-program-design without the workflow reading env/config live. Threaded from
+ * config at workflow-start into the deterministic workflow.
  */
-export function phaseSetForSize(size: TaskSize): TaskPhase[] {
+export interface PhaseSetOptions {
+  disableProgramDesign?: boolean;
+}
+
+/**
+ * The ordered subset of `TASK_PHASE_ORDER` a run of the given size walks. A subset of the
+ * full order with the size's skippable planning phases removed; ordering is preserved. When
+ * `opts.disableProgramDesign` is set, `program-design` is additionally dropped regardless of size.
+ */
+export function phaseSetForSize(size: TaskSize, opts?: PhaseSetOptions): TaskPhase[] {
   const skip = new Set(SKIPPABLE_PLANNING_PHASES[size]);
+  if (opts?.disableProgramDesign) skip.add('program-design');
   return TASK_PHASE_ORDER.filter((p) => !skip.has(p));
 }
 

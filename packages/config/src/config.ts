@@ -20,6 +20,14 @@ export const WorkbenchConfigSchema = z.object({
    * `Repository.isEnterpriseRepo`). Matched at registration time; e.g. `["~/Klaviyo/Repos"]`.
    */
   enterpriseRepoRoots: z.array(z.string()).default([]),
+  // Planning-shape knobs. `disableProgramDesign` drops the separate program-design phase from an
+  // L run's phase set so an A/B run can compare program-design vs no-program-design (rework/loop-back
+  // and reviewed-vs-total ratio). Off by default — the full L ceremony is unchanged.
+  planning: z
+    .object({
+      disableProgramDesign: z.boolean().default(false),
+    })
+    .default({ disableProgramDesign: false }),
 });
 export type WorkbenchConfig = z.infer<typeof WorkbenchConfigSchema>;
 
@@ -31,4 +39,17 @@ export function loadConfig(layout: DataDirLayout): WorkbenchConfig {
 
 export function saveConfig(layout: DataDirLayout, config: WorkbenchConfig): void {
   writeFileSync(layout.configFile, stringify(config), 'utf8');
+}
+
+/**
+ * The planning-shape config for the current data dir, with defaults applied. Read at workflow-start
+ * (TASK-61) so the deterministic workflow receives `disableProgramDesign` as an input rather than
+ * reading config live. Falls back to the schema defaults when no config file exists yet.
+ */
+export function resolvePlanningConfig(layout: DataDirLayout): WorkbenchConfig['planning'] {
+  try {
+    return loadConfig(layout).planning;
+  } catch {
+    return WorkbenchConfigSchema.parse({}).planning;
+  }
 }

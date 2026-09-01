@@ -36,6 +36,9 @@ import {
   listTasksByParent,
   listBlockedTasks,
   listStartableTasks,
+  insertTaskDependency,
+  listParentsOf,
+  listDependentsOf,
   ensureRun,
   ensurePhaseAttempt,
   deleteTask,
@@ -264,6 +267,58 @@ describe('stacked-PR edge (TASK-72)', () => {
       .values({ id: 'task-parent-lease', repositoryId: REPO_ID, taskId: 'task-parent', baseRef: 'main', baseSha: 'sha', branchName: 'awb/task-parent-slug', worktreePath: '/tmp/wt', executionProfile: 'native-trusted', allocatedPortsJson: '[]', state: 'active', createdAt: now })
       .run();
     expect(getTaskDeliveredBranch(db.db, 'task-parent')).toBe('awb/task-parent-slug');
+  });
+});
+
+describe('task_dependencies edges (TASK-102)', () => {
+  let dir: string;
+  let db: WorkbenchDatabase;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'awb-dep-'));
+    db = createDatabase(join(dir, 'wb.sqlite'));
+    db.db
+      .insert(repositories)
+      .values({ id: REPO_ID, canonicalPath: '/tmp/repo', name: 'repo', remoteUrl: null, defaultBranch: 'main', trusted: true, createdAt: now, updatedAt: now })
+      .run();
+    for (const id of ['A', 'B', 'C', 'D']) {
+      upsertTask(db.db, { id, repositoryId: REPO_ID, prompt: id });
+    }
+  });
+
+  afterEach(async () => {
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('insertTaskDependency is idempotent on (task_id, depends_on_task_id) and updates mode', () => {
+    insertTaskDependency(db.db, { taskId: 'B', dependsOnTaskId: 'A', mode: 'after' });
+    insertTaskDependency(db.db, { taskId: 'B', dependsOnTaskId: 'A', mode: 'stack' });
+    const parents = listParentsOf(db.db, 'B');
+    expect(parents).toHaveLength(1);
+    expect(parents[0]).toMatchObject({ dependsOnTaskId: 'A', mode: 'stack' });
+  });
+
+  it('listParentsOf returns every predecessor edge; listDependentsOf the reverse', () => {
+    // Diamond: D after B and C, both after A.
+    insertTaskDependency(db.db, { taskId: 'B', dependsOnTaskId: 'A', mode: 'after' });
+    insertTaskDependency(db.db, { taskId: 'C', dependsOnTaskId: 'A', mode: 'after' });
+    insertTaskDependency(db.db, { taskId: 'D', dependsOnTaskId: 'B', mode: 'stack' });
+    insertTaskDependency(db.db, { taskId: 'D', dependsOnTaskId: 'C', mode: 'after' });
+
+    expect(listParentsOf(db.db, 'D').map((e) => e.dependsOnTaskId).sort()).toEqual(['B', 'C']);
+    expect(listDependentsOf(db.db, 'A').map((e) => e.taskId).sort()).toEqual(['B', 'C']);
+    expect(listDependentsOf(db.db, 'B').map((e) => e.taskId)).toEqual(['D']);
+  });
+
+  it('deleteTask removes edges touching the task on either end', () => {
+    insertTaskDependency(db.db, { taskId: 'B', dependsOnTaskId: 'A', mode: 'stack' });
+    insertTaskDependency(db.db, { taskId: 'C', dependsOnTaskId: 'B', mode: 'after' });
+    deleteTask(db.db, 'B');
+    expect(listParentsOf(db.db, 'B')).toHaveLength(0);
+    expect(listDependentsOf(db.db, 'B')).toHaveLength(0);
+    expect(listParentsOf(db.db, 'C')).toHaveLength(0);
+    expect(db.sqlite.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
   });
 });
 
