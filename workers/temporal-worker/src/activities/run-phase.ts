@@ -205,12 +205,18 @@ function inheritedEnv(): Record<string, string> {
 }
 
 /**
- * Emits a Temporal Activity heartbeat with a per-command detail so a genuinely stuck verify phase
- * (a hung command that stops heartbeating) trips the Activity's `heartbeatTimeout` promptly instead
- * of blocking the full 30-minute startToClose. A no-op outside an Activity context (unit tests call
- * the verify handler directly), so it never throws there.
+ * How often a phase proves liveness while it runs. Must be comfortably below the
+ * workflow's `heartbeatTimeout` so a live phase never trips it (see packages/workflow/src/task-workflow.ts).
  */
-function heartbeatVerifyProgress(detail: { command: string; index: number; total: number }): void {
+const PHASE_HEARTBEAT_INTERVAL_MS = 20_000;
+
+/**
+ * Emits a Temporal Activity heartbeat so a genuinely stuck phase (a hung command or wedged agent
+ * that stops making progress) trips the Activity's `heartbeatTimeout` promptly instead of blocking the full
+ * 30-minute startToClose. A no-op outside an Activity context (unit tests call the verify handler
+ * directly), so it never throws there.
+ */
+function emitPhaseHeartbeat(detail: Record<string, unknown>): void {
   try {
     ActivityContext.current().heartbeat(detail);
   } catch {
@@ -223,17 +229,14 @@ function heartbeatVerifyProgress(detail: { command: string; index: number; total
  * `createDatabase` handle, so each verify command writes an incremental `command_executions` row
  * (open on spawn with live timing, closed on finish with exit code). The handle is opened lazily on
  * the first command and closed by the returned `close()` once the matrix finishes. Every DB touch is
- * wrapped defensively: verify observability must never fail the command or the phase. Also
- * heartbeats per command so Temporal sees liveness while the matrix runs.
+ * wrapped defensively: verify observability must never fail the command or the phase.
  */
 function makeDbCommandExecutionRecorder(input: {
   phaseAttemptId: string;
   runId: string;
   phase: TaskPhase;
-  total: number;
 }): { recorder: CommandExecutionRecorder; close: () => void } {
   let database: WorkbenchDatabase | undefined;
-  let index = 0;
 
   function ensureDb(): WorkbenchDatabase | undefined {
     if (database) return database;
@@ -248,9 +251,6 @@ function makeDbCommandExecutionRecorder(input: {
 
   const recorder: CommandExecutionRecorder = {
     onCommandStart(start) {
-      const currentIndex = index++;
-      heartbeatVerifyProgress({ command: start.command, index: currentIndex, total: input.total });
-
       let rowId: string | undefined;
       const db = ensureDb();
       if (db) {
@@ -270,7 +270,6 @@ function makeDbCommandExecutionRecorder(input: {
 
       return {
         onCommandFinish(finish) {
-          heartbeatVerifyProgress({ command: start.command, index: currentIndex, total: input.total });
           if (!rowId || !database) return;
           try {
             completeCommandExecution(database.db, rowId, finish);
@@ -1156,16 +1155,28 @@ const verifyHandler: PhaseHandler = {
     };
 
     // On the durable/real path, thread a DB-backed recorder so each verify command writes an
-    // incremental command_executions row (live timing on spawn, exit code on finish) and heartbeats
-    // Temporal per command. The mock path passes no recorder (no daemon-owned DB to write to here).
+    // incremental command_executions row (live timing on spawn, exit code on finish). The mock path
+    // passes no recorder (no daemon-owned DB to write to here). Liveness is a separate concern: the
+    // wall-clock timer below beats for the whole matrix, so the recorder no longer heartbeats.
     const recorderHandle = ctx.profile.usesDurableRunState
       ? makeDbCommandExecutionRecorder({
           phaseAttemptId: context.phaseAttemptId,
           runId: context.runId,
           phase: 'verify',
-          total: commands.length,
         })
       : undefined;
+    // TASK-105: heartbeat on a wall-clock interval for as long as the matrix is running, so
+    // liveness is proven CONTINUOUSLY rather than only at command boundaries. A single long-but-live
+    // command (a 10-minute `pnpm test`) must not look stuck; only a wedged worker stops the beat.
+    const verifyStartedAt = Date.now();
+    const heartbeatTimer = setInterval(() => {
+      emitPhaseHeartbeat({
+        phase: 'verify',
+        totalCommands: commands.length,
+        elapsedMs: Date.now() - verifyStartedAt,
+      });
+    }, PHASE_HEARTBEAT_INTERVAL_MS);
+    if (typeof heartbeatTimer.unref === 'function') heartbeatTimer.unref();
 
     let results;
     try {
@@ -1173,6 +1184,7 @@ const verifyHandler: PhaseHandler = {
         runVerificationMatrix(commands, context, runState.artifactStore, recorderHandle?.recorder),
       );
     } finally {
+      clearInterval(heartbeatTimer);
       recorderHandle?.close();
     }
     runState.verificationEvidence.push(...results.map((r) => r.evidence));
@@ -2003,6 +2015,26 @@ const HANDLERS: Record<TaskPhase, PhaseHandler> = {
  * for the Workflow's `tokenUsageTotal` + `runtimeMsByPhase` aggregation.
  */
 export async function runPhase(input: {
+  phase: TaskPhase;
+  state: TaskWorkflowState;
+}): Promise<PhaseAttemptResult> {
+  // TASK-105: EVERY phase proves liveness on a wall-clock interval, not just verify. The
+  // `heartbeatTimeout` on the runPhase proxy applies to all phases, so a phase that never
+  // heartbeats (an agent-driven implement/plan taking longer than the ceiling) would otherwise be
+  // killed while perfectly alive. This beat runs for the whole Activity; verify additionally beats
+  // with per-matrix detail.
+  const phaseHeartbeat = setInterval(() => {
+    emitPhaseHeartbeat({ phase: input.phase, taskId: input.state.taskId });
+  }, PHASE_HEARTBEAT_INTERVAL_MS);
+  if (typeof phaseHeartbeat.unref === 'function') phaseHeartbeat.unref();
+  try {
+    return await runPhaseInner(input);
+  } finally {
+    clearInterval(phaseHeartbeat);
+  }
+}
+
+async function runPhaseInner(input: {
   phase: TaskPhase;
   state: TaskWorkflowState;
 }): Promise<PhaseAttemptResult> {

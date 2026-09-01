@@ -8,6 +8,11 @@ import {
   ApplicationFailure,
   continueAsNew,
   workflowInfo,
+  CancelledFailure,
+  TerminatedFailure,
+  TimeoutFailure,
+  isCancellation,
+  log,
 } from '@temporalio/workflow';
 import type { TaskPhase, TaskSize, HumanGateReason, PhaseAttemptResult } from '@awb/domain';
 import { nextPhaseIn, phaseSetForSize } from './phase-order.js';
@@ -20,10 +25,13 @@ export interface TaskActivities {
 
 const activities = proxyActivities<TaskActivities>({
   startToCloseTimeout: '30 minutes',
-  // A phase that stops making progress (e.g. a hung verify command) must be detected by liveness, not
-  // by the coarse 30-minute startToClose. runPhase heartbeats while it works (per verify command); if
-  // heartbeats stop for this long, Temporal times the attempt out and it retries — surfacing a stuck
-  // phase in minutes instead of blocking half an hour, and letting the workflow count it (below).
+  // A phase that stops making progress (e.g. a hung verify command, a wedged agent) must be detected
+  // by liveness, not by the coarse 30-minute startToClose. This ceiling applies to EVERY phase, so
+  // runPhase beats on a wall-clock interval for its whole duration (see PHASE_HEARTBEAT_INTERVAL_MS
+  // in run-phase.ts) — a long-but-live phase keeps beating and survives; only a genuinely stuck one
+  // goes silent, times out, retries, and is counted by the workflow (below). Do NOT heartbeat only at
+  // command boundaries: a single long command then produces one silent gap wider than this ceiling
+  // and a healthy phase is killed.
   heartbeatTimeout: '2 minutes',
   retry: {
     // Deterministic engineering failures are never Activity exceptions — only
@@ -34,6 +42,56 @@ const activities = proxyActivities<TaskActivities>({
     backoffCoefficient: 2,
   },
 });
+
+/**
+ * Does this runPhase Activity exception mean "the phase is stuck" — i.e. should it be folded into the
+ * no-progress streak and retried as a repair?
+ *
+ * TRUE for genuine execution failures: a heartbeat/start-to-close timeout (the hung-command case
+ * TASK-105 exists for), a worker crash, an ApplicationFailure the phase threw, a ServerFailure.
+ *
+ * FALSE for control flow, which must propagate so the workflow unwinds:
+ *   - CancelledFailure / cancellation scope — `awb task cancel`, or a parent cancelling us. Treating
+ *     this as a repair would spin the phase loop instead of stopping it, and the cancel signal's own
+ *     `condition: 'cancelled'` would be overwritten by the repair routing.
+ *   - TerminatedFailure — the workflow was terminated outright; nothing left to repair.
+ *
+ * Temporal wraps the real reason as `ActivityFailure.cause`, so unwrap the chain before deciding.
+ */
+export function isRetryableStuckPhase(err: unknown): boolean {
+  if (isCancellation(err)) {
+    return false;
+  }
+  // Walk the cause chain: ActivityFailure -> (TimeoutFailure | CancelledFailure | ApplicationFailure | ...)
+  let current: unknown = err;
+  const seen = new Set<unknown>();
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof CancelledFailure || current instanceof TerminatedFailure) {
+      return false;
+    }
+    current = current.cause;
+  }
+  return true;
+}
+
+/**
+ * True when the Activity failed because it stopped heartbeating — the "genuinely stuck phase" signal
+ * `heartbeatTimeout` exists to produce, as opposed to a phase that failed fast for its own reasons.
+ * Reported on the gate so a stuck phase is legible, not just counted.
+ */
+export function isHeartbeatTimeout(err: unknown): boolean {
+  let current: unknown = err;
+  const seen = new Set<unknown>();
+  while (current instanceof Error && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof TimeoutFailure && current.timeoutType === 'HEARTBEAT') {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
 
 // Updates — synchronous, validated against current state before applying.
 export const approveContractUpdate = defineUpdate<void, [{ contractVersion: number; size?: TaskSize }]>(
@@ -233,13 +291,26 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
     let result: PhaseAttemptResult;
     try {
       result = await activities.runPhase({ phase: state.phase, state });
-    } catch {
-      // The Activity exhausted its retries — a genuinely stuck phase (e.g. a hung verify command that
-      // stopped heartbeating and tripped heartbeatTimeout, retried, and failed again). Temporal would
-      // otherwise fail the whole Workflow (or silently replay). Fold it into the SAME no-progress
-      // accounting a repaired failure uses: a `repair` outcome so the failure streak for this phase
-      // advances and a genuinely stuck phase surfaces as a counted `repeated-failure-no-progress` gate
-      // instead of a silent "attempt 1" replay or a workflow crash.
+    } catch (err) {
+      // The Activity exhausted its retries. A STUCK phase (a hung command that stopped heartbeating,
+      // or a crashed/timed-out attempt) is folded into the SAME no-progress accounting a repaired
+      // failure uses, so it surfaces as a counted `repeated-failure-no-progress` gate rather than a
+      // silent "attempt 1" replay or a workflow crash.
+      //
+      // But NOT every exception means "stuck". Cancellation and termination are control-flow, not
+      // failure: swallowing them would make `awb task cancel` look like a repair and spin the loop
+      // instead of stopping it. Re-throw those so the workflow unwinds as Temporal intends.
+      if (!isRetryableStuckPhase(err)) {
+        throw err;
+      }
+      // Make a stuck phase legible: a heartbeat timeout is the "went silent" case, distinct from a
+      // phase that failed fast for its own reasons. `findings` is a ref list, not free text, so this
+      // detail belongs in the log rather than the routing result.
+      log.warn('runPhase failed after exhausting retries — counting as no-progress repair', {
+        phase: phaseThatRan,
+        attemptNumber: state.attemptNumber,
+        heartbeatTimeout: isHeartbeatTimeout(err),
+      });
       result = { outcome: 'repair', target: 'implement', findings: [] };
     }
 
