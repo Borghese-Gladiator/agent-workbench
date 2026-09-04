@@ -58,7 +58,7 @@ at `awaiting-human` both land in the row. *Manual:* run one task and poll `awb f
 — the PHASE and COND columns advance in step with `awb task show`, with no disagreement
 between the two commands at any point.
 
-### [ ] TASK-124: `phase_attempts.ended_at` and `.outcome` are never written — per-phase duration and outcome are unreadable
+### [x] TASK-124: `phase_attempts.ended_at` and `.outcome` are never written — per-phase duration and outcome are unreadable
 
 **What's wrong.** All 190 `phase_attempts` rows in the local database have `ended_at =
 NULL` and `outcome = NULL`. The row is inserted when a phase attempt starts and never
@@ -87,7 +87,22 @@ after the phase; a phase attempt that throws also has a non-null `ended_at` and 
 `outcome`. *Manual:* run one task, call the execution-tree endpoint, and every phase attempt
 shows a real duration, a real outcome, and its runtime-attribution breakdown.
 
-### [ ] TASK-125: `agent_sessions.ended_at` equals `started_at` — every agent session reports zero duration
+**What was done.** `drivePhase` (`phase-driver.ts`) now records the attempt start, wraps the
+handler, and closes the attempt from a `finally` block, so both the normal and the throw path
+write `ended_at`. The throw path writes `outcome: 'failed'` and re-throws. A new
+`PhaseAttemptOutcomeSchema` (the six `PhaseAttemptResult` outcomes plus `failed`) and three
+optional close fields on `PhaseObservabilitySchema` carry it; `persistPhaseObservability` writes
+them onto the row and never pushes `started_at` forward on a re-persist. The execution tree joins
+`runtime_attribution` and a computed `durationMs` per attempt. The attempt seam is
+`phase-driver.ts`, so `run-phase.ts` needed no edit for this task.
+
+**How we know it's done.** 5 driver tests prove the normal path posts the result outcome, the
+throw path posts `failed` and re-throws, and a failed persist masks neither the result nor the
+error. A live claude run closed `specify #1 await-human`, `specify #2 candidate`, `prepare #1
+candidate` with real timestamps, and the execution-tree endpoint returned a `durationMs`, an
+`outcome` and a `runtimeAttribution` block for every attempt.
+
+### [x] TASK-125: `agent_sessions.ended_at` equals `started_at` — every agent session reports zero duration
 
 **What's wrong.** All 92 `agent_sessions` rows have `ended_at` exactly equal to
 `started_at`, so every session in the execution tree reports a zero-millisecond duration.
@@ -111,6 +126,19 @@ is assembled). Relates to TASK-124.
 persists an `ended_at` that reflects that interval, not `started_at`; a runtime that reports
 no end persists `NULL`. *Manual:* after a real run, session durations in the execution tree
 differ from each other and sum to roughly their parent phase attempt's duration.
+
+**What was done.** `recordSession` stamped one `new Date()` into `startedAt` AND `endedAt`, for
+the session and its invocation — the whole defect. It now takes `startedAtMs` and derives the real
+interval; the five call sites in `run-phase.ts` each pass the start constant they already measure
+`runtimeMs` from (six added lines, no refactor, so the sibling branch rebases cleanly). The
+synthesized `model_invocations` row now leaves `ended_at` **NULL**: no in-tree adapter reports a
+per-invocation boundary (`AgentExecutionResult.usage` is documented as aggregate, and the Claude
+adapter emits one `usage` event at the terminal `result` message), so an honest gap replaces the
+fabricated equal timestamp.
+
+**How we know it's done.** Persisted sessions of 8s / 54s / 72s / 5s read back with four distinct
+durations, and the two implement sessions (54s + 72s = 126s) sum to roughly their parent attempt's
+130s. Every `model_invocations.ended_at` reads NULL rather than equal to `started_at`.
 
 ### [ ] TASK-126: Phantom `running` tasks — nothing reconciles the database against whether the Workflow still exists
 
@@ -166,7 +194,7 @@ rather than exiting. *Manual:* `awb down` then `awb up --quiet` exits 0 and the 
 following `awb status --json` reports `ok: true`, repeated five times without a single
 `unhealthy`.
 
-### [ ] TASK-128: No CLI surface for post-hoc observability — timing and token data are reachable only by hand-written HTTP calls
+### [x] TASK-128: No CLI surface for post-hoc observability — timing and token data are reachable only by hand-written HTTP calls
 
 **What's wrong.** The durable observability is genuinely rich — per-phase runtime
 attribution by category, token and USD cost by model, the phase-attempt → session →
@@ -193,6 +221,24 @@ TASK-121 (cross-task rollup, which sits above this).
 QA, evidence and tokens, and its `--json` output parses against a stable named-field shape.
 *Manual:* after a real run, one command answers "which phase took longest, what QA ran, and
 what did it cost" with no `curl` and no database query.
+
+**What was done.** `awb task timeline` renders a new `GET /api/tasks/:repositoryId/:taskId/timeline`
+route backed by `buildTaskTimeline`. The route is a pure SQLite read with no Temporal handle, so it
+still answers for a task whose Workflow is closed or purged — which is the normal case for a
+post-hoc question. It lives in its own `routes/timeline.ts`, so the shared `routes/tasks.ts` was not
+touched. `--json` emits the stable named-field shape; plain text prints the phase table, the runtime
+split, the QA rows, the evidence and artifact counts, and the token and cost total.
+
+`awb task logs` had **two** defects, not one. It queried `/api/events?runId=<taskId>`, but
+`semantic_events.run_id` is `<taskId>-run` (`runIdForTask`), so the query never matched — verified
+directly: the bare id returns `{"events":[]}` where the suffixed id returns the rows. It also passed
+`afterSequence=0`, and since `afterSequence` is EXCLUSIVE while sequences start at 0, it silently
+dropped the first event of every run. Both are fixed and covered by tests.
+
+**How we know it's done.** One command prints "Longest phase: implement #1 (2m10s)", the QA rows
+that ran, and "Cost: $0.6513", with no `curl` and no SQL. `--json` parses to a stable shape
+(`taskId`, `phases`, `totals`, `longestPhase`). `task logs` returns all four persisted events,
+sequence 0 included.
 
 ## Group AA — Autonomy pivot: remove human approvals, loop to a draft PR (TOP PRIORITY)
 

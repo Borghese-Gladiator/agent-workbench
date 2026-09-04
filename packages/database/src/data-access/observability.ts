@@ -14,6 +14,8 @@ import {
   contextComposition,
   tasks,
   phaseAttempts,
+  evidence,
+  artifacts,
 } from '../schema/index.js';
 import type { DrizzleDb } from '../connection.js';
 import type {
@@ -21,6 +23,7 @@ import type {
   AgentSessionRow,
   ModelInvocationRow,
   ContextCompositionRow,
+  RuntimeAttributionRow,
 } from '../row-types.js';
 import { ensureRunAndPhaseAttempt, refreshTaskSummary } from './tasks.js';
 
@@ -103,6 +106,26 @@ export function persistPhaseObservability(db: DrizzleDb, payload: PhaseObservabi
           .values(ccRow)
           .onConflictDoUpdate({ target: contextComposition.agentSessionId, set: ccRow })
           .run();
+      }
+    }
+
+    // Close the phase attempt (TASK-124). `ended_at`/`outcome` are the whole point of the row for a
+    // reader; they were never written before. `started_at` is only overwritten when the caller
+    // supplies an EARLIER one, so a re-persist of the same attempt cannot push the start forward.
+    if (payload.startedAt !== undefined || payload.endedAt !== undefined || payload.outcome !== undefined) {
+      const existing = tx
+        .select({ startedAt: phaseAttempts.startedAt })
+        .from(phaseAttempts)
+        .where(eq(phaseAttempts.id, payload.phaseAttemptId))
+        .all()[0];
+      const set: Partial<typeof phaseAttempts.$inferInsert> = {};
+      if (payload.startedAt !== undefined && (!existing || payload.startedAt < existing.startedAt)) {
+        set.startedAt = payload.startedAt;
+      }
+      if (payload.endedAt !== undefined) set.endedAt = payload.endedAt;
+      if (payload.outcome !== undefined) set.outcome = payload.outcome;
+      if (Object.keys(set).length > 0) {
+        tx.update(phaseAttempts).set(set).where(eq(phaseAttempts.id, payload.phaseAttemptId)).run();
       }
     }
 
@@ -312,6 +335,28 @@ export function getRuntimeAttribution(db: DrizzleDb, taskId: string) {
   return db.select().from(runtimeAttribution).where(eq(runtimeAttribution.taskId, taskId)).all();
 }
 
+/**
+ * Runtime attribution for a task keyed by phase attempt. The execution tree joins this per attempt so
+ * one call answers "which phase took the time, and inside it was it the model, the tests, or the QA"
+ * — previously the caller had to know to query a table the tree never mentioned.
+ */
+export function getRuntimeAttributionByAttempt(
+  db: DrizzleDb,
+  taskId: string,
+): Map<string, RuntimeAttributionRow> {
+  const rows = db.select().from(runtimeAttribution).where(eq(runtimeAttribution.taskId, taskId)).all();
+  return new Map(rows.map((r) => [r.phaseAttemptId, r]));
+}
+
+/** Elapsed ms between two ISO timestamps, or null when either is missing or unparsable. */
+export function durationMs(startedAt: string | null, endedAt: string | null): number | null {
+  if (!startedAt || !endedAt) return null;
+  const start = Date.parse(startedAt);
+  const end = Date.parse(endedAt);
+  if (Number.isNaN(start) || Number.isNaN(end)) return null;
+  return Math.max(0, end - start);
+}
+
 /** One rollup row: tokens summed by repo/task/model/phase/outcome, with the task's retry-lineage parent. */
 export interface CrossRepoTokenAggregate {
   repositoryId: string;
@@ -488,4 +533,177 @@ export function getBuilderResumeSessions(db: DrizzleDb, taskId: string): Record<
     }
   }
   return Object.keys(bySlice).length > 0 ? bySlice : undefined;
+}
+
+/** The QA evidence kinds — the proof a QA run actually executed, as opposed to a test or build. */
+const QA_EVIDENCE_KINDS = new Set(['qa-video', 'browser-trace', 'terminal-recording', 'screenshot']);
+
+/** One agent session inside a phase attempt, with its real measured duration. */
+export interface TimelineSession {
+  id: string;
+  role: string;
+  runtime: string;
+  model: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+}
+
+/** One evidence row, reduced to what a timeline reader needs. */
+export interface TimelineEvidence {
+  id: string;
+  kind: string;
+  status: string;
+  summary: string;
+}
+
+export interface TimelineArtifact {
+  id: string;
+  kind: string;
+  mediaType: string;
+  byteSize: number;
+}
+
+/** One phase attempt: how long it took, how it ended, where the time went, and what it produced. */
+export interface TimelinePhase {
+  phaseAttemptId: string;
+  phase: string;
+  attemptNumber: number;
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  outcome: string | null;
+  retryOf: string | null;
+  runtimeAttribution: RuntimeAttributionRow | null;
+  sessions: TimelineSession[];
+  /** QA evidence only (video / trace / recording / screenshot) — "which QA ran". */
+  qa: TimelineEvidence[];
+  /** Every other evidence row produced under this attempt (tests, builds, static checks, review). */
+  evidence: TimelineEvidence[];
+  artifacts: TimelineArtifact[];
+}
+
+export interface TaskTimeline {
+  taskId: string;
+  phases: TimelinePhase[];
+  totals: {
+    /** Wall-clock summed over the attempts that closed. Attempts still open contribute nothing. */
+    durationMs: number;
+    /** How many attempts have no `ended_at` yet — the honest caveat on `durationMs`. */
+    openAttempts: number;
+    qaExecutionMs: number;
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+    cacheCreationInputTokens: number;
+    costUsd: number;
+  };
+  /** The attempt that consumed the most wall-clock, or null when nothing has closed yet. */
+  longestPhase: { phase: string; attemptNumber: number; durationMs: number } | null;
+}
+
+/**
+ * Assembles the post-hoc timeline for one task: every phase attempt in start order with its
+ * duration, outcome, runtime-attribution split, sessions, QA, evidence, artifacts, and the task's
+ * token/cost total. Pure SQLite read — it never queries Temporal, so it still answers for a task
+ * whose Workflow is long gone. This is what `awb task timeline` renders.
+ */
+export function buildTaskTimeline(db: DrizzleDb, taskId: string): TaskTimeline {
+  const attribution = getRuntimeAttributionByAttempt(db, taskId);
+
+  const evidenceRows = db.select().from(evidence).where(eq(evidence.taskId, taskId)).all();
+  const artifactRows = db.select().from(artifacts).where(eq(artifacts.taskId, taskId)).all();
+
+  const evidenceByAttempt = new Map<string, typeof evidenceRows>();
+  for (const row of evidenceRows) {
+    const list = evidenceByAttempt.get(row.phaseAttemptId) ?? [];
+    list.push(row);
+    evidenceByAttempt.set(row.phaseAttemptId, list);
+  }
+  const artifactsByAttempt = new Map<string, typeof artifactRows>();
+  for (const row of artifactRows) {
+    if (!row.phaseAttemptId) continue;
+    const list = artifactsByAttempt.get(row.phaseAttemptId) ?? [];
+    list.push(row);
+    artifactsByAttempt.set(row.phaseAttemptId, list);
+  }
+
+  const phases: TimelinePhase[] = listPhaseAttempts(db, taskId)
+    .map((attempt) => {
+      const attemptEvidence = evidenceByAttempt.get(attempt.id) ?? [];
+      return {
+        phaseAttemptId: attempt.id,
+        phase: attempt.phase,
+        attemptNumber: attempt.attemptNumber,
+        startedAt: attempt.startedAt,
+        endedAt: attempt.endedAt,
+        durationMs: durationMs(attempt.startedAt, attempt.endedAt),
+        outcome: attempt.outcome,
+        retryOf: attempt.retryOf,
+        runtimeAttribution: attribution.get(attempt.id) ?? null,
+        sessions: listAgentSessions(db, attempt.id).map((session) => ({
+          id: session.id,
+          role: sessionRole(db, session.id),
+          runtime: session.runtime,
+          model: session.model,
+          startedAt: session.startedAt,
+          endedAt: session.endedAt,
+          durationMs: durationMs(session.startedAt, session.endedAt),
+        })),
+        qa: attemptEvidence.filter((e) => QA_EVIDENCE_KINDS.has(e.kind)).map(toTimelineEvidence),
+        evidence: attemptEvidence.filter((e) => !QA_EVIDENCE_KINDS.has(e.kind)).map(toTimelineEvidence),
+        artifacts: (artifactsByAttempt.get(attempt.id) ?? []).map((a) => ({
+          id: a.id,
+          kind: a.kind,
+          mediaType: a.mediaType,
+          byteSize: a.byteSize,
+        })),
+      };
+    })
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.phaseAttemptId.localeCompare(b.phaseAttemptId));
+
+  const tokens = getTokenBreakdown(db, taskId);
+  let longestPhase: TaskTimeline['longestPhase'] = null;
+  let totalDuration = 0;
+  let openAttempts = 0;
+  let qaExecutionMs = 0;
+  for (const phase of phases) {
+    qaExecutionMs += phase.runtimeAttribution?.qaExecutionMs ?? 0;
+    if (phase.durationMs === null) {
+      openAttempts += 1;
+      continue;
+    }
+    totalDuration += phase.durationMs;
+    if (!longestPhase || phase.durationMs > longestPhase.durationMs) {
+      longestPhase = { phase: phase.phase, attemptNumber: phase.attemptNumber, durationMs: phase.durationMs };
+    }
+  }
+
+  return {
+    taskId,
+    phases,
+    totals: {
+      durationMs: totalDuration,
+      openAttempts,
+      qaExecutionMs,
+      inputTokens: tokens.totals.inputTokens,
+      outputTokens: tokens.totals.outputTokens,
+      cachedInputTokens: tokens.totals.cachedInputTokens,
+      cacheCreationInputTokens: tokens.totals.cacheCreationInputTokens,
+      costUsd: tokens.totals.costUsd,
+    },
+    longestPhase,
+  };
+}
+
+function toTimelineEvidence(row: { id: string; kind: string; status: string; summary: string }): TimelineEvidence {
+  return { id: row.id, kind: row.kind, status: row.status, summary: row.summary };
+}
+
+/**
+ * The session's role. `agent_sessions` has no role column — the role lives on the per-session
+ * context_composition row — so fall back to `unknown` when no context was recorded for it.
+ */
+function sessionRole(db: DrizzleDb, agentSessionId: string): string {
+  return getSessionContextComposition(db, agentSessionId)?.role ?? 'unknown';
 }

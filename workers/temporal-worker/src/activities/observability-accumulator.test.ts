@@ -3,6 +3,7 @@ import type { ModelUsage } from '@awb/domain';
 import {
   estimateContextComposition,
   reconcileContextComposition,
+  ObservabilityAccumulator,
 } from './observability-accumulator.js';
 
 const CONTEXT_BUCKETS = [
@@ -80,5 +81,97 @@ describe('reconcileContextComposition', () => {
     const reconciled = reconcileContextComposition(estimate, undefined);
     expect(reconciled.estimated).toBe(true);
     expect(bucketSum(reconciled)).toBe(bucketSum(estimate));
+  });
+});
+
+describe('ObservabilityAccumulator.recordSession timestamps (TASK-125)', () => {
+  const base = {
+    sessionId: 'sess-1',
+    taskId: 'task-1',
+    runId: 'task-1-run',
+    phaseAttemptId: 'task-1-plan-1',
+    phase: 'plan',
+    role: 'planner',
+    runtime: 'claude',
+  } as const;
+
+  const usage: ModelUsage = { provider: 'anthropic', model: 'claude-opus', inputTokens: 100, outputTokens: 20 };
+
+  const drain = (acc: ObservabilityAccumulator) =>
+    acc.toPayload({
+      taskId: base.taskId,
+      runId: base.runId,
+      phaseAttemptId: base.phaseAttemptId,
+      phase: 'plan',
+      attemptNumber: 1,
+    });
+
+  it('persists the measured interval, not a single write-time stamp', () => {
+    const acc = new ObservabilityAccumulator();
+    const startedAtMs = Date.now() - 42_000;
+    acc.recordSession({ ...base, usage, runtimeMs: 42_000, startedAtMs });
+
+    const session = drain(acc)?.sessions[0];
+    expect(session?.startedAt).toBe(new Date(startedAtMs).toISOString());
+    expect(session?.endedAt).not.toBe(session?.startedAt);
+    const elapsed = Date.parse(session!.endedAt!) - Date.parse(session!.startedAt);
+    expect(elapsed).toBeGreaterThanOrEqual(42_000);
+  });
+
+  it('reconstructs the start from runtimeMs when no start was measured', () => {
+    const acc = new ObservabilityAccumulator();
+    acc.recordSession({ ...base, usage, runtimeMs: 5000 });
+
+    const session = drain(acc)?.sessions[0];
+    const elapsed = Date.parse(session!.endedAt!) - Date.parse(session!.startedAt);
+    expect(elapsed).toBe(5000);
+  });
+
+  it('gives two sessions of different length different durations', () => {
+    const acc = new ObservabilityAccumulator();
+    const now = Date.now();
+    acc.recordSession({ ...base, sessionId: 'short', usage, runtimeMs: 1000, startedAtMs: now - 1000 });
+    acc.recordSession({ ...base, sessionId: 'long', usage, runtimeMs: 60_000, startedAtMs: now - 60_000 });
+
+    const durations = (drain(acc)?.sessions ?? []).map(
+      (s) => Date.parse(s.endedAt!) - Date.parse(s.startedAt),
+    );
+    expect(durations[0]).not.toBe(durations[1]);
+    expect(durations[1]).toBeGreaterThan(durations[0]!);
+  });
+
+  it('leaves the model invocation end unset — no in-tree runtime reports one', () => {
+    const acc = new ObservabilityAccumulator();
+    acc.recordSession({ ...base, usage, runtimeMs: 1000, startedAtMs: Date.now() - 1000 });
+
+    const invocation = drain(acc)?.sessions[0]?.modelInvocations[0];
+    expect(invocation?.startedAt).toBeDefined();
+    expect(invocation?.endedAt).toBeUndefined();
+  });
+});
+
+describe('ObservabilityAccumulator.toPayload close fields (TASK-124)', () => {
+  const attempt = {
+    taskId: 'task-1',
+    runId: 'task-1-run',
+    phaseAttemptId: 'task-1-plan-1',
+    phase: 'plan',
+    attemptNumber: 1,
+  } as const;
+
+  it('returns undefined when nothing was recorded and the attempt is not closing', () => {
+    expect(new ObservabilityAccumulator().toPayload(attempt)).toBeUndefined();
+  });
+
+  it('returns a payload for close fields alone, so a throwing attempt still closes', () => {
+    const payload = new ObservabilityAccumulator().toPayload({
+      ...attempt,
+      startedAt: '2026-09-04T00:00:00.000Z',
+      endedAt: '2026-09-04T00:00:01.000Z',
+      outcome: 'failed',
+    });
+    expect(payload?.outcome).toBe('failed');
+    expect(payload?.endedAt).toBe('2026-09-04T00:00:01.000Z');
+    expect(payload?.sessions).toEqual([]);
   });
 });

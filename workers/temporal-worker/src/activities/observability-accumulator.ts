@@ -4,6 +4,7 @@ import type {
   ContextComposition,
   AgentSessionRecord,
   PhaseObservability,
+  PhaseAttemptOutcome,
   TaskPhase,
   ModelUsage,
 } from '@awb/domain';
@@ -66,11 +67,20 @@ export class ObservabilityAccumulator {
     runtime: string;
     usage?: ModelUsage;
     runtimeMs: number;
+    /**
+     * Epoch ms at which the adapter execution began. The session's real interval — persisted as
+     * `started_at`/`ended_at` — is derived from this and `runtimeMs`. Omit it only when no start was
+     * measured; the interval is then reconstructed backwards from `runtimeMs`.
+     */
+    startedAtMs?: number;
     contextComposition?: ContextComposition;
     /** Provider resume token for this session; persisted so a retry resumes the transcript. */
     resumeSessionId?: string;
   }): void {
-    const now = new Date().toISOString();
+    const endedAtMs = Date.now();
+    const startedAtMs = input.startedAtMs ?? endedAtMs - input.runtimeMs;
+    const startedAt = new Date(startedAtMs).toISOString();
+    const endedAt = new Date(Math.max(endedAtMs, startedAtMs)).toISOString();
     this.add('modelGenerationMs', input.runtimeMs);
     this.sessions.push({
       id: input.sessionId,
@@ -82,8 +92,8 @@ export class ObservabilityAccumulator {
       runtime: input.runtime,
       ...(input.usage?.model ? { model: input.usage.model } : {}),
       ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
-      startedAt: now,
-      endedAt: now,
+      startedAt,
+      endedAt,
       modelInvocations: input.usage
         ? [
             {
@@ -99,8 +109,11 @@ export class ObservabilityAccumulator {
                 ? { cacheCreationInputTokens: input.usage.cacheCreationInputTokens }
                 : {}),
               ...(input.usage.costUsd !== undefined ? { costUsd: input.usage.costUsd } : {}),
-              startedAt: now,
-              endedAt: now,
+              startedAt,
+              // No in-tree adapter reports a per-invocation boundary: `AgentExecutionResult.usage` is
+              // aggregate for the whole execution (the Claude adapter emits one `usage` event at the
+              // terminal `result` message). Leave `endedAt` unset so the column is an honest NULL
+              // rather than a fabricated zero-duration equal to `startedAt`.
             },
           ]
         : [],
@@ -110,16 +123,24 @@ export class ObservabilityAccumulator {
     });
   }
 
-  /** Build the payload for /internal/observability, or undefined when nothing was recorded. */
+  /**
+   * Build the payload for /internal/observability, or undefined when nothing was recorded AND the
+   * attempt is not being closed. An attempt that records no sessions and no wall-clock still has to
+   * close (TASK-124), so close fields alone are enough to produce a payload — that is the throw path.
+   */
   toPayload(input: {
     taskId: string;
     runId: string;
     phaseAttemptId: string;
     phase: TaskPhase;
     attemptNumber: number;
+    startedAt?: string;
+    endedAt?: string;
+    outcome?: PhaseAttemptOutcome;
   }): PhaseObservability | undefined {
     const hasAttribution = Object.values(this.attribution).some((v) => v > 0);
-    if (!hasAttribution && this.sessions.length === 0) return undefined;
+    const closes = input.endedAt !== undefined || input.outcome !== undefined;
+    if (!hasAttribution && this.sessions.length === 0 && !closes) return undefined;
     return {
       taskId: input.taskId,
       runId: input.runId,
@@ -128,6 +149,9 @@ export class ObservabilityAccumulator {
       attemptNumber: input.attemptNumber,
       runtimeAttribution: { ...this.attribution },
       sessions: this.sessions,
+      ...(input.startedAt !== undefined ? { startedAt: input.startedAt } : {}),
+      ...(input.endedAt !== undefined ? { endedAt: input.endedAt } : {}),
+      ...(input.outcome !== undefined ? { outcome: input.outcome } : {}),
     };
   }
 }

@@ -33,11 +33,25 @@ a `SemanticEvent` row in workbench SQLite.
 Fine-grained accounting for §27: one `agent_sessions` row per agent session, its
 `model_invocations` (tokens/cost), `runtime_attribution` (the 12 wall-clock
 buckets per phase attempt), and `context_composition` (the 8 token-source
-buckets). Read back on demand by `getTokenBreakdown` / `getRuntimeAttribution`
-(`packages/database/src/data-access/observability.ts`) — computed on read, not a
-time series.
+buckets). Read back on demand by `getTokenBreakdown` / `getRuntimeAttribution` /
+`buildTaskTimeline` (`packages/database/src/data-access/observability.ts`) —
+computed on read, not a time series.
 
 - **Purpose:** "where did this task's tokens/cost/time go?" per phase and model.
+- **Attempt boundaries (TASK-124).** `drivePhase` closes each `phase_attempts` row
+  with `ended_at` and an `outcome` (the six `PhaseAttemptResult` outcomes, plus
+  `failed` when a handler throws). It closes on the throw path too, so an attempt
+  that dies still carries an end timestamp.
+- **Session boundaries (TASK-125).** `agent_sessions.started_at`/`ended_at` come
+  from the adapter's measured execution interval, not from a single write-time
+  stamp. `model_invocations.ended_at` is **NULL** by design: no in-tree adapter
+  reports a per-invocation end (`AgentExecutionResult.usage` is aggregate for the
+  whole execution), and an honest gap beats a fabricated equal timestamp.
+- **Read surfaces.** `GET /api/tasks/:repositoryId/:taskId/execution-tree` (the
+  attempt → session → invocation tree, with `runtimeAttribution` and `durationMs`
+  joined per attempt) and `GET /api/tasks/:repositoryId/:taskId/timeline`, which
+  `awb task timeline` renders. Both are pure SQLite reads, so they still answer
+  for a task whose Workflow is gone.
 - Also the durable home of the builder's **resume tokens** (`resume_session_id`,
   TASK-32): reconstructed into `builderResumeSessions` on worker restart so a
   retry resumes rather than cold-starts.

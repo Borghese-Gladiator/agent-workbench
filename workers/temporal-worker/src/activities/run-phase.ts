@@ -553,6 +553,7 @@ const planHandler: PhaseHandler = {
           runtime: ctx.strategy,
           usage: execution.usage,
           runtimeMs: plannerMs,
+        startedAtMs: plannerStart,
           contextComposition: estimateContextComposition(
             { contract, priorFindings, ...(projectMemory.length > 0 ? { memory: projectMemory } : {}) },
             plannerInstr,
@@ -627,6 +628,7 @@ const planHandler: PhaseHandler = {
           runtime: ctx.strategy,
           usage: execution.usage,
           runtimeMs: criticMs,
+        startedAtMs: criticStart,
           contextComposition: estimateContextComposition({ plan }, criticInstr),
         });
         await flush();
@@ -755,6 +757,7 @@ const programDesignHandler: PhaseHandler = {
         runtime: ctx.strategy,
         usage: execution.usage,
         runtimeMs: ms,
+        startedAtMs: start,
         contextComposition: estimateContextComposition({ plan }, instr),
       });
       await flush();
@@ -1000,6 +1003,7 @@ const implementHandler: PhaseHandler = {
               resumeKey: slice.id,
             });
           }
+          const builderStart = Date.now();
           const attempt = await runRealBuilderAttempt({
             adapter,
             taskId: state.taskId,
@@ -1036,6 +1040,7 @@ const implementHandler: PhaseHandler = {
             runtime: ctx.strategy,
             usage: attempt.usage,
             runtimeMs: attempt.runtimeMs,
+            startedAtMs: builderStart,
             contextComposition: estimateContextComposition({ plan: slice }, ''),
             resumeSessionId: attempt.sessionId,
           });
@@ -1589,6 +1594,7 @@ const challengeHandler: PhaseHandler = {
           runtime: ctx.strategy,
           usage: execution.usage,
           runtimeMs: reviewerMs,
+          startedAtMs: reviewerStart,
           contextComposition: estimateContextComposition(inputs, reviewerInstr),
         });
         await flush();

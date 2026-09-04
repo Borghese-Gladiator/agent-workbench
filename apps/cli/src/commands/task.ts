@@ -22,6 +22,35 @@ interface TaskListItem {
   createdAt: string;
 }
 
+export interface TimelineResponse {
+  taskId: string;
+  phases: Array<{
+    phaseAttemptId: string;
+    phase: string;
+    attemptNumber: number;
+    startedAt: string;
+    endedAt: string | null;
+    durationMs: number | null;
+    outcome: string | null;
+    runtimeAttribution: Record<string, number | string> | null;
+    sessions: Array<{ id: string; role: string; runtime: string; model: string | null; durationMs: number | null }>;
+    qa: Array<{ id: string; kind: string; status: string; summary: string }>;
+    evidence: Array<{ id: string; kind: string; status: string; summary: string }>;
+    artifacts: Array<{ id: string; kind: string; mediaType: string; byteSize: number }>;
+  }>;
+  totals: {
+    durationMs: number;
+    openAttempts: number;
+    qaExecutionMs: number;
+    inputTokens: number;
+    outputTokens: number;
+    cachedInputTokens: number;
+    cacheCreationInputTokens: number;
+    costUsd: number;
+  };
+  longestPhase: { phase: string; attemptNumber: number; durationMs: number } | null;
+}
+
 interface TaskShowResponse {
   state: { phase: string; condition: string; deliveryState: string };
   openFindings: string[];
@@ -44,6 +73,115 @@ export function deriveTaskTitle(prompt: string, maxLength = 72): string {
     title = `${title.slice(0, maxLength - 1).trimEnd()}…`;
   }
   return title === '' ? '(no prompt)' : title;
+}
+
+/**
+ * The run id for a task. A task has exactly one run and `semantic_events.run_id` carries this
+ * suffixed form, so a query by bare task id matches nothing — that was why `task logs` reported no
+ * events for tasks that had thousands. Mirrors `runIdForTask` in `@awb/database`, which the CLI does
+ * not depend on.
+ */
+export function runIdForTaskId(taskId: string): string {
+  return `${taskId}-run`;
+}
+
+/**
+ * The catch-up query `task logs` reads a task's events from. `afterSequence` is EXCLUSIVE and
+ * sequences start at 0, so the previous `afterSequence=0` silently dropped the first event of every
+ * run; -1 is the route's own "everything" value.
+ */
+export function eventsQueryFor(taskId: string): string {
+  return `/api/events?runId=${encodeURIComponent(runIdForTaskId(taskId))}&afterSequence=-1`;
+}
+
+/** The 12 runtime-attribution buckets, in the order the timeline reports them. */
+const ATTRIBUTION_BUCKETS = [
+  ['modelGenerationMs', 'model'],
+  ['toolExecutionMs', 'tools'],
+  ['testExecutionMs', 'tests'],
+  ['qaExecutionMs', 'qa'],
+  ['dependencyInstallMs', 'deps'],
+  ['environmentSetupMs', 'env'],
+  ['serviceStartupMs', 'services'],
+  ['githubOperationMs', 'github'],
+  ['artifactProcessingMs', 'artifacts'],
+  ['modelWaitMs', 'model-wait'],
+  ['humanWaitMs', 'human-wait'],
+  ['retryBackoffMs', 'backoff'],
+] as const;
+
+/** Compact duration for a table cell: `-` when unknown, else ms / s / m+s. */
+export function formatDuration(ms: number | null): string {
+  if (ms === null) return '-';
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes}m${String(seconds).padStart(2, '0')}s`;
+}
+
+/** The non-zero runtime-attribution buckets as `label duration` pairs, biggest first. */
+export function formatAttribution(attribution: Record<string, number | string> | null): string {
+  if (!attribution) return '';
+  const parts = ATTRIBUTION_BUCKETS.map(([key, label]) => {
+    const value = attribution[key];
+    return { label, ms: typeof value === 'number' ? value : 0 };
+  })
+    .filter((p) => p.ms > 0)
+    .sort((a, b) => b.ms - a.ms)
+    .map((p) => `${p.label} ${formatDuration(p.ms)}`);
+  return parts.join('  ');
+}
+
+/** Renders the timeline as plain text. Returns the lines so a test can assert on them. */
+export function renderTimeline(timeline: TimelineResponse): string[] {
+  const lines: string[] = [];
+  lines.push(`Task ${timeline.taskId} — ${timeline.phases.length} phase attempts`);
+  if (timeline.longestPhase) {
+    const longest = timeline.longestPhase;
+    lines.push(
+      `Longest phase: ${longest.phase} #${longest.attemptNumber} (${formatDuration(longest.durationMs)})`,
+    );
+  }
+  lines.push('');
+
+  const nameWidth = Math.max(5, ...timeline.phases.map((p) => `${p.phase} #${p.attemptNumber}`.length));
+  lines.push(`${'PHASE'.padEnd(nameWidth)}  ${'DURATION'.padEnd(9)}  OUTCOME`);
+  for (const phase of timeline.phases) {
+    const name = `${phase.phase} #${phase.attemptNumber}`;
+    lines.push(
+      `${name.padEnd(nameWidth)}  ${formatDuration(phase.durationMs).padEnd(9)}  ${phase.outcome ?? '(open)'}`,
+    );
+    const attribution = formatAttribution(phase.runtimeAttribution);
+    if (attribution !== '') lines.push(`${' '.repeat(nameWidth)}  where: ${attribution}`);
+    for (const session of phase.sessions) {
+      lines.push(
+        `${' '.repeat(nameWidth)}  session ${session.role} (${session.model ?? session.runtime}) ${formatDuration(session.durationMs)}`,
+      );
+    }
+    for (const qa of phase.qa) {
+      lines.push(`${' '.repeat(nameWidth)}  qa ${qa.kind}: ${qa.status} — ${qa.summary}`);
+    }
+    if (phase.evidence.length > 0) {
+      const passed = phase.evidence.filter((e) => e.status === 'passed').length;
+      lines.push(
+        `${' '.repeat(nameWidth)}  evidence ${phase.evidence.length} (${passed} passed), artifacts ${phase.artifacts.length}`,
+      );
+    } else if (phase.artifacts.length > 0) {
+      lines.push(`${' '.repeat(nameWidth)}  artifacts ${phase.artifacts.length}`);
+    }
+  }
+
+  lines.push('');
+  const t = timeline.totals;
+  const openNote = t.openAttempts > 0 ? ` (${t.openAttempts} attempts still open)` : '';
+  lines.push(`Total wall-clock: ${formatDuration(t.durationMs)}${openNote}`);
+  lines.push(`QA execution: ${formatDuration(t.qaExecutionMs)}`);
+  lines.push(
+    `Tokens: ${t.inputTokens} in / ${t.outputTokens} out (cache read ${t.cachedInputTokens}, cache write ${t.cacheCreationInputTokens})`,
+  );
+  lines.push(`Cost: $${t.costUsd.toFixed(4)}`);
+  return lines;
 }
 
 const TERMINAL_CONDITIONS = new Set(['completed', 'failed', 'cancelled']);
@@ -324,15 +462,35 @@ export function registerTaskCommands(program: Command): void {
     });
 
   task
+    .command('timeline [repositoryId] [taskId]')
+    .description('Print the post-hoc timeline: phase durations, outcomes, QA, evidence and cost')
+    .action(async (repositoryId: string | undefined, taskId: string | undefined) => {
+      try {
+        const repoId = resolveRepositoryId(repositoryId);
+        const tId = resolveTaskId(taskId);
+        const timeline = await daemonClient.get<TimelineResponse>(
+          `/api/tasks/${repoId}/${tId}/timeline`,
+        );
+        if (outputOptions().json) {
+          emitJson(timeline);
+          return;
+        }
+        for (const line of renderTimeline(timeline)) printResult(line);
+      } catch (err) {
+        handleError(err);
+      }
+    });
+
+  task
     .command('logs [repositoryId] [taskId]')
     .description('Print the recorded semantic events for a task')
     .option('--tail <count>', 'Number of trailing events to show', '50')
     .action(async (_repositoryId: string | undefined, taskId: string | undefined, opts: { tail: string }) => {
       try {
         const tId = resolveTaskId(taskId);
-        const res = await daemonClient.get<{ events: unknown[] }>(
-          `/api/events?runId=${encodeURIComponent(tId)}&afterSequence=0`,
-        ).catch(() => ({ events: [] as unknown[] }));
+        const res = await daemonClient
+          .get<{ events: unknown[] }>(eventsQueryFor(tId))
+          .catch(() => ({ events: [] as unknown[] }));
         let events = res.events;
         const tail = Number(opts.tail);
         if (!Number.isNaN(tail)) events = events.slice(-tail);

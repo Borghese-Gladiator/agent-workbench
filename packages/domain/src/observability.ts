@@ -79,6 +79,22 @@ export const AgentSessionRecordSchema = z.object({
 });
 export type AgentSessionRecord = z.infer<typeof AgentSessionRecordSchema>;
 
+/**
+ * How a phase attempt ended. The six `PhaseAttemptResult` outcomes plus `failed`, which the driver
+ * writes when a handler throws — a throw produces no `PhaseAttemptResult`, but the attempt still has
+ * to close so a reader can see when it died.
+ */
+export const PhaseAttemptOutcomeSchema = z.enum([
+  'candidate',
+  'repair',
+  'replan',
+  'await-human',
+  'blocked',
+  'cancelled',
+  'failed',
+]);
+export type PhaseAttemptOutcome = z.infer<typeof PhaseAttemptOutcomeSchema>;
+
 /** The observability payload the worker posts to the daemon at the end of a phase attempt. */
 export const PhaseObservabilitySchema = z.object({
   taskId: z.string(),
@@ -88,6 +104,11 @@ export const PhaseObservabilitySchema = z.object({
   attemptNumber: z.number().int().nonnegative(),
   runtimeAttribution: RuntimeAttributionSchema,
   sessions: z.array(AgentSessionRecordSchema),
+  /** When the attempt began. Lets the row carry the real start instead of the persist time. */
+  startedAt: z.string().optional(),
+  /** When the attempt ended. Absent only while an attempt is still open. */
+  endedAt: z.string().optional(),
+  outcome: PhaseAttemptOutcomeSchema.optional(),
 });
 export type PhaseObservability = z.infer<typeof PhaseObservabilitySchema>;
 
