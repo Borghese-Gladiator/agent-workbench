@@ -27,6 +27,7 @@ describe('deriveTaskStatus (mirror of domain)', () => {
     ['failed', 'implement', 'failed'],
     ['blocked', 'qa', 'blocked'],
     ['awaiting-human', 'plan', 'awaiting-human'],
+    ['abandoned', 'implement', 'abandoned'],
   ])('condition=%s phase=%s → %s', (condition, phase, expected) => {
     expect(deriveTaskStatus(condition, phase)).toBe(expected);
   });

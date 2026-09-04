@@ -28,9 +28,10 @@ import {
   listFindingsByTask,
   getFleetStatus,
   loadRunStateSnapshot,
+  listPrunableTasks,
   type TaskSummaryWithRepository,
 } from '@awb/database';
-import type { TaskSize, TaskFreshness } from '@awb/domain';
+import { RunConditionSchema, type RunCondition, type TaskSize, type TaskFreshness } from '@awb/domain';
 import {
   validateTaskDag,
   TaskDagValidationError,
@@ -399,6 +400,49 @@ export function registerTaskRoutes(
         reply.code(409);
         return { error: err instanceof Error ? err.message : String(err) };
       }
+    },
+  );
+
+  // TASK-126: bulk-remove the corpses the reconcile pass marked terminal. A task whose Workflow is
+  // gone stays in `awb fleet` forever otherwise, and this machine carried 40 such rows. Defaults to
+  // `abandoned` only — `completed` and `failed` rows are the audit trail of work that really ran, so
+  // dropping them takes an explicit `conditions` list.
+  app.post<{ Body: { conditions?: string[]; olderThanMs?: number; dryRun?: boolean } }>(
+    '/api/tasks/prune',
+    async (request, reply) => {
+      const body = request.body ?? {};
+      let conditions: RunCondition[] | undefined;
+      if (body.conditions !== undefined) {
+        const parsed = RunConditionSchema.array().safeParse(body.conditions);
+        if (!parsed.success) {
+          reply.code(400);
+          return { error: `Invalid conditions: ${parsed.error.message}` };
+        }
+        conditions = parsed.data;
+      }
+      const before =
+        typeof body.olderThanMs === 'number' && body.olderThanMs > 0
+          ? new Date(Date.now() - body.olderThanMs).toISOString()
+          : undefined;
+
+      const candidates = listPrunableTasks(database.db, {
+        ...(conditions ? { conditions } : {}),
+        ...(before ? { before } : {}),
+      });
+      const tasks = candidates.map((t) => ({
+        taskId: t.id,
+        repositoryId: t.repositoryId,
+        condition: t.condition,
+        updatedAt: t.updatedAt,
+      }));
+      if (body.dryRun === true) {
+        return { dryRun: true, tasks, pruned: 0 };
+      }
+      let pruned = 0;
+      for (const task of candidates) {
+        if (deleteTask(database.db, task.id)) pruned += 1;
+      }
+      return { dryRun: false, tasks, pruned };
     },
   );
 

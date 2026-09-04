@@ -23,6 +23,10 @@ export const RunConditionSchema = z.enum([
   'failed',
   'cancelled',
   'completed',
+  // Terminal, and deliberately distinct from `failed`: no Temporal Workflow backs this row any
+  // more, so the workbench cannot say whether the work succeeded. The daemon's reconcile pass is
+  // the only writer (TASK-126); a Workflow never reports it.
+  'abandoned',
 ]);
 export type RunCondition = z.infer<typeof RunConditionSchema>;
 

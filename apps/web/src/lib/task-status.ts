@@ -19,7 +19,8 @@ export type DerivedTaskStatus =
   | 'blocked'
   | 'completed'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'abandoned';
 
 /** Display label per derived status. Mirror of domain `DERIVED_STATUS_LABEL`. */
 export const DERIVED_STATUS_LABEL: Record<DerivedTaskStatus, string> = {
@@ -32,6 +33,7 @@ export const DERIVED_STATUS_LABEL: Record<DerivedTaskStatus, string> = {
   completed: 'Completed',
   failed: 'Failed',
   cancelled: 'Cancelled',
+  abandoned: 'Abandoned',
 };
 
 /** Statuses that mean "a human needs to look at this". Mirror of domain `ATTENTION_STATUSES`. */
@@ -54,6 +56,8 @@ export function deriveTaskStatus(condition: string, phase: string): DerivedTaskS
       return 'failed';
     case 'cancelled':
       return 'cancelled';
+    case 'abandoned':
+      return 'abandoned';
     case 'blocked':
       return 'blocked';
     case 'awaiting-human':
@@ -77,6 +81,7 @@ const BADGE_VARIANT: Record<DerivedTaskStatus, BadgeVariant> = {
   completed: 'done',
   failed: 'abandoned',
   cancelled: 'outline',
+  abandoned: 'abandoned',
 };
 
 export interface StatusPresentation {

@@ -52,6 +52,12 @@ export interface TimelineResponse {
   longestPhase: { phase: string; attemptNumber: number; durationMs: number } | null;
 }
 
+interface PruneResponse {
+  dryRun: boolean;
+  pruned: number;
+  tasks: { taskId: string; repositoryId: string; condition: string; updatedAt: string }[];
+}
+
 interface TaskShowResponse {
   state: { phase: string; condition: string; deliveryState: string };
   openFindings: string[];
@@ -573,6 +579,47 @@ export function registerTaskCommands(program: Command): void {
         await daemonClient.del(`/api/tasks/${repoId}/${tId}`);
         if (outputOptions().json) emitJson({ removed: tId });
         else printInfo(`Removed task ${tId} and its rows.`);
+      } catch (err) {
+        handleError(err);
+      }
+    });
+
+  task
+    .command('prune')
+    .description('Delete terminal task rows (default: abandoned) whose workflow no longer exists')
+    .option('--older-than <duration>', 'Only prune tasks untouched for at least this long (e.g. 7d)')
+    .option(
+      '--condition <condition...>',
+      'Conditions to prune instead of the default `abandoned` (e.g. abandoned failed)',
+    )
+    .option('--dry-run', 'List what would be pruned and delete nothing')
+    .option('--yes', 'Skip the confirmation prompt')
+    .action(async (opts: { olderThan?: string; condition?: string[]; dryRun?: boolean; yes?: boolean }) => {
+      try {
+        const dryRun = opts.dryRun === true;
+        if (!dryRun && opts.yes !== true && !outputOptions().input) {
+          printError('Refusing to prune without --yes (no interactive input available). Try --dry-run first.');
+          process.exitCode = 1;
+          return;
+        }
+        const body = {
+          dryRun,
+          ...(opts.olderThan ? { olderThanMs: parseDuration(opts.olderThan) } : {}),
+          ...(opts.condition ? { conditions: opts.condition } : {}),
+        };
+        const res = await daemonClient.post<PruneResponse>('/api/tasks/prune', body);
+        if (outputOptions().json) {
+          emitJson(res);
+          return;
+        }
+        if (res.tasks.length === 0) {
+          printInfo('Nothing to prune.');
+          return;
+        }
+        for (const t of res.tasks) {
+          printResult(`${t.taskId}  ${t.condition}  last moved ${t.updatedAt}`);
+        }
+        printInfo(dryRun ? `${res.tasks.length} task(s) would be pruned.` : `Pruned ${res.pruned} task(s).`);
       } catch (err) {
         handleError(err);
       }

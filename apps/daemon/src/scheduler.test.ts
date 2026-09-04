@@ -8,10 +8,11 @@ import {
   workspaceLeases,
   upsertTask,
   getTask,
+  getTaskSummary,
   insertTaskDependency,
   type WorkbenchDatabase,
 } from '@awb/database';
-import { TaskScheduler, type StartTaskFn } from './scheduler.js';
+import { TaskScheduler, type StartTaskFn, type DescribeWorkflowFn } from './scheduler.js';
 
 const REPO = 'repo-1';
 
@@ -40,11 +41,16 @@ describe('TaskScheduler', () => {
   const recordingStart: StartTaskFn = async (input) => {
     started.push({ taskId: input.taskId, baseBranch: input.baseBranch });
   };
-  function scheduler(): TaskScheduler {
+  /**
+   * `describeWorkflow` defaults to `running`, so the DAG tests below are unaffected by the liveness
+   * reconcile that shares the same tick (TASK-126). The liveness suite passes its own.
+   */
+  function scheduler(describeWorkflow: DescribeWorkflowFn = async () => 'running'): TaskScheduler {
     return new TaskScheduler({
       database: db,
       startTask: recordingStart,
       hasReleased: async (parentTaskId) => releasedParents.has(parentTaskId),
+      describeWorkflow,
     });
   }
 
@@ -142,6 +148,7 @@ describe('TaskScheduler', () => {
         if (fail) throw new Error('temporal unavailable');
       },
       hasReleased: async () => false,
+      describeWorkflow: async () => 'running',
     });
 
     await flaky.reconcile(); // swallows the failure
@@ -186,5 +193,83 @@ describe('TaskScheduler', () => {
 
     await scheduler().reconcile();
     expect(started).toEqual([{ taskId: 'B', baseBranch: 'awb/A-slug' }]);
+  });
+
+  // TASK-126: nothing used to compare a task row against the Workflow behind it, so 40 rows on this
+  // machine claimed `running` with their last activity weeks old. On a fleet view that is worse than
+  // a wrong phase: the reader cannot tell a live task from a corpse.
+  describe('workflow liveness reconciliation (TASK-126)', () => {
+    it('marks a started task abandoned when no workflow backs it', async () => {
+      upsertTask(db.db, { id: 'ghost', repositoryId: REPO, prompt: 'p', scheduleState: 'started' });
+
+      await scheduler(async () => 'absent').reconcile();
+
+      expect(getTask(db.db, 'ghost')?.condition).toBe('abandoned');
+    });
+
+    it('leaves a task whose workflow is running untouched', async () => {
+      upsertTask(db.db, { id: 'live', repositoryId: REPO, prompt: 'p', scheduleState: 'started' });
+
+      await scheduler(async () => 'running').reconcile();
+
+      expect(getTask(db.db, 'live')?.condition).toBe('running');
+    });
+
+    it('leaves every task untouched when Temporal cannot be reached', async () => {
+      upsertTask(db.db, { id: 'live', repositoryId: REPO, prompt: 'p', scheduleState: 'started' });
+
+      await scheduler(async () => 'unknown').reconcile();
+
+      expect(getTask(db.db, 'live')?.condition).toBe('running');
+    });
+
+    it('leaves every task untouched when describeWorkflow throws', async () => {
+      upsertTask(db.db, { id: 'live', repositoryId: REPO, prompt: 'p', scheduleState: 'started' });
+
+      await scheduler(async () => {
+        throw new Error('transport failure');
+      }).reconcile();
+
+      expect(getTask(db.db, 'live')?.condition).toBe('running');
+    });
+
+    it('writes the real outcome of a workflow that closed without reporting it', async () => {
+      upsertTask(db.db, { id: 'done', repositoryId: REPO, prompt: 'p', scheduleState: 'started' });
+
+      await scheduler(async () => 'completed').reconcile();
+
+      expect(getTask(db.db, 'done')?.condition).toBe('completed');
+    });
+
+    it('skips a task the scheduler has not started — it has no workflow yet by design', async () => {
+      upsertTask(db.db, { id: 'A', repositoryId: REPO, prompt: 'A', scheduleState: 'started' });
+      upsertTask(db.db, { id: 'B', repositoryId: REPO, prompt: 'B', parentTaskId: 'A', scheduleState: 'blocked' });
+
+      await scheduler(async () => 'absent').reconcile();
+
+      expect(getTask(db.db, 'B')?.condition).toBe('running');
+      expect(getTask(db.db, 'A')?.condition).toBe('abandoned');
+    });
+
+    it('does not re-reconcile a row it already marked terminal', async () => {
+      upsertTask(db.db, { id: 'ghost', repositoryId: REPO, prompt: 'p', scheduleState: 'started' });
+      await scheduler(async () => 'absent').reconcile();
+
+      const asked: string[] = [];
+      await scheduler(async ({ taskId }) => {
+        asked.push(taskId);
+        return 'absent';
+      }).reconcile();
+
+      expect(asked).toEqual([]);
+    });
+
+    it('projects the terminal condition into task_summary so the fleet view agrees', async () => {
+      upsertTask(db.db, { id: 'ghost', repositoryId: REPO, prompt: 'p', scheduleState: 'started' });
+
+      await scheduler(async () => 'absent').reconcile();
+
+      expect(getTaskSummary(db.db, 'ghost')?.derivedStatus).toBe('abandoned');
+    });
   });
 });

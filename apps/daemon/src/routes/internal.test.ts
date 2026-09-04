@@ -52,7 +52,12 @@ describe('internal worker→daemon routes', () => {
     seedRepo(database);
     eventBus = new SemanticEventBus();
     app = Fastify({ logger: false });
-    const scheduler = new TaskScheduler({ database, startTask: async () => {}, hasReleased: async () => false });
+    const scheduler = new TaskScheduler({
+      database,
+      startTask: async () => {},
+      hasReleased: async () => false,
+      describeWorkflow: async () => 'running',
+    });
     registerInternalRoutes(app, database, eventBus, scheduler);
     await app.ready();
   });

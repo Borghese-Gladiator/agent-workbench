@@ -1,4 +1,4 @@
-import { eq, inArray, or } from 'drizzle-orm';
+import { and, eq, inArray, or } from 'drizzle-orm';
 import type {
   TaskPhase,
   RunCondition,
@@ -197,6 +197,50 @@ export function listStartableTasks(db: DrizzleDb): TaskRow[] {
 
 export interface TaskWithRepository extends TaskRow {
   repositoryName: string | null;
+}
+
+/**
+ * Conditions a task can still move out of on its own. Everything else is terminal: the Workflow (or
+ * the reconcile pass) has said the last word, and no further write is expected.
+ */
+export const NON_TERMINAL_CONDITIONS: readonly RunCondition[] = [
+  'running',
+  'awaiting-human',
+  'awaiting-external',
+  'blocked',
+];
+
+/**
+ * Tasks the daemon's reconcile pass must check against Temporal (TASK-126): their workflow was
+ * started, and the row still claims a condition it could only leave by being written to. A task the
+ * scheduler has not started yet is excluded — it legitimately has no Workflow, and marking it
+ * abandoned would kill a task that is merely queued.
+ */
+export function listReconcilableTasks(db: DrizzleDb): TaskRow[] {
+  return db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.scheduleState, 'started'), inArray(tasks.condition, [...NON_TERMINAL_CONDITIONS])))
+    .all();
+}
+
+/**
+ * Tasks eligible for `awb task prune` (TASK-126): terminal, and untouched since `before`. This is
+ * how the corpses a crashed or purged Workflow left behind leave the fleet view for good. Passing no
+ * `conditions` prunes only `abandoned` rows — the conservative default, since `completed` rows are
+ * the audit trail of work that actually shipped.
+ */
+export function listPrunableTasks(
+  db: DrizzleDb,
+  options: { conditions?: readonly RunCondition[]; before?: string } = {},
+): TaskRow[] {
+  const conditions = options.conditions ?? (['abandoned'] as const);
+  return db
+    .select()
+    .from(tasks)
+    .where(inArray(tasks.condition, [...conditions]))
+    .all()
+    .filter((row) => (options.before === undefined ? true : row.updatedAt < options.before));
 }
 
 export function listTasksWithRepository(db: DrizzleDb): TaskWithRepository[] {
