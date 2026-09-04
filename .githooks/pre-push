@@ -35,6 +35,13 @@ fi
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root" || exit 1
 
+# Git exports GIT_DIR (and friends) into every hook. Anything the test suite spawns would
+# inherit them, so a test that runs `git init` in a temp dir then commits would operate on
+# THIS worktree's git dir instead and fail — 35 tests failed this way while the same suite
+# passed when run directly. Drop them before handing control to build/test.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_QUARANTINE_PATH \
+  GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR GIT_INTERNAL_GETTEXT_SH_SCHEME
+
 echo "pre-push: building..."
 if ! pnpm build; then
   echo >&2
