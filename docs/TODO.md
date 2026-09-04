@@ -4,6 +4,196 @@ Prioritized List of Things to Fix
 Every task should have what is wrong / what to do, where, and how we'll know when it's done
 
 
+## Group AD — Observability & monitoring integrity (BLOCKS multi-task builds, 2026-09-04)
+
+Found during a readiness audit before a large multi-task build. Build and the full test
+suite are green (1217 tests), the stack boots, draft-PR delivery and interactive QA are
+real. The gap is **read-back**: the workbench does the work but cannot honestly report
+what phase a task is in, how long a phase took, or whether a task is still alive.
+
+Two independent seams, deliberately split so they can be built in parallel:
+- **Monitoring** (TASK-123, 126, 127) — *is this task alive and where is it right now?*
+  Owns `tasks` / `task_summary` / `awb fleet` / `awb status`.
+- **Observability** (TASK-124, 125, 128) — *after the fact, what took the time and what
+  happened?* Owns `phase_attempts` / `agent_sessions` / the read-back CLI.
+
+They touch different tables and different commands. Do not let one branch edit the other's
+surface.
+
+### [ ] TASK-123: `tasks.phase` and `tasks.condition` are write-once — the entire fleet monitoring surface is frozen at task creation
+
+**What's wrong.** Nothing in production ever writes a task's phase or condition after the
+row is inserted. Every one of the 40 tasks in the local database reads `specify | running`,
+including tasks that actually reached `challenge` and parked at `awaiting-human`. `awb
+fleet` therefore prints a dead PHASE column and a dead COND column for every row. `awb task
+show` is correct only because it queries the live Temporal Workflow, not the database.
+
+The daemon already exposes the write route — `PUT /internal/tasks/:taskId`, which accepts
+`phase`, `condition` and `deliveryState`
+(`apps/daemon/src/routes/internal.ts:35-53`) — and the worker already defines the client
+method that calls it (`workers/temporal-worker/src/daemon-client.ts:46,76`). **No
+production code path calls either.** The only callers are tests. `refreshTaskSummary`
+(`packages/database/src/data-access/tasks.ts:275`) then faithfully projects the stale row
+into `task_summary`, which is what `getFleetStatus` reads.
+
+**What to do.** Call `daemonClient.upsertTask` with the current `phase`, `condition` and
+`deliveryState` on every lifecycle transition, so the database tracks the Workflow. The
+Workflow itself must stay I/O-free, so the write belongs in an Activity — either fold it
+into the existing `runPhase` entry/exit path (which already reaches the daemon for
+run-state snapshots) or add a small dedicated `syncTaskState` Activity the Workflow invokes
+on each transition. Prefer folding it into the existing seam over adding a new Activity.
+Cover the phase transitions, the loop-backs (repair / replan), the human-gate parks, and
+the terminal states.
+
+**Where.** `workers/temporal-worker/src/activities/run-phase.ts` (transition points),
+`workers/temporal-worker/src/daemon-client.ts:46,76`,
+`apps/daemon/src/routes/internal.ts:35`, `packages/database/src/data-access/tasks.ts:86,275`,
+`packages/workflow/src/task-workflow.ts` (if a dedicated Activity is chosen). Relates to
+TASK-127 (a correct phase is useless if a dead task still claims `running`) and to Group O's
+`task_summary` projection.
+
+**How we'll know it's done.** *Unit:* driving a task through specify → plan → implement
+writes each transition to `tasks` and `task_summary`; a loop-back to `implement` and a park
+at `awaiting-human` both land in the row. *Manual:* run one task and poll `awb fleet --md`
+— the PHASE and COND columns advance in step with `awb task show`, with no disagreement
+between the two commands at any point.
+
+### [ ] TASK-124: `phase_attempts.ended_at` and `.outcome` are never written — per-phase duration and outcome are unreadable
+
+**What's wrong.** All 190 `phase_attempts` rows in the local database have `ended_at =
+NULL` and `outcome = NULL`. The row is inserted when a phase attempt starts and never
+closed. `/api/tasks/:repositoryId/:taskId/execution-tree` therefore returns a tree in which
+no phase has a duration and no phase has a result, which is the single most obvious thing to
+ask of it after a run. The timing data does exist, but in a different table
+(`runtime_attribution`, 121 rows, broken out by category: `modelGenerationMs`,
+`testExecutionMs`, `qaExecutionMs`, `dependencyInstallMs`, `githubOperationMs`), so a reader
+must know to join a table the execution tree does not mention.
+
+**What to do.** Close the `phase_attempts` row when the attempt finishes: write `ended_at`
+and the `outcome` the completion evaluation produced (complete / repair / replan /
+await-human / failed). Write it on the failure and throw paths too, not only the happy path
+— a phase that dies is exactly the one a reader wants a timestamp for. Then join
+`runtime_attribution` into the execution-tree response for each attempt, so one call answers
+"which phase took the time, and inside that phase was it the model, the tests, or the QA".
+
+**Where.** `packages/database/src/data-access/observability.ts:33,118`
+(`persistPhaseObservability`, `listPhaseAttempts`),
+`workers/temporal-worker/src/activities/run-phase.ts` (the attempt exit paths, including the
+catch), `apps/daemon/src/routes/tasks.ts` (execution-tree assembly). Relates to TASK-125
+(same defect one level down) and TASK-128 (the CLI that prints this).
+
+**How we'll know it's done.** *Unit:* a completed phase attempt has a non-null `ended_at`
+after the phase; a phase attempt that throws also has a non-null `ended_at` and a failure
+`outcome`. *Manual:* run one task, call the execution-tree endpoint, and every phase attempt
+shows a real duration, a real outcome, and its runtime-attribution breakdown.
+
+### [ ] TASK-125: `agent_sessions.ended_at` equals `started_at` — every agent session reports zero duration
+
+**What's wrong.** All 92 `agent_sessions` rows have `ended_at` exactly equal to
+`started_at`, so every session in the execution tree reports a zero-millisecond duration.
+The same collapse shows on the `model_invocations` rows beneath them (`startedAt` equals
+`endedAt`). The session end timestamp is being stamped at persist time rather than captured
+when the session actually ended, so a 4-minute model session and a 2-second one are
+indistinguishable. This makes the session layer of the execution tree decorative.
+
+**What to do.** Capture the real session start and end from the adapter, and the real
+per-invocation start and end from the usage stream, then persist those instead of a single
+write-time timestamp. Where the underlying runtime genuinely does not report a per-invocation
+end (some CLI adapters), persist `NULL` rather than a fabricated equal timestamp — an honest
+gap beats a plausible-looking zero.
+
+**Where.** `packages/database/src/data-access/observability.ts:33,128,138`,
+`packages/agent-gateway` (the adapter/usage seam that reports session and invocation
+boundaries), `workers/temporal-worker/src/activities/run-phase.ts` (where the session record
+is assembled). Relates to TASK-124.
+
+**How we'll know it's done.** *Unit:* a session whose adapter ran for a known interval
+persists an `ended_at` that reflects that interval, not `started_at`; a runtime that reports
+no end persists `NULL`. *Manual:* after a real run, session durations in the execution tree
+differ from each other and sum to roughly their parent phase attempt's duration.
+
+### [ ] TASK-126: Phantom `running` tasks — nothing reconciles the database against whether the Workflow still exists
+
+**What's wrong.** The local database holds 40 tasks that all claim `running`, with last
+activity 17 to 36 days old. Their Temporal Workflows are long gone. Nothing ever reconciles
+"the row says running" against "a Workflow is actually executing", so a crashed, terminated,
+or history-purged task claims to be running forever. On a fleet view this is worse than a
+wrong phase: it makes the monitoring surface unusable, because the reader cannot tell a live
+task from a corpse. TASK-105's phase heartbeat proves liveness *inside* a running Activity;
+it says nothing about a task whose Workflow no longer exists at all.
+
+**What to do.** Add a reconciliation pass that compares each non-terminal task row against
+the Workflow's real state, and marks the row terminal (`abandoned` / `lost`, distinct from
+`failed`) when no Workflow backs it. Run it on daemon start and on a slow poll — the daemon
+already runs a `reconcile()` tick for DAG scheduling, so extend that rather than adding a
+second loop. Surface the result in `awb fleet` so an abandoned task reads as abandoned, not
+as running. Provide a way to purge the existing 40 stale rows.
+
+**Where.** `apps/daemon/src/scheduler.ts:135,153` (the existing reconcile tick),
+`packages/database/src/data-access/fleet.ts`, `packages/database/src/data-access/tasks.ts:275`,
+`packages/domain/src/task-status.ts:14` (the new terminal status),
+`apps/cli/src/commands/fleet.ts`. Depends on TASK-123 landing first — reconciling a phase
+that never advances is meaningless. Relates to TASK-111 (network partition wedges the stack).
+
+**How we'll know it's done.** *Unit:* a task row whose Workflow is absent is marked
+abandoned by the reconcile pass; a task whose Workflow is running is left untouched.
+*Manual:* `awb fleet` on this machine shows zero tasks claiming `running` that have not moved
+in weeks, and a task killed mid-run flips to abandoned within one reconcile interval.
+
+### [ ] TASK-127: `awb up` exits nonzero on a worker/Temporal boot race
+
+**What's wrong.** `awb up --quiet` returned exit 1 with the worker `unhealthy`, twice in a
+row, on a machine where the stack was otherwise fine. Two distinct races: the worker
+connects to Temporal before Temporal listens on 7233 and dies with `ConnectionRefused`
+(observed in `awb logs worker`), and `up` gives up waiting before the worker finishes its
+roughly 30-second webpack Workflow-bundle build. A `status` call a moment later reports
+`ready`. Because `awb status --json` is documented as the health check that agents and CI
+gate on, a boot that is merely slow is indistinguishable from a boot that failed.
+
+**What to do.** Make `up` wait for Temporal to accept connections before it starts the
+worker, and give the worker's readiness wait a budget that accommodates the bundle build.
+Retry the worker's initial Temporal connection with backoff instead of dying on the first
+`ConnectionRefused`. Keep `status` exiting nonzero when the runtime genuinely is not ready —
+the contract is right, the boot sequencing is not. Also clear the stale-pid warning `doctor`
+reports after a crashed worker.
+
+**Where.** `apps/cli/src/commands/lifecycle.ts:175`, `apps/cli/src/services.ts:29`
+(`RUNTIME_SERVICES` order), `apps/cli/src/health.ts:174`,
+`workers/temporal-worker/src/index.ts` (the connect path). Relates to TASK-111.
+
+**How we'll know it's done.** *Unit:* the worker retries a refused Temporal connection
+rather than exiting. *Manual:* `awb down` then `awb up --quiet` exits 0 and the immediately
+following `awb status --json` reports `ok: true`, repeated five times without a single
+`unhealthy`.
+
+### [ ] TASK-128: No CLI surface for post-hoc observability — timing and token data are reachable only by hand-written HTTP calls
+
+**What's wrong.** The durable observability is genuinely rich — per-phase runtime
+attribution by category, token and USD cost by model, the phase-attempt → session →
+invocation → context-composition tree — but the only way to read any of it is `curl` against
+`/api/tasks/:repositoryId/:taskId` and `/execution-tree`. `awb task show` prints three lines
+(phase, condition, gate). `awb task logs` printed `No recorded events for this task yet.` for
+a task that has rows in `semantic_events`. With no frontend, the CLI is the only review
+surface, and it does not expose the data.
+
+**What to do.** Add a read-back command — `awb task timeline` (or a flag on `task show`) —
+that prints, for one task: each phase attempt with its duration and outcome, the runtime
+attribution split inside it, which QA ran and how long it took, the evidence and artifacts
+produced, and the token/cost total. Honor the global output contract: `--json` for a stable
+machine shape, plain text otherwise. Separately fix `awb task logs`, which fails to find
+`semantic_events` rows that exist.
+
+**Where.** `apps/cli/src/commands/task.ts` (`show`, `logs`, the new command),
+`apps/daemon/src/routes/tasks.ts:291` (the payload already assembled there),
+`packages/database/src/data-access/observability.ts:118,163,217,311`. Depends on TASK-124
+and TASK-125 — the command is only worth writing once the durations are real. Relates to
+TASK-121 (cross-task rollup, which sits above this).
+
+**How we'll know it's done.** *Unit:* the command renders a task with phases, durations,
+QA, evidence and tokens, and its `--json` output parses against a stable named-field shape.
+*Manual:* after a real run, one command answers "which phase took longest, what QA ran, and
+what did it cost" with no `curl` and no database query.
+
 ## Group AA — Autonomy pivot: remove human approvals, loop to a draft PR (TOP PRIORITY)
 
 The direction: the workbench stops being a human-in-the-loop system with an approval
@@ -1861,7 +2051,7 @@ Reference items to evaluate against the workbench. Each is a **read + short writ
 decision** (adopt / steal-one-idea / decline), not a build task on its own. Where a
 finding turns into work, spin it into a numbered task.
 
-### [ ] TASK-100: Evaluate external agentic-framework / memory / tooling references
+### [x] TASK-100: Evaluate external agentic-framework / memory / tooling references
 
 **What to do.** Read each reference, decide what (if anything) the workbench should
 steal, and record the call + which existing task/learning it maps to. Do **not** adopt
@@ -1948,3 +2138,175 @@ and ADR-009.
 
 **How we'll know it's done.** A short note per reference with an adopt / steal-idea /
 decline call, and any adopted idea promoted to its own task.
+
+> **Done.** TASK-100's review surfaced the candidate tasks below (TASK-116..122);
+> everything else was `decline` / `reference-only` (covered by an existing invariant,
+> task, or learning, or conflicting with no-vector-DB / SQLite-single-writer /
+> no-subagent / read-only-board).
+
+### [ ] TASK-116: Define a promotion/eviction policy for project memory (markdown files grow unboundedly, no lifecycle)
+
+**What's wrong today.** Project memory (`project-memory-design`) is one append-only
+markdown file per project, written at closeout. There is no rule for when a fact
+graduates from session-scoped context into persisted project memory, and no eviction rule
+— the file only ever grows, so stale/superseded facts accumulate forever.
+
+**What the external technology does.** **Memory-OS** — 6-layer memory (short-term →
+mid-term → long-term) built on Hermes, with explicit promotion/eviction between layers:
+`https://www.marktechpost.com/2026/06/01/meet-memory-os-a-memory-operating-system-for-ai-agents-that-cuts-gpt-4o-mini-cost-and-boosts-accuracy/`.
+**autoagent** (`https://github.com/hkuds/autoagent`) maintains a fine-grained, typed
+memory graph automatically rather than only at explicit save points.
+
+**What to do.** Define (in `docs/decisions/` or alongside `project-memory-design`)
+explicit promotion criteria (what makes a fact worth writing to project memory) and an
+eviction rule (when an entry is stale enough to remove or supersede — e.g. superseded by a
+later entry on the same topic, or contradicted by current repo state). This **extends**
+ADR-009, it does not reopen it: still markdown, still repo-is-truth, no `AgentMemory`
+store, no memory graph/vector store (decline the graph-store and vector parts of both
+references — steal only the lifecycle idea).
+
+**Where.** `docs/decisions/ADR-009*.md` and wherever `project-memory-design` is
+documented; the closeout skill that writes project memory. Relates to TASK-117 (may fold
+together).
+
+**How we'll know it's done.** A documented promotion/eviction rule exists, and the
+closeout skill applies it (an old, superseded memory entry gets marked/removed rather than
+accumulating forever).
+
+### [ ] TASK-117: Auto-capture high-signal repo facts on first touch, not only at closeout
+
+**What's wrong today.** Project memory is only written at session closeout. If a session
+ends without an explicit closeout (crash, park, cold re-entry), high-signal facts learned
+mid-run are lost — contributing to the cold-re-entry non-convergence already noted in
+`qa-cold-reentry-nonconvergence`.
+
+**What the external technology does.** The **auto-memory** writeup
+(`https://share.google/oXjo34ahE29NMPYaE`, "I wasted 68 min/day re-explaining my code")
+auto-captures repo facts as they're discovered, not only at an explicit save point —
+directly addressing the same "re-explain everything every session" pain this task fixes.
+
+**What to do.** Identify a bounded set of high-signal moments (e.g. discovering a repo
+convention, hitting a non-obvious blocker) where memory should be written immediately
+rather than deferred to closeout. Likely folds into TASK-116's promotion policy rather
+than being separate — triage together.
+
+**Where.** Same surface as TASK-116 (project-memory write path). Relates to
+`qa-cold-reentry-nonconvergence`.
+
+**How we'll know it's done.** A mid-run fact survives a session that ends without a clean
+closeout (verified by killing a session mid-task and checking memory was still written).
+
+### [ ] TASK-118: Evaluate markitdown as the context-ingestion converter (PDF/docx/pptx → md), replacing ad-hoc pdfminer
+
+**What's wrong today.** Context ingestion for non-markdown documents is ad hoc — the
+Karpathy PDF was converted via pdfminer as a one-off (`group-e-token-memory-graph`), not
+through a reusable converter. Every new document format would need its own bespoke script.
+
+**What the external technology does.** **markitdown**
+(`https://github.com/microsoft/markitdown`) is a general-purpose PDF/docx/pptx/office/asset
+→ Markdown converter maintained by Microsoft, covering exactly this class of conversion
+with one dependency instead of per-format scripts.
+
+**What to do.** Evaluate `markitdown` as the standard context-ingestion converter in place
+of one-off scripts. Bounded evaluation: does it handle the formats we've actually needed,
+and is it worth the dependency. No invariant conflict — it's a converter, not a store.
+
+**Where.** Wherever ad-hoc document-to-context conversion currently happens (context
+ingestion / memory tooling).
+
+**How we'll know it's done.** *Manual:* re-run the Karpathy-PDF-style conversion through
+markitdown and confirm output quality is equal or better than the pdfminer one-off; decide
+adopt or decline.
+
+### [ ] TASK-119: Test whether a `design.md`-style structured design spec improves from-scratch UI output (flag on TASK-99)
+
+**What's wrong today.** TASK-99's `build-ui` skill has no structured design-spec input —
+it relies on prompt guidance alone, with no tokens/layout/light-dark spec file feeding
+generation.
+
+**What the external technology does.** The **design.md** pattern
+(`https://github.com/google-labs-code/design.md` and
+`https://getdesign.md/linear.app/design-md`) is a structured spec file (design tokens,
+layout rules, light/dark rules) that conditions UI generation, used to reproduce
+recognizable design systems (e.g. the linked Linear-app example) from a spec rather than
+prose alone.
+
+**What to do.** As part of (or immediately following) TASK-99, run a bounded experiment:
+build the same from-scratch UI once with the current skill prompt and once with a
+`design.md`-style spec feeding it, and compare coherence (tokens, light/dark, responsive)
+without hand-holding. Adopt the pattern into `build-ui` only if the experiment shows a real
+difference.
+
+**Where.** `.claude/skills/build-ui/` (TASK-99). Not a standalone deliverable — a flagged
+experiment on that task.
+
+**How we'll know it's done.** A short before/after comparison exists and TASK-99's skill
+either adopts or explicitly declines the `design.md` input based on it.
+
+### [ ] TASK-120: Persisted per-run agent scratchpad/TODO to reduce cold re-entry
+
+**What's wrong today.** Long runs have no persisted scratchpad — only plan artifacts. On
+cold re-entry (park/resume), the agent has to reconstruct working state from the plan
+artifact rather than a running TODO/scratchpad, contributing to the non-convergence pattern
+in `qa-cold-reentry-nonconvergence`.
+
+**What the external technology does.** **deep-agents-from-scratch**
+(`https://github.com/langchain-ai/deep-agents-from-scratch`) teaches planning + sub-task
+decomposition backed by an explicit agent-maintained scratchpad / virtual filesystem for
+in-progress state, separate from the plan itself. (Decline its subagent framing — we
+already have the stacked-PR DAG for decomposition via `decompose-into-dag`/TASK-51; the
+bounded steal is just the scratchpad idea.)
+
+**What to do.** Add a persisted per-run scratchpad file (plain markdown/text, not a new
+store) that the agent updates as it works and that is loaded back in on resume, distinct
+from the plan artifact. Bounded: no subagent framing, no new database table.
+
+**Where.** Wherever plan artifacts are currently produced/loaded on resume
+(`produceStageArtifactResuming` per `artifact-dedup-per-stage-run`). Relates to
+`qa-cold-reentry-nonconvergence`.
+
+**How we'll know it's done.** *Manual:* park a long-running task mid-phase, resume it, and
+confirm the resumed session picks up the scratchpad instead of cold-re-deriving state.
+
+### [ ] TASK-121: Batch/factory rollup view over `task_summary` (cross-task, not per-task)
+
+**What's wrong today.** `task_summary` (per `ui-roadmap-phase0-progress`) gives per-task
+rollups, but there's no cross-task view summarizing what a batch of tasks (e.g. one
+dogfooding run across N tickets) produced — an operator has to open each task individually.
+
+**What the external technology does.** The **"Build a software factory with Claude
+Code"** writeup
+(`https://www.freecodecamp.org/news/how-to-build-software-factory-with-claude-code/`)
+frames its pipeline around an explicit factory run-report: one rollup summarizing what a
+whole batch of tasks produced.
+
+**What to do.** Add a low-priority rollup view (CLI output or a UI page) that aggregates
+`task_summary` across a set of tasks run together — counts by terminal state, PRs opened,
+unmet-criteria tasks — rather than requiring per-task drill-in.
+
+**Where.** Builds on the `task_summary` projection (Group O UI work / `apps/web`, or `awb`
+CLI). Low priority.
+
+**How we'll know it's done.** *Manual:* after driving several tasks, one command/page shows
+the batch rollup (opened PRs, unmet-criteria count) without opening each task individually.
+
+### [ ] TASK-122: OS-level sandbox for untrusted repos (deferred — only if the `native-trusted` model changes)
+
+**What's wrong today.** Execution is confined by the capability broker + worktree
+isolation, which is explicitly `native-trusted` — **not** a hostile-code sandbox
+(documented gap in `AGENTS.md`, `monitor-tool-escapes-readonly-deny`). There is currently
+no OS-level isolation boundary if the workbench ever needed to run an untrusted repo.
+
+**What the external technology does.** **Sandcastle** provides OS-level sandboxing /
+isolation for running untrusted code, which is the mitigation this gap would need if the
+trust model changes.
+
+**What to do.** Nothing now. If/when the workbench needs to run untrusted repos, use
+Sandcastle's isolation-boundary model as the design reference for OS-level sandboxing.
+Deferred — not needed under the current `native-trusted` model.
+
+**Where.** N/A until triggered. Relates to `AGENTS.md` known-gaps and
+`monitor-tool-escapes-readonly-deny`.
+
+**How we'll know it's done.** N/A — this stays deferred until the trust model changes;
+re-triage at that point rather than building speculatively.
