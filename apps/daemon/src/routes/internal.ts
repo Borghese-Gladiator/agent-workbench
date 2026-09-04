@@ -1,7 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import type { WorkbenchDatabase, TaskSummaryContext } from '@awb/database';
 import { upsertTask, persistRunStateSnapshot, insertSemanticEvent, persistPhaseObservability } from '@awb/database';
-import { RunStateSnapshotSchema, SemanticEventSchema, PhaseObservabilitySchema } from '@awb/domain';
+import {
+  RunStateSnapshotSchema,
+  SemanticEventSchema,
+  PhaseObservabilitySchema,
+  TaskStateSyncSchema,
+} from '@awb/domain';
 import { getRepository, refreshRepositorySnapshot, persistValidatedStartCommand } from '@awb/repository';
 import type { SemanticEventBus } from '../event-bus.js';
 import type { TaskScheduler } from '../scheduler.js';
@@ -32,25 +37,41 @@ export function registerInternalRoutes(
     return { ok: true };
   });
 
-  app.put<{ Params: { taskId: string }; Body: { repositoryId: string; prompt: string; phase?: string; condition?: string; deliveryState?: string } }>(
-    '/internal/tasks/:taskId',
-    async (request, reply) => {
-      try {
-        upsertTask(database.db, {
-          id: request.params.taskId,
-          repositoryId: request.body.repositoryId,
-          prompt: request.body.prompt,
-          phase: request.body.phase as never,
-          condition: request.body.condition as never,
-          deliveryState: request.body.deliveryState as never,
-        });
-        return { ok: true };
-      } catch (err) {
-        reply.code(500);
-        return { error: err instanceof Error ? err.message : String(err) };
+  // The Workflow's lifecycle sync (TASK-123). Every phase transition, loop-back, human-gate park and
+  // terminal state lands here, so `tasks` (and through it `task_summary`, which `awb fleet` reads)
+  // tracks the Workflow instead of freezing at `specify | running`.
+  app.put<{ Params: { taskId: string }; Body: unknown }>('/internal/tasks/:taskId', async (request, reply) => {
+    const parsed = TaskStateSyncSchema.safeParse({
+      ...(typeof request.body === 'object' && request.body !== null ? request.body : {}),
+      taskId: request.params.taskId,
+    });
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: `Invalid task-state sync: ${parsed.error.message}` };
+    }
+    try {
+      const summaryContext: TaskSummaryContext = {};
+      if (parsed.data.pendingGateReason !== undefined) {
+        summaryContext.pendingGateReason = parsed.data.pendingGateReason;
       }
-    },
-  );
+      upsertTask(
+        database.db,
+        {
+          id: parsed.data.taskId,
+          repositoryId: parsed.data.repositoryId,
+          prompt: parsed.data.prompt,
+          phase: parsed.data.phase,
+          condition: parsed.data.condition,
+          deliveryState: parsed.data.deliveryState,
+        },
+        summaryContext,
+      );
+      return { ok: true };
+    } catch (err) {
+      reply.code(500);
+      return { error: err instanceof Error ? err.message : String(err) };
+    }
+  });
 
   app.put<{ Params: { taskId: string } }>('/internal/run-state/:taskId', async (request, reply) => {
     const parsed = RunStateSnapshotSchema.safeParse(request.body);

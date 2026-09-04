@@ -6,7 +6,8 @@ import { promisify } from 'node:util';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { repositories } from '@awb/database';
+import { repositories, upsertTask, getTask } from '@awb/database';
+import type { TaskStateSync } from '@awb/domain';
 import { buildServer, type DaemonServer } from '../server.js';
 import { setTemporalClientForTesting } from '../temporal-client.js';
 import { taskQueueName } from '../temporal-worker-constants.js';
@@ -14,6 +15,25 @@ import { taskQueueName } from '../temporal-worker-constants.js';
 import { runPhase } from '../../../../workers/temporal-worker/dist/activities/run-phase.js';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Stands in for the daemon's `PUT /internal/tasks/:taskId` route (TASK-123). `buildServer()` never
+ * listens on a port here — the test drives it through `inject` — so the real Activity's HTTP call
+ * cannot land. This writes the same row the route writes, which is what lets the test assert that a
+ * task's persisted phase actually tracks the workflow.
+ */
+function makeSyncTaskState(getDb: () => DaemonServer) {
+  return async (state: TaskStateSync): Promise<void> => {
+    upsertTask(getDb().database.db, {
+      id: state.taskId,
+      repositoryId: state.repositoryId,
+      prompt: state.prompt,
+      phase: state.phase,
+      condition: state.condition,
+      deliveryState: state.deliveryState,
+    });
+  };
+}
 
 async function makeTempRepo(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'awb-daemon-e2e-repo-'));
@@ -113,7 +133,7 @@ describe('daemon routes drive a task to completion', () => {
       connection: testEnv.nativeConnection,
       taskQueue: taskQueueName(),
       workflowsPath: new URL('../../../../packages/workflow/dist/task-workflow.js', import.meta.url).pathname,
-      activities: { runPhase },
+      activities: { runPhase, syncTaskState: makeSyncTaskState(() => server) },
     });
 
     const result = await worker.runUntil(async () => {
@@ -155,9 +175,21 @@ describe('daemon routes drive a task to completion', () => {
       });
       expect(merged.statusCode).toBe(200);
 
+      // Wait for the TERMINAL state, not just the phase: the workflow reaches `assimilate` at the
+      // end of the release iteration and only sets `completed` after the phase loop exits, so a poll
+      // on the phase alone can read the state one step early.
       await poll(async () => {
         const show = await server.app.inject({ method: 'GET', url: base });
-        return show.json().state?.phase === 'assimilate';
+        const state = show.json().state;
+        return state?.phase === 'assimilate' && state?.condition === 'completed';
+      });
+
+      // TASK-123: the persisted row must catch up with the workflow. The terminal write is an
+      // Activity dispatched after the workflow sets `completed`, so it lands just after the query
+      // reports it — poll rather than read once.
+      await poll(async () => {
+        const row = getTask(server.database.db, taskId);
+        return row?.phase === 'assimilate' && row?.condition === 'completed';
       });
 
       const final = await server.app.inject({ method: 'GET', url: base });
@@ -167,6 +199,13 @@ describe('daemon routes drive a task to completion', () => {
     expect(result.state.phase).toBe('assimilate');
     expect(result.state.condition).toBe('completed');
     expect(result.state.deliveryState).toBe('merged');
+
+    // TASK-123: the persisted row must agree with the live workflow. Before the lifecycle sync it
+    // stayed at `specify | running` for the whole run, which is what made `awb fleet` unreadable.
+    const persisted = getTask(server.database.db, result.state.taskId as string);
+    expect(persisted?.phase).toBe('assimilate');
+    expect(persisted?.condition).toBe('completed');
+    expect(persisted?.deliveryState).toBe('merged');
   }, 90_000);
 
   it('DELETE removes a task (terminating its workflow) and drops it from the list (TASK-37)', async () => {
@@ -174,7 +213,7 @@ describe('daemon routes drive a task to completion', () => {
       connection: testEnv.nativeConnection,
       taskQueue: taskQueueName(),
       workflowsPath: new URL('../../../../packages/workflow/dist/task-workflow.js', import.meta.url).pathname,
-      activities: { runPhase },
+      activities: { runPhase, syncTaskState: makeSyncTaskState(() => server) },
     });
 
     await worker.runUntil(async () => {

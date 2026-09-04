@@ -21,11 +21,14 @@ const TASK_ID = 'task-1';
 /** A DaemonClient that writes straight to the test DB, standing in for the daemon's internal routes. */
 function fakeDaemonClient(database: WorkbenchDatabase): DaemonClient {
   return {
-    async upsertTask(input) {
+    async syncTaskState(state) {
       upsertTask(database.db, {
-        id: input.taskId,
-        repositoryId: input.repositoryId,
-        prompt: input.prompt,
+        id: state.taskId,
+        repositoryId: state.repositoryId,
+        prompt: state.prompt,
+        phase: state.phase,
+        condition: state.condition,
+        deliveryState: state.deliveryState,
       });
     },
     async saveRunState(snapshot: RunStateSnapshot) {

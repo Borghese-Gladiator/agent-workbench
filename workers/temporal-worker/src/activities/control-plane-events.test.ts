@@ -7,7 +7,7 @@ import type { DaemonClient } from '../daemon-client.js';
 function capturingDaemon(): { daemon: DaemonClient; posted: SemanticEvent[] } {
   const posted: SemanticEvent[] = [];
   const daemon: DaemonClient = {
-    async upsertTask() {},
+    async syncTaskState() {},
     async saveRunState() {},
     async postEvent(event) {
       posted.push(event);

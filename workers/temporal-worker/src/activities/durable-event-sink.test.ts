@@ -8,7 +8,7 @@ import type { DaemonClient } from '../daemon-client.js';
 
 function collectingClient(events: SemanticEvent[], opts: { throwOnPost?: boolean } = {}): DaemonClient {
   return {
-    async upsertTask() {},
+    async syncTaskState() {},
     async saveRunState() {},
     async postEvent(event) {
       if (opts.throwOnPost) throw new Error('daemon down');

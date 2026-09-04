@@ -32,11 +32,26 @@ describe('daemon client', () => {
     delete process.env.AWB_DAEMON_URL;
   });
 
-  it('PUTs a task upsert to the configured daemon URL', async () => {
-    await createDaemonClient().upsertTask({ taskId: 'task-1', repositoryId: 'repo-1', prompt: 'p' });
+  it('PUTs a task-state sync to the configured daemon URL', async () => {
+    await createDaemonClient().syncTaskState({
+      taskId: 'task-1',
+      repositoryId: 'repo-1',
+      prompt: 'p',
+      phase: 'implement',
+      condition: 'running',
+      deliveryState: 'not-started',
+      pendingGateReason: null,
+    });
     expect(calls[0]?.method).toBe('PUT');
     expect(calls[0]?.url).toBe('http://127.0.0.1:9999/internal/tasks/task-1');
-    expect(calls[0]?.body).toEqual({ repositoryId: 'repo-1', prompt: 'p' });
+    expect(calls[0]?.body).toEqual({
+      repositoryId: 'repo-1',
+      prompt: 'p',
+      phase: 'implement',
+      condition: 'running',
+      deliveryState: 'not-started',
+      pendingGateReason: null,
+    });
   });
 
   it('POSTs a semantic event', async () => {
@@ -72,7 +87,14 @@ describe('daemon client', () => {
   it('throws on a non-2xx response', async () => {
     status = 500;
     await expect(
-      createDaemonClient().upsertTask({ taskId: 'task-1', repositoryId: 'repo-1', prompt: 'p' }),
+      createDaemonClient().syncTaskState({
+        taskId: 'task-1',
+        repositoryId: 'repo-1',
+        prompt: 'p',
+        phase: 'specify',
+        condition: 'running',
+        deliveryState: 'not-started',
+      }),
     ).rejects.toThrow(/returned 500/);
   });
 });

@@ -14,13 +14,19 @@ import {
   isCancellation,
   log,
 } from '@temporalio/workflow';
-import type { TaskPhase, TaskSize, HumanGateReason, PhaseAttemptResult } from '@awb/domain';
+import type { TaskPhase, TaskSize, HumanGateReason, PhaseAttemptResult, TaskStateSync } from '@awb/domain';
 import { nextPhaseIn, phaseSetForSize } from './phase-order.js';
 import type { TaskWorkflowInput, TaskWorkflowState } from './workflow-types.js';
 import { shouldEscalateToHuman } from './loop-routing.js';
 
 export interface TaskActivities {
   runPhase(input: { phase: TaskPhase; state: TaskWorkflowState }): Promise<PhaseAttemptResult>;
+  /**
+   * Persists this Workflow's current phase/condition/delivery-state onto the task row (TASK-123).
+   * The Activity is best-effort by contract — it never throws — so a monitoring write can never
+   * fail a task.
+   */
+  syncTaskState(state: TaskStateSync): Promise<void>;
 }
 
 const activities = proxyActivities<TaskActivities>({
@@ -41,6 +47,18 @@ const activities = proxyActivities<TaskActivities>({
     initialInterval: '5 seconds',
     backoffCoefficient: 2,
   },
+});
+
+/**
+ * Separate proxy for the task-state sync (TASK-123). It must NOT inherit the phase proxy's options:
+ * a phase may legitimately run for 30 minutes and proves liveness by heartbeating, while this write
+ * is a sub-second HTTP call that never heartbeats — under the phase proxy's 2-minute heartbeat
+ * timeout it would be killed and retried for no reason. The Activity swallows daemon errors, so the
+ * retries here only cover a worker crash or a wedged call.
+ */
+const stateSyncActivities = proxyActivities<Pick<TaskActivities, 'syncTaskState'>>({
+  startToCloseTimeout: '30 seconds',
+  retry: { maximumAttempts: 2, initialInterval: '1 second' },
 });
 
 /**
@@ -184,6 +202,27 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
   let paused = false;
   const failureStreak = new Map<TaskPhase, number>();
 
+  // TASK-123: mirror every lifecycle transition onto the task row, so `awb fleet` reads the real
+  // phase and condition instead of the values frozen at creation. `lastSynced` collapses the
+  // consecutive identical writes the loop would otherwise make (the end-of-iteration sync and the
+  // next iteration's entry sync carry the same triple) — a deterministic, replay-safe local.
+  let lastSynced = '';
+  const syncTaskState = async (): Promise<void> => {
+    const gateReason = state.pendingHumanGate?.reason ?? null;
+    const key = `${state.phase}|${state.condition}|${state.deliveryState}|${gateReason ?? ''}`;
+    if (key === lastSynced) return;
+    lastSynced = key;
+    await stateSyncActivities.syncTaskState({
+      taskId: state.taskId,
+      repositoryId: state.repositoryId,
+      prompt: state.prompt ?? '',
+      phase: state.phase,
+      condition: state.condition,
+      deliveryState: state.deliveryState,
+      pendingGateReason: gateReason,
+    });
+  };
+
   setHandler(cancelSignal, () => {
     cancelled = true;
     state = { ...state, condition: 'cancelled' };
@@ -287,6 +326,8 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
     }
 
     state = { ...state, attemptNumber: state.attemptNumber + 1 };
+    // Entry sync: records the phase about to run, and clears a gate reason a human just resolved.
+    await syncTaskState();
     const phaseThatRan = state.phase;
     let result: PhaseAttemptResult;
     try {
@@ -388,11 +429,20 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
         break;
       }
     }
+
+    // Exit sync: records where the routing just sent the task — the next phase, a loop-back target,
+    // a human-gate park, or a cancellation. A park writes here and then blocks at the top of the
+    // next iteration, so the row shows `awaiting-human` for as long as the task really waits.
+    await syncTaskState();
   }
 
   if (state.phase === 'assimilate' && state.condition !== 'cancelled') {
     state = { ...state, condition: 'completed' };
   }
+
+  // Terminal sync. This state is decided AFTER the phase loop, so no runPhase Activity can ever
+  // observe it — the reason the task-state write is its own Activity rather than a fold into runPhase.
+  await syncTaskState();
 
   return state;
 }

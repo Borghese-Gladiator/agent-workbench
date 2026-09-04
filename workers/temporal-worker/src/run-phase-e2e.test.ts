@@ -14,6 +14,13 @@ import {
 } from '@awb/workflow';
 import { runPhase } from './activities/run-phase.js';
 
+/**
+ * The lifecycle-transition write (TASK-123) is a no-op here: these tests exercise the real runPhase
+ * Activity, and no daemon is listening. Its own coverage lives in the workflow suite and in the
+ * daemon's completion e2e, which asserts the task row really advances.
+ */
+const syncTaskState = async (): Promise<void> => {};
+
 const execFileAsync = promisify(execFile);
 
 /**
@@ -113,7 +120,7 @@ describe('runPhase wired for real (E2E through TaskWorkflow)', () => {
       // TaskWorkflow itself is unchanged (built by an earlier milestone) — only runPhase, this
       // task's actual deliverable, is real here (not a scripted fake).
       workflowsPath: new URL('../../../packages/workflow/dist/task-workflow.js', import.meta.url).pathname,
-      activities: { runPhase },
+      activities: { runPhase, syncTaskState },
     });
 
     const result = await worker.runUntil(async () => {
@@ -153,7 +160,7 @@ describe('runPhase wired for real (E2E through TaskWorkflow)', () => {
       connection: testEnv.nativeConnection,
       taskQueue,
       workflowsPath: new URL('../../../packages/workflow/dist/task-workflow.js', import.meta.url).pathname,
-      activities: { runPhase },
+      activities: { runPhase, syncTaskState },
     });
 
     const result = await worker.runUntil(async () => {
@@ -196,7 +203,7 @@ describe('runPhase wired for real (E2E through TaskWorkflow)', () => {
       connection: testEnv.nativeConnection,
       taskQueue,
       workflowsPath: new URL('../../../packages/workflow/dist/task-workflow.js', import.meta.url).pathname,
-      activities: { runPhase },
+      activities: { runPhase, syncTaskState },
     });
 
     const result = await worker.runUntil(async () => {
