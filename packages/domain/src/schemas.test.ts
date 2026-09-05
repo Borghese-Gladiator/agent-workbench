@@ -16,6 +16,8 @@ import {
   SemanticEventSchema,
   PhaseAttemptResultSchema,
   CompletionCandidateSchema,
+  PhaseAttemptOutcomeSchema,
+  PhaseObservabilitySchema,
 } from './index.js';
 
 describe('domain schemas', () => {
@@ -297,5 +299,50 @@ describe('domain schemas', () => {
     expect(() =>
       PhaseAttemptResultSchema.parse({ outcome: 'not-a-real-outcome' }),
     ).toThrow();
+  });
+});
+
+describe('PhaseAttemptOutcomeSchema (TASK-124)', () => {
+  it.each(['candidate', 'repair', 'replan', 'await-human', 'blocked', 'cancelled', 'failed'])(
+    'accepts %s',
+    (outcome) => {
+      expect(PhaseAttemptOutcomeSchema.parse(outcome)).toBe(outcome);
+    },
+  );
+
+  it.each(['complete', 'done', 'error', ''])('rejects %s', (outcome) => {
+    expect(PhaseAttemptOutcomeSchema.safeParse(outcome).success).toBe(false);
+  });
+});
+
+describe('PhaseObservabilitySchema attempt close fields (TASK-124)', () => {
+  const base = {
+    taskId: 't',
+    runId: 't-run',
+    phaseAttemptId: 't-plan-1',
+    phase: 'plan',
+    attemptNumber: 1,
+    runtimeAttribution: {},
+    sessions: [],
+  };
+
+  it('parses without close fields, so an open attempt is still a valid payload', () => {
+    const parsed = PhaseObservabilitySchema.parse(base);
+    expect(parsed.endedAt).toBeUndefined();
+    expect(parsed.outcome).toBeUndefined();
+  });
+
+  it('parses with close fields', () => {
+    const parsed = PhaseObservabilitySchema.parse({
+      ...base,
+      startedAt: '2026-09-04T00:00:00.000Z',
+      endedAt: '2026-09-04T00:00:05.000Z',
+      outcome: 'failed',
+    });
+    expect(parsed.outcome).toBe('failed');
+  });
+
+  it('rejects an outcome outside the enum', () => {
+    expect(PhaseObservabilitySchema.safeParse({ ...base, outcome: 'finished' }).success).toBe(false);
   });
 });

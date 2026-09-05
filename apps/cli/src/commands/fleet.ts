@@ -2,6 +2,8 @@ import type { Command } from 'commander';
 import type { FleetTaskRow } from '@awb/database';
 import { daemonClient, DaemonRequestError } from '../daemon-client.js';
 import { emitJson, outputOptions, printError, printResult } from '../output.js';
+import { formatDurationCoarse } from '../duration.js';
+import { formatColumns } from '../table.js';
 
 interface FleetResponse {
   tasks: FleetTaskRow[];
@@ -9,11 +11,7 @@ interface FleetResponse {
 
 /** A short human age like "2m", "45s", "1h" for a whole-second duration. */
 export function formatAge(sec: number | null): string {
-  if (sec == null) return '—';
-  if (sec < 60) return `${sec}s`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
-  if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
-  return `${Math.floor(sec / 86400)}d`;
+  return formatDurationCoarse(sec == null ? null : sec * 1000);
 }
 
 /** The attempt cell — "#2 ↩verify" when the run regressed, "#1" on a clean first pass. */
@@ -50,11 +48,7 @@ const COLUMNS: Column[] = [
 export function renderTable(rows: FleetTaskRow[]): string {
   if (rows.length === 0) return 'No tasks.';
   const cells = rows.map((r) => COLUMNS.map((c) => c.value(r)));
-  const widths = COLUMNS.map((c, i) => Math.max(c.header.length, ...cells.map((row) => (row[i] ?? '').length)));
-  const pad = (s: string, w: number): string => s.padEnd(w);
-  const headerLine = COLUMNS.map((c, i) => pad(c.header, widths[i] ?? 0)).join('  ');
-  const bodyLines = cells.map((row) => row.map((v, i) => pad(v, widths[i] ?? 0)).join('  '));
-  return [headerLine, ...bodyLines].join('\n');
+  return formatColumns(COLUMNS.map((c) => c.header), cells).join('\n');
 }
 
 /** GitHub-flavored markdown table — the agent-legible default an LLM pastes into its reasoning. */

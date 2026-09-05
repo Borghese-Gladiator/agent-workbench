@@ -4,6 +4,7 @@ import type {
   PhaseAttemptResult,
   CompletionCandidate,
   ModelUsage,
+  PhaseAttemptOutcome,
   PhaseUsage,
 } from '@awb/domain';
 import type { TaskWorkflowState } from '@awb/workflow';
@@ -184,6 +185,21 @@ export async function drivePhase(handler: PhaseHandler, ctx: PhaseContext): Prom
     attemptNumber: ctx.state.attemptNumber,
   });
 
+  const attemptStartedAt = new Date().toISOString();
+  let attemptOutcome: PhaseAttemptOutcome = 'failed';
+  try {
+    const result = await runHandler(handler, ctx);
+    attemptOutcome = result.outcome;
+    return result;
+  } finally {
+    // Close the phase attempt on BOTH paths. A phase that throws is exactly the attempt a reader
+    // wants an end timestamp for, so the throw path closes it as `failed` before the error
+    // propagates. Best-effort: a failed persist never changes what the phase returned.
+    await persistAttemptObservability(handler, ctx, attemptStartedAt, attemptOutcome);
+  }
+}
+
+async function runHandler(handler: PhaseHandler, ctx: PhaseContext): Promise<PhaseAttemptResult> {
   const outcome = await handler.run(ctx);
 
   let result: PhaseAttemptResult;
@@ -231,24 +247,35 @@ export async function drivePhase(handler: PhaseHandler, ctx: PhaseContext): Prom
     usage,
   });
 
-  // Persist observability for this attempt (runtime-attribution buckets + agent sessions +
-  // model invocations + context composition). Best-effort: a failed persist never fails the phase.
-  if (ctx.daemon) {
-    const payload = ctx.observability.toPayload({
-      taskId: ctx.state.taskId,
-      runId: runIdForTask(ctx.state.taskId),
-      phaseAttemptId: `${ctx.state.taskId}-${handler.phase}-${ctx.state.attemptNumber}`,
-      phase: handler.phase,
-      attemptNumber: ctx.state.attemptNumber,
-    });
-    if (payload) {
-      try {
-        await ctx.daemon.postObservability(payload);
-      } catch {
-        // best-effort observability
-      }
-    }
-  }
-
   return result;
+}
+
+/**
+ * Persist this attempt's observability: the runtime-attribution buckets, agent sessions, model
+ * invocations, context composition, and the attempt's own start/end/outcome. Best-effort — a failed
+ * persist never fails the phase.
+ */
+async function persistAttemptObservability(
+  handler: PhaseHandler,
+  ctx: PhaseContext,
+  startedAt: string,
+  outcome: PhaseAttemptOutcome,
+): Promise<void> {
+  if (!ctx.daemon) return;
+  const payload = ctx.observability.toPayload({
+    taskId: ctx.state.taskId,
+    runId: runIdForTask(ctx.state.taskId),
+    phaseAttemptId: `${ctx.state.taskId}-${handler.phase}-${ctx.state.attemptNumber}`,
+    phase: handler.phase,
+    attemptNumber: ctx.state.attemptNumber,
+    startedAt,
+    endedAt: new Date().toISOString(),
+    outcome,
+  });
+  if (!payload) return;
+  try {
+    await ctx.daemon.postObservability(payload);
+  } catch {
+    // best-effort observability
+  }
 }
