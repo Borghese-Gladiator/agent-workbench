@@ -25,12 +25,27 @@ export function isServiceRunning(key: ServiceKey): boolean {
   return pid !== undefined && isAlive(pid);
 }
 
+/**
+ * Deletes a pid file whose process is gone. A crashed service (the worker losing its race with
+ * Temporal, TASK-127) leaves one behind, and `doctor` then reports a stale-pid warning that no
+ * amount of restarting clears. Returns whether a file was removed. A live pid is never touched.
+ */
+export function clearStalePid(key: ServiceKey): boolean {
+  const pid = readServicePid(key);
+  if (pid === undefined || isAlive(pid)) return false;
+  const path = pidPathFor(key);
+  if (!existsSync(path)) return false;
+  unlinkSync(path);
+  return true;
+}
+
 /** Spawns a managed service detached, redirecting its output to the service log. No-op if already running. */
 export function startService(key: ServiceKey): { started: boolean; pid?: number } {
   const existing = readServicePid(key);
   if (existing !== undefined && isAlive(existing)) {
     return { started: false, pid: existing };
   }
+  clearStalePid(key);
   const def = serviceDefinition(key);
   const logFd = openSync(logPathFor(key), 'a');
   const child = spawn(def.command, def.args, {
@@ -97,6 +112,20 @@ export async function waitForDaemonHealth(timeoutMs = 30_000): Promise<boolean> 
     await new Promise((r) => setTimeout(r, 500));
   }
   return false;
+}
+
+/**
+ * Waits for a TCP port to accept a connection. `up` uses this to start the worker only AFTER Temporal
+ * listens on 7233 — starting them together made the worker lose the race and die with
+ * `ConnectionRefused` on a stack that was otherwise fine (TASK-127).
+ */
+export async function waitForPort(port: number, timeoutMs = 30_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await portOpen(port)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, 250));
+  }
 }
 
 function portOpen(port: number, timeoutMs = 500): Promise<boolean> {

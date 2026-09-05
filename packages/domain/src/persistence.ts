@@ -3,7 +3,12 @@ import { TaskContractSchema, TaskSizeSchema } from './contract.js';
 import { ImplementationPlanSchema, ProgramDesignSchema } from './plan.js';
 import { WorkspaceLeaseSchema } from './workspace.js';
 import { EvidenceSchema, FindingSchema, ArtifactRecordSchema } from './evidence.js';
-import { HumanGateReasonSchema } from './lifecycle.js';
+import {
+  HumanGateReasonSchema,
+  TaskPhaseSchema,
+  RunConditionSchema,
+  DeliveryStateSchema,
+} from './lifecycle.js';
 
 /**
  * The serializable snapshot of the worker's per-task run-state that crosses the worker→daemon
@@ -59,3 +64,24 @@ export const RunStateSnapshotSchema = z.object({
   repairFindings: z.array(FindingSchema).optional(),
 });
 export type RunStateSnapshot = z.infer<typeof RunStateSnapshotSchema>;
+
+/**
+ * The lifecycle state of one task as the Workflow currently holds it, crossing the worker→daemon
+ * boundary on every transition. The Workflow decides these three fields, so they are the only
+ * honest source for `tasks.phase` / `tasks.condition` / `tasks.delivery_state` — before TASK-123 no
+ * production path wrote them at all and every row stayed frozen at `specify | running`.
+ */
+export const TaskStateSyncSchema = z.object({
+  taskId: z.string().min(1),
+  repositoryId: z.string().min(1),
+  prompt: z.string(),
+  phase: TaskPhaseSchema,
+  condition: RunConditionSchema,
+  deliveryState: DeliveryStateSchema,
+  /**
+   * The gate the task parked on, projected into `task_summary`. Explicit `null` clears a resolved
+   * gate; an omitted field leaves whatever the projection already holds.
+   */
+  pendingGateReason: HumanGateReasonSchema.nullable().optional(),
+});
+export type TaskStateSync = z.infer<typeof TaskStateSyncSchema>;

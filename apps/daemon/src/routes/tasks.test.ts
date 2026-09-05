@@ -11,7 +11,12 @@ import { setTemporalClientForTesting, workflowIdFor } from '../temporal-client.j
 
 /** A scheduler whose start/hasReleased are no-ops — the signal-route tests don't exercise the DAG. */
 function makeStubScheduler(database: WorkbenchDatabase): TaskScheduler {
-  return new TaskScheduler({ database, startTask: async () => {}, hasReleased: async () => false });
+  return new TaskScheduler({
+    database,
+    startTask: async () => {},
+    hasReleased: async () => false,
+    describeWorkflow: async () => 'running',
+  });
 }
 
 interface RecordedSignal {
@@ -297,6 +302,7 @@ describe('POST /api/task-dags (stacked-PR DAG declaration)', () => {
         started.push(input.taskId);
       },
       hasReleased: async (parentTaskId) => released.has(parentTaskId),
+      describeWorkflow: async () => 'running',
     });
     app = Fastify({ logger: false });
     registerTaskRoutes(app, database, scheduler);
@@ -352,5 +358,56 @@ describe('POST /api/task-dags (stacked-PR DAG declaration)', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toMatch(/cycle/);
     expect(started).toHaveLength(0);
+  });
+
+  // TASK-126: once the reconcile pass marks the corpses, this is how they leave the fleet view.
+  describe('POST /api/tasks/prune', () => {
+    it('deletes abandoned rows only, and reports what it removed', async () => {
+      upsertTask(database.db, { id: 'gone', repositoryId: 'repo-1', prompt: 'p', condition: 'abandoned' });
+      upsertTask(database.db, { id: 'done', repositoryId: 'repo-1', prompt: 'p', condition: 'completed' });
+      upsertTask(database.db, { id: 'live', repositoryId: 'repo-1', prompt: 'p', condition: 'running' });
+
+      const res = await app.inject({ method: 'POST', url: '/api/tasks/prune', payload: {} });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().pruned).toBe(1);
+      expect(res.json().tasks.map((t: { taskId: string }) => t.taskId)).toEqual(['gone']);
+      expect(getTask(database.db, 'gone')).toBeUndefined();
+      expect(getTask(database.db, 'done')).toBeDefined();
+      expect(getTask(database.db, 'live')).toBeDefined();
+    });
+
+    it('deletes nothing on a dry run', async () => {
+      upsertTask(database.db, { id: 'gone', repositoryId: 'repo-1', prompt: 'p', condition: 'abandoned' });
+
+      const res = await app.inject({ method: 'POST', url: '/api/tasks/prune', payload: { dryRun: true } });
+
+      expect(res.json()).toMatchObject({ dryRun: true, pruned: 0 });
+      expect(res.json().tasks).toHaveLength(1);
+      expect(getTask(database.db, 'gone')).toBeDefined();
+    });
+
+    it('spares a row that moved inside the age cutoff', async () => {
+      upsertTask(database.db, { id: 'gone', repositoryId: 'repo-1', prompt: 'p', condition: 'abandoned' });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/tasks/prune',
+        payload: { olderThanMs: 7 * 24 * 60 * 60 * 1000 },
+      });
+
+      expect(res.json().pruned).toBe(0);
+      expect(getTask(database.db, 'gone')).toBeDefined();
+    });
+
+    it('rejects an unknown condition', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/tasks/prune',
+        payload: { conditions: ['not-a-condition'] },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
   });
 });

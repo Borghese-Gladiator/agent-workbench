@@ -2,6 +2,7 @@ import {
   type WorkbenchDatabase,
   getTask,
   getTaskDeliveredBranch,
+  listReconcilableTasks,
   listStartableTasks,
   listTasksByParent,
   listParentsOf,
@@ -9,6 +10,7 @@ import {
   upsertTask,
   type TaskRow,
 } from '@awb/database';
+import type { RunCondition } from '@awb/domain';
 
 /**
  * Starts one task's workflow. Injected so the scheduler is testable without a real Temporal client.
@@ -29,10 +31,36 @@ export type StartTaskFn = (input: {
  */
 export type HasReleasedFn = (parentTaskId: string, repositoryId: string) => Promise<boolean>;
 
+/**
+ * What Temporal says about the Workflow behind a task row (TASK-126).
+ *
+ * `absent` means Temporal has no execution under that workflow id at all — terminated long ago,
+ * never started, or aged out of history. That is the case the fleet view could not distinguish from
+ * a live run. `unknown` means we could not ask (Temporal down, a transport error): the row is left
+ * exactly as it is, because a monitoring pass must never turn an outage into 40 dead tasks.
+ */
+export type WorkflowLiveness = 'running' | 'absent' | 'completed' | 'failed' | 'cancelled' | 'unknown';
+
+/** Reports the live state of one task's Workflow. Injected so the scheduler is testable without Temporal. */
+export type DescribeWorkflowFn = (input: { taskId: string; repositoryId: string }) => Promise<WorkflowLiveness>;
+
+/**
+ * The condition a reconciled row takes, per liveness. An absent Workflow yields `abandoned`, which is
+ * deliberately NOT `failed`: the workbench does not know whether the work failed, only that nothing
+ * is running it any more, and a reader must be able to tell those apart.
+ */
+const CONDITION_FOR_LIVENESS: Readonly<Partial<Record<WorkflowLiveness, RunCondition>>> = {
+  absent: 'abandoned',
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: 'cancelled',
+};
+
 export interface TaskSchedulerOptions {
   database: WorkbenchDatabase;
   startTask: StartTaskFn;
   hasReleased: HasReleasedFn;
+  describeWorkflow: DescribeWorkflowFn;
 }
 
 /**
@@ -52,12 +80,14 @@ export class TaskScheduler {
   private readonly database: WorkbenchDatabase;
   private readonly startTaskFn: StartTaskFn;
   private readonly hasReleased: HasReleasedFn;
+  private readonly describeWorkflow: DescribeWorkflowFn;
   private timer: ReturnType<typeof setInterval> | undefined;
 
   constructor(options: TaskSchedulerOptions) {
     this.database = options.database;
     this.startTaskFn = options.startTask;
     this.hasReleased = options.hasReleased;
+    this.describeWorkflow = options.describeWorkflow;
   }
 
   /**
@@ -95,6 +125,36 @@ export class TaskScheduler {
       } catch {
         // left blocked/ready for the next tick; tryStart already rolled back the row
       }
+    }
+    await this.reconcileTaskLiveness();
+  }
+
+  /**
+   * LIVENESS path (TASK-126): compare every started, non-terminal task row against the Workflow that
+   * is supposed to back it, and write the row's real condition when no Workflow does. Without this a
+   * crashed, terminated or history-purged task claims `running` forever, and the fleet view cannot
+   * tell a live task from a corpse — worse than a wrong phase, because the reader cannot even tell
+   * which rows to trust.
+   *
+   * Runs inside the existing reconcile tick (boot sweep + slow poll) rather than as a second loop.
+   * Per-task failures are swallowed so one unreachable Workflow never aborts the sweep.
+   */
+  async reconcileTaskLiveness(): Promise<void> {
+    for (const task of listReconcilableTasks(this.database.db)) {
+      let liveness: WorkflowLiveness;
+      try {
+        liveness = await this.describeWorkflow({ taskId: task.id, repositoryId: task.repositoryId });
+      } catch {
+        continue; // treat an unexpected throw exactly like `unknown`: leave the row alone
+      }
+      const condition = CONDITION_FOR_LIVENESS[liveness];
+      if (!condition) continue; // 'running' or 'unknown' — nothing to correct
+      upsertTask(this.database.db, {
+        id: task.id,
+        repositoryId: task.repositoryId,
+        prompt: task.prompt,
+        condition,
+      });
     }
   }
 

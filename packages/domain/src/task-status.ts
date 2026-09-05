@@ -16,7 +16,8 @@ export type DerivedTaskStatus =
   | 'blocked'
   | 'completed'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'abandoned';
 
 export function deriveTaskStatus(condition: RunCondition, phase: TaskPhase): DerivedTaskStatus {
   switch (condition) {
@@ -26,6 +27,8 @@ export function deriveTaskStatus(condition: RunCondition, phase: TaskPhase): Der
       return 'failed';
     case 'cancelled':
       return 'cancelled';
+    case 'abandoned':
+      return 'abandoned';
     case 'blocked':
       return 'blocked';
     case 'awaiting-human':
@@ -51,9 +54,14 @@ export const DERIVED_STATUS_LABEL: Record<DerivedTaskStatus, string> = {
   completed: 'Completed',
   failed: 'Failed',
   cancelled: 'Cancelled',
+  abandoned: 'Abandoned',
 };
 
-/** Statuses that mean "a human needs to look at this" — the board/overview "needs attention" set. */
+/**
+ * Statuses that mean "a human needs to look at this" — the board/overview "needs attention" set.
+ * `abandoned` is deliberately absent: the row is dead and purgeable, so listing it would bury the
+ * tasks that a human can still act on.
+ */
 export const ATTENTION_STATUSES: ReadonlySet<DerivedTaskStatus> = new Set<DerivedTaskStatus>([
   'awaiting-human',
   'blocked',

@@ -1,4 +1,4 @@
-import type { PhaseAttemptResult, TaskPhase } from '@awb/domain';
+import type { PhaseAttemptResult, TaskPhase, TaskStateSync } from '@awb/domain';
 import type { TaskWorkflowState } from './workflow-types.js';
 import type { TaskActivities } from './task-workflow.js';
 
@@ -23,6 +23,15 @@ export type ScriptEntry = PhaseAttemptResult | typeof THROW;
 const THROW_RETRY_MAX = 3;
 
 /**
+ * Optional wiring for the scripted activities. `syncLog`, when given, collects every task-state sync
+ * the workflow performs, in order — the assertion surface for the lifecycle-transition writes
+ * (TASK-123).
+ */
+export interface ScriptedActivitiesOptions {
+  syncLog?: TaskStateSync[];
+}
+
+/**
  * A scriptable fake `runPhase` activity implementation for Temporal workflow tests. Each call
  * consumes the next scripted result for the current phase (or repeats the last one if the script
  * for that phase is exhausted), so tests can express "verify fails once, then passes" etc. A
@@ -32,11 +41,15 @@ const THROW_RETRY_MAX = 3;
  */
 export function createScriptedActivities(
   script: Partial<Record<TaskPhase, ScriptEntry[]>>,
+  options: ScriptedActivitiesOptions = {},
 ): TaskActivities {
   const cursors = new Map<TaskPhase, number>();
   const throwCounts = new Map<TaskPhase, number>();
 
   return {
+    async syncTaskState(state: TaskStateSync): Promise<void> {
+      options.syncLog?.push(state);
+    },
     async runPhase({ phase, state }: { phase: TaskPhase; state: TaskWorkflowState }): Promise<PhaseAttemptResult> {
       const results = script[phase] ?? [defaultCandidate(phase, state)];
       const cursor = cursors.get(phase) ?? 0;

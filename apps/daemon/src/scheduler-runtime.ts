@@ -1,9 +1,16 @@
+import { WorkflowNotFoundError, type WorkflowExecutionStatusName } from '@temporalio/client';
 import { TaskWorkflow, getCurrentStateQuery, TASK_PHASE_ORDER } from '@awb/workflow';
 import { resolveLayout, resolvePlanningConfig } from '@awb/config';
 import type { WorkbenchDatabase } from '@awb/database';
 import { getTemporalClient, workflowIdFor } from './temporal-client.js';
 import { taskQueueName } from './temporal-worker-constants.js';
-import { TaskScheduler, type StartTaskFn, type HasReleasedFn } from './scheduler.js';
+import {
+  TaskScheduler,
+  type StartTaskFn,
+  type HasReleasedFn,
+  type DescribeWorkflowFn,
+  type WorkflowLiveness,
+} from './scheduler.js';
 
 /**
  * Real Temporal-backed `startTask`: starts a TaskWorkflow exactly like `POST /api/tasks` does,
@@ -48,7 +55,50 @@ const realHasReleased: HasReleasedFn = async (parentTaskId, repositoryId) => {
   }
 };
 
+/**
+ * Temporal's closed-execution statuses, mapped to what the row should say (TASK-126). A
+ * continue-as-new execution is still the same task running, so it maps to `running`. `TERMINATED`
+ * and `TIMED_OUT` map to `abandoned`, not `failed`: nothing decided the work was wrong, the run just
+ * stopped existing.
+ */
+const LIVENESS_FOR_STATUS: Readonly<Record<WorkflowExecutionStatusName, WorkflowLiveness>> = {
+  RUNNING: 'running',
+  CONTINUED_AS_NEW: 'running',
+  PAUSED: 'running',
+  COMPLETED: 'completed',
+  FAILED: 'failed',
+  CANCELLED: 'cancelled',
+  TERMINATED: 'absent',
+  TIMED_OUT: 'absent',
+  UNSPECIFIED: 'unknown',
+  UNKNOWN: 'unknown',
+};
+
+/**
+ * Real `describeWorkflow`: asks Temporal what actually backs a task row.
+ *
+ * The distinction that matters is between "Temporal says there is no such execution" (absent — the
+ * row is a corpse) and "we could not ask" (unknown — leave the row alone). Only
+ * `WorkflowNotFoundError` proves the first. Every other error, including Temporal being down, is the
+ * second, so an outage can never mass-mark live tasks as abandoned.
+ */
+const realDescribeWorkflow: DescribeWorkflowFn = async ({ taskId, repositoryId }) => {
+  try {
+    const client = await getTemporalClient();
+    const handle = client.workflow.getHandle(workflowIdFor(repositoryId, taskId));
+    const description = await handle.describe();
+    return LIVENESS_FOR_STATUS[description.status.name] ?? 'unknown';
+  } catch (err) {
+    return err instanceof WorkflowNotFoundError ? 'absent' : 'unknown';
+  }
+};
+
 /** Builds a production TaskScheduler wired to Temporal. */
 export function createTaskScheduler(database: WorkbenchDatabase): TaskScheduler {
-  return new TaskScheduler({ database, startTask: realStartTask, hasReleased: realHasReleased });
+  return new TaskScheduler({
+    database,
+    startTask: realStartTask,
+    hasReleased: realHasReleased,
+    describeWorkflow: realDescribeWorkflow,
+  });
 }

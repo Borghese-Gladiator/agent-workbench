@@ -188,3 +188,39 @@ export async function probeHealth(): Promise<RuntimeHealth> {
 
   return { runtime, services: { temporal, worker, daemon, ui, otel }, runtimeConfig: status?.runtimeConfig };
 }
+
+/**
+ * The runtime services `awb status` gates on. The OTel collector is diagnostics-only (ADR-008) and
+ * is deliberately excluded, matching `probeHealth`'s own readiness rule.
+ */
+const GATED_SERVICES: ServiceKey[] = ['temporal', 'worker', 'daemon'];
+
+export interface RuntimeReadiness {
+  ready: boolean;
+  health: RuntimeHealth;
+  /** The gated services that were still not `ready` when the wait ended. Empty when ready. */
+  blockers: { key: ServiceKey; state: ServiceState }[];
+}
+
+/**
+ * Polls until every gated runtime service reports `ready`, or the budget runs out.
+ *
+ * `up` used to return the moment the daemon answered `/api/health`, but the worker needs roughly 30
+ * more seconds to finish its webpack Workflow-bundle build. A `status` call in that window reported
+ * `unhealthy`, which made a boot that was merely slow indistinguishable from a boot that failed
+ * (TASK-127). The default budget covers the bundle build with room to spare.
+ */
+export async function waitForRuntimeReady(timeoutMs = 90_000, intervalMs = 1_000): Promise<RuntimeReadiness> {
+  const deadline = Date.now() + timeoutMs;
+  let health = await probeHealth();
+  for (;;) {
+    if (health.runtime === 'ready') return { ready: true, health, blockers: [] };
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    health = await probeHealth();
+  }
+  const blockers = GATED_SERVICES.map((key) => ({ key, state: health.services[key].state })).filter(
+    (s) => s.state !== 'ready',
+  );
+  return { ready: false, health, blockers };
+}

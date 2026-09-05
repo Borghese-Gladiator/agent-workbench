@@ -52,7 +52,12 @@ describe('internal worker→daemon routes', () => {
     seedRepo(database);
     eventBus = new SemanticEventBus();
     app = Fastify({ logger: false });
-    const scheduler = new TaskScheduler({ database, startTask: async () => {}, hasReleased: async () => false });
+    const scheduler = new TaskScheduler({
+      database,
+      startTask: async () => {},
+      hasReleased: async () => false,
+      describeWorkflow: async () => 'running',
+    });
     registerInternalRoutes(app, database, eventBus, scheduler);
     await app.ready();
   });
@@ -63,14 +68,75 @@ describe('internal worker→daemon routes', () => {
     await rm(dbDir, { recursive: true, force: true });
   });
 
-  it('PUT /internal/tasks upserts a task row', async () => {
+  // TASK-123: this route is the ONLY writer of tasks.phase/condition after creation, so a task's
+  // whole monitoring surface depends on it accepting the workflow's state and projecting it.
+  it('PUT /internal/tasks writes the workflow phase + condition onto the task row and its summary', async () => {
     const res = await app.inject({
       method: 'PUT',
       url: `/internal/tasks/${TASK_ID}`,
-      payload: { repositoryId: REPO_ID, prompt: 'do the thing', phase: 'verify' },
+      payload: {
+        repositoryId: REPO_ID,
+        prompt: 'do the thing',
+        phase: 'verify',
+        condition: 'running',
+        deliveryState: 'branch-ready',
+      },
     });
     expect(res.statusCode).toBe(200);
-    expect(getTask(database.db, TASK_ID)?.phase).toBe('verify');
+    const row = getTask(database.db, TASK_ID);
+    expect(row?.phase).toBe('verify');
+    expect(row?.condition).toBe('running');
+    expect(row?.deliveryState).toBe('branch-ready');
+    const summary = getTaskSummary(database.db, TASK_ID);
+    expect(summary?.phase).toBe('verify');
+    expect(summary?.derivedStatus).toBe('running');
+  });
+
+  it('PUT /internal/tasks projects a human-gate park and then clears it', async () => {
+    await app.inject({
+      method: 'PUT',
+      url: `/internal/tasks/${TASK_ID}`,
+      payload: {
+        repositoryId: REPO_ID,
+        prompt: 'do the thing',
+        phase: 'specify',
+        condition: 'awaiting-human',
+        deliveryState: 'not-started',
+        pendingGateReason: 'task-contract-approval',
+      },
+    });
+    expect(getTaskSummary(database.db, TASK_ID)?.pendingGateReason).toBe('task-contract-approval');
+    expect(getTaskSummary(database.db, TASK_ID)?.derivedStatus).toBe('awaiting-human');
+
+    await app.inject({
+      method: 'PUT',
+      url: `/internal/tasks/${TASK_ID}`,
+      payload: {
+        repositoryId: REPO_ID,
+        prompt: 'do the thing',
+        phase: 'plan',
+        condition: 'running',
+        deliveryState: 'not-started',
+        pendingGateReason: null,
+      },
+    });
+    expect(getTaskSummary(database.db, TASK_ID)?.pendingGateReason).toBeNull();
+  });
+
+  it('PUT /internal/tasks rejects an unknown phase rather than writing it', async () => {
+    const res = await app.inject({
+      method: 'PUT',
+      url: `/internal/tasks/${TASK_ID}`,
+      payload: {
+        repositoryId: REPO_ID,
+        prompt: 'do the thing',
+        phase: 'not-a-phase',
+        condition: 'running',
+        deliveryState: 'not-started',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(getTask(database.db, TASK_ID)).toBeUndefined();
   });
 
   it('PUT /internal/run-state persists contract + evidence + artifacts', async () => {
@@ -179,7 +245,13 @@ describe('internal worker→daemon routes', () => {
     await app.inject({
       method: 'PUT',
       url: `/internal/tasks/${TASK_ID}`,
-      payload: { repositoryId: REPO_ID, prompt: 'p' },
+      payload: {
+        repositoryId: REPO_ID,
+        prompt: 'p',
+        phase: 'plan',
+        condition: 'running',
+        deliveryState: 'not-started',
+      },
     });
     const event: SemanticEvent = {
       id: 'evt-1',

@@ -12,6 +12,7 @@ describe('deriveTaskStatus', () => {
     ['completed', 'release', 'completed'],
     ['failed', 'implement', 'failed'],
     ['cancelled', 'plan', 'cancelled'],
+    ['abandoned', 'implement', 'abandoned'],
     ['blocked', 'implement', 'blocked'],
     ['awaiting-human', 'plan', 'awaiting-human'],
     ['awaiting-external', 'verify', 'awaiting-external'],
@@ -38,5 +39,11 @@ describe('status metadata', () => {
 
   it('attention set is exactly the human-needs-to-look subset', () => {
     expect([...ATTENTION_STATUSES].sort()).toEqual(['awaiting-human', 'blocked', 'failed']);
+  });
+
+  // TASK-126: an abandoned task is dead, not actionable. Listing it under "needs attention" would
+  // bury the tasks a human can still do something about.
+  it('excludes abandoned from the attention set', () => {
+    expect(ATTENTION_STATUSES.has('abandoned')).toBe(false);
   });
 });

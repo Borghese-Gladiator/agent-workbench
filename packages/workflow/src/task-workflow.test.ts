@@ -1,7 +1,7 @@
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { PhaseAttemptResult, TaskPhase } from '@awb/domain';
+import type { PhaseAttemptResult, TaskPhase, TaskStateSync } from '@awb/domain';
 import {
   TaskWorkflow,
   approveContractUpdate,
@@ -88,6 +88,7 @@ async function runWithActivities(
   script: Partial<Record<TaskPhase, ScriptEntry[]>>,
   driveWorkflow: (handle: import('@temporalio/client').WorkflowHandle) => Promise<void>,
   args: TaskWorkflowInput = { taskId: 'task-1', repositoryId: 'repo-1' },
+  syncLog?: TaskStateSync[],
 ) {
   // Each test gets its own task queue — Temporal's native runtime refuses two concurrent Worker
   // registrations on the same (namespace, task queue), and this suite creates workers per-test.
@@ -99,7 +100,7 @@ async function runWithActivities(
     // dist output (this test suite requires `pnpm --filter @awb/workflow build` to have run),
     // not the TypeScript source.
     workflowsPath: new URL('../dist/task-workflow.js', import.meta.url).pathname,
-    activities: createScriptedActivities(script),
+    activities: createScriptedActivities(script, syncLog ? { syncLog } : {}),
   });
 
   let handle!: import('@temporalio/client').WorkflowHandle;
@@ -521,6 +522,115 @@ describe('TaskWorkflow', () => {
     expect(result.phase).toBe('assimilate');
     expect(result.deliveryState).toBe('closed');
   }, 30_000);
+
+  // TASK-123: before this, nothing in production wrote tasks.phase/condition after the row was
+  // inserted, so every row in the fleet view read `specify | running` forever. The Workflow now
+  // mirrors each transition it decides onto the task row through the syncTaskState Activity.
+  describe('task-state sync (TASK-123)', () => {
+    /** The phase/condition pairs the workflow reported, in order. */
+    function transitions(log: TaskStateSync[]): string[] {
+      return log.map((s) => `${s.phase}|${s.condition}`);
+    }
+
+    it('writes each phase transition as the run advances', async () => {
+      const syncLog: TaskStateSync[] = [];
+      await runWithActivities(
+        { specify: [candidate('specify')], plan: [candidate('plan')] },
+        async () => {},
+        { taskId: 'task-1', repositoryId: 'repo-1', prompt: 'do the thing' },
+        syncLog,
+      );
+
+      const seen = transitions(syncLog);
+      expect(seen).toContain('specify|running');
+      expect(seen).toContain('plan|running');
+      expect(seen).toContain('implement|running');
+      // Order matters: a monitor must never see `implement` before `plan`.
+      expect(seen.indexOf('specify|running')).toBeLessThan(seen.indexOf('plan|running'));
+      expect(seen.indexOf('plan|running')).toBeLessThan(seen.indexOf('implement|running'));
+      // The terminal state is decided after the phase loop, where no phase Activity runs.
+      expect(seen.at(-1)).toBe('assimilate|completed');
+      // Every write carries the identity the daemon needs to upsert the row.
+      for (const entry of syncLog) {
+        expect(entry.taskId).toBe('task-1');
+        expect(entry.repositoryId).toBe('repo-1');
+        expect(entry.prompt).toBe('do the thing');
+      }
+    }, 30_000);
+
+    it('writes the loop-back when verify bounces the run to implement', async () => {
+      const syncLog: TaskStateSync[] = [];
+      await runWithActivities(
+        {
+          specify: [candidate('specify')],
+          plan: [candidate('plan')],
+          verify: [repair(), candidate('verify')],
+        },
+        async () => {},
+        { taskId: 'task-1', repositoryId: 'repo-1' },
+        syncLog,
+      );
+
+      const seen = transitions(syncLog);
+      const firstVerify = seen.indexOf('verify|running');
+      expect(firstVerify).toBeGreaterThanOrEqual(0);
+      // The bounce re-enters implement AFTER verify already ran once.
+      expect(seen.slice(firstVerify)).toContain('implement|running');
+    }, 30_000);
+
+    it('writes the park and its gate reason when the run awaits a human', async () => {
+      const syncLog: TaskStateSync[] = [];
+      await runWithActivities(
+        { specify: [awaitHuman('specify', 'task-contract-approval'), candidate('specify')] },
+        async (handle) => {
+          await waitForCondition(async () => {
+            const state = await handle.query(getCurrentStateQuery);
+            return state.condition === 'awaiting-human';
+          });
+          await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion: 1 }] });
+        },
+        { taskId: 'task-1', repositoryId: 'repo-1' },
+        syncLog,
+      );
+
+      const park = syncLog.find((s) => s.condition === 'awaiting-human');
+      expect(park).toBeDefined();
+      expect(park?.phase).toBe('specify');
+      expect(park?.pendingGateReason).toBe('task-contract-approval');
+      // Resolving the gate clears the reason on the next write, so the row stops reading as gated.
+      const afterPark = syncLog.slice(syncLog.indexOf(park!) + 1);
+      expect(afterPark.some((s) => s.condition === 'running' && s.pendingGateReason === null)).toBe(true);
+    }, 30_000);
+
+    it('writes the terminal condition on a cancel signal', async () => {
+      const syncLog: TaskStateSync[] = [];
+      await runWithActivities(
+        { specify: [candidate('specify')], plan: [candidate('plan')] },
+        async (handle) => {
+          await handle.signal(cancelSignal);
+        },
+        { taskId: 'task-1', repositoryId: 'repo-1' },
+        syncLog,
+      );
+
+      expect(syncLog.at(-1)?.condition).toBe('cancelled');
+    }, 30_000);
+
+    it('does not repeat an identical write', async () => {
+      const syncLog: TaskStateSync[] = [];
+      await runWithActivities(
+        { specify: [candidate('specify')], plan: [candidate('plan')] },
+        async () => {},
+        { taskId: 'task-1', repositoryId: 'repo-1' },
+        syncLog,
+      );
+
+      const seen = transitions(syncLog);
+      for (let i = 1; i < seen.length; i++) {
+        expect(seen[i]).not.toBe(seen[i - 1]);
+      }
+    }, 30_000);
+  });
 });
 
 async function waitForCondition(check: () => Promise<boolean>, timeoutMs = 10_000, intervalMs = 100): Promise<void> {

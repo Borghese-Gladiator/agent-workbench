@@ -43,6 +43,8 @@ import {
   ensurePhaseAttempt,
   deleteTask,
   listTasksWithRepository,
+  listReconcilableTasks,
+  listPrunableTasks,
 } from './tasks.js';
 
 const REPO_ID = 'repo-1';
@@ -365,5 +367,51 @@ describe('schedule state (task DAG orchestration)', () => {
     expect(listBlockedTasks(db.db).map((t) => t.id).sort()).toEqual(['B', 'C']);
     // Startable = not-yet-started (ready + blocked); the `started` A is excluded.
     expect(listStartableTasks(db.db).map((t) => t.id).sort()).toEqual(['B', 'C', 'root2']);
+  });
+
+  // TASK-126: the reconcile pass must ask Temporal only about rows that could actually have a live
+  // workflow. Asking about the others would mark a queued task abandoned before it ever ran.
+  describe('listReconcilableTasks', () => {
+    it('returns only started tasks in a non-terminal condition', () => {
+      upsertTask(db.db, { id: 'live', repositoryId: REPO_ID, prompt: 'p', scheduleState: 'started', condition: 'running' });
+      upsertTask(db.db, { id: 'gated', repositoryId: REPO_ID, prompt: 'p', scheduleState: 'started', condition: 'awaiting-human' });
+      upsertTask(db.db, { id: 'queued', repositoryId: REPO_ID, prompt: 'p', scheduleState: 'ready', condition: 'running' });
+      upsertTask(db.db, { id: 'waiting', repositoryId: REPO_ID, prompt: 'p', scheduleState: 'blocked', condition: 'running' });
+      upsertTask(db.db, { id: 'done', repositoryId: REPO_ID, prompt: 'p', scheduleState: 'started', condition: 'completed' });
+      upsertTask(db.db, { id: 'gone', repositoryId: REPO_ID, prompt: 'p', scheduleState: 'started', condition: 'abandoned' });
+
+      expect(listReconcilableTasks(db.db).map((t) => t.id).sort()).toEqual(['gated', 'live']);
+    });
+  });
+
+  describe('listPrunableTasks', () => {
+    it('defaults to abandoned rows only, so completed and failed history survives', () => {
+      upsertTask(db.db, { id: 'gone', repositoryId: REPO_ID, prompt: 'p', condition: 'abandoned' });
+      upsertTask(db.db, { id: 'done', repositoryId: REPO_ID, prompt: 'p', condition: 'completed' });
+      upsertTask(db.db, { id: 'broke', repositoryId: REPO_ID, prompt: 'p', condition: 'failed' });
+      upsertTask(db.db, { id: 'live', repositoryId: REPO_ID, prompt: 'p', condition: 'running' });
+
+      expect(listPrunableTasks(db.db).map((t) => t.id)).toEqual(['gone']);
+    });
+
+    it('honors an explicit condition list', () => {
+      upsertTask(db.db, { id: 'gone', repositoryId: REPO_ID, prompt: 'p', condition: 'abandoned' });
+      upsertTask(db.db, { id: 'broke', repositoryId: REPO_ID, prompt: 'p', condition: 'failed' });
+      upsertTask(db.db, { id: 'live', repositoryId: REPO_ID, prompt: 'p', condition: 'running' });
+
+      expect(listPrunableTasks(db.db, { conditions: ['abandoned', 'failed'] }).map((t) => t.id).sort()).toEqual([
+        'broke',
+        'gone',
+      ]);
+    });
+
+    it('excludes a row that moved after the cutoff', () => {
+      upsertTask(db.db, { id: 'fresh', repositoryId: REPO_ID, prompt: 'p', condition: 'abandoned' });
+
+      const future = new Date(Date.now() + 60_000).toISOString();
+      const past = new Date(Date.now() - 60_000).toISOString();
+      expect(listPrunableTasks(db.db, { before: future }).map((t) => t.id)).toEqual(['fresh']);
+      expect(listPrunableTasks(db.db, { before: past })).toEqual([]);
+    });
   });
 });

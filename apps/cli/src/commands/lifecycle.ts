@@ -3,9 +3,22 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { Command } from 'commander';
 import { ensureDataDir, resolveDataDir, isolatedOverrides, resolveRuntimeConfig, describeRuntimeShape } from '@awb/config';
-import { probeHealth, type RuntimeHealth, type ServiceHealth, type RuntimeConfigHealth } from '../health.js';
-import { RUNTIME_SERVICES, logPathFor, repoRoot, type ServiceKey } from '../services.js';
-import { startService, stopService, waitForDaemonHealth, streamServiceLogs } from '../process-control.js';
+import {
+  probeHealth,
+  waitForRuntimeReady,
+  type RuntimeHealth,
+  type ServiceHealth,
+  type RuntimeConfigHealth,
+} from '../health.js';
+import { RUNTIME_SERVICES, logPathFor, repoRoot, temporalPort, type ServiceKey } from '../services.js';
+import {
+  startService,
+  stopService,
+  clearStalePid,
+  waitForDaemonHealth,
+  waitForPort,
+  streamServiceLogs,
+} from '../process-control.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
 import { parseDuration, formatDurationCoarse } from '../duration.js';
 import { formatColumns } from '../table.js';
@@ -16,12 +29,28 @@ function isServiceKey(value: string): value is ServiceKey {
   return (ALL_SERVICES as string[]).includes(value);
 }
 
-/** Starts the three runtime services (idempotent) and waits for the daemon to answer health. */
+/**
+ * How long to wait for Temporal to accept connections before starting the worker. Temporal's dev
+ * server is quick; this is a generous ceiling, not an expected wait.
+ */
+const TEMPORAL_LISTEN_TIMEOUT_MS = 30_000;
+
+/**
+ * Starts the runtime services (idempotent) and waits until the whole runtime reports ready.
+ *
+ * Order matters (TASK-127). Temporal must be LISTENING before the worker starts, or the worker
+ * connects to a closed port and dies with `ConnectionRefused`. And the wait must run to full
+ * readiness, not just to the daemon answering `/api/health`: the worker needs roughly 30 more
+ * seconds to build its webpack Workflow bundle, and `up` returning inside that window is what made a
+ * slow boot look like a failed one.
+ */
 async function ensureRuntime(opts: { verbose?: boolean } = {}): Promise<{
   ready: boolean;
   alreadyReady: boolean;
   elapsedMs: number;
   runtimeConfig?: RuntimeConfigHealth;
+  /** Services still not ready when the wait ended. Empty on success; drives the error message. */
+  blockers: { key: ServiceKey; state: string }[];
 }> {
   const start = Date.now();
   const before = await probeHealth();
@@ -29,23 +58,44 @@ async function ensureRuntime(opts: { verbose?: boolean } = {}): Promise<{
     // A warm stack from a prior session may have booted with a DIFFERENT env (e.g. mock vs claude).
     // Return its actual runtime config so `up` can report what is really live rather than a bare
     // "already ready" (TASK-70).
-    return { ready: true, alreadyReady: true, elapsedMs: Date.now() - start, runtimeConfig: before.runtimeConfig };
+    return {
+      ready: true,
+      alreadyReady: true,
+      elapsedMs: Date.now() - start,
+      runtimeConfig: before.runtimeConfig,
+      blockers: [],
+    };
   }
+  // Drop pid files left by a crashed service, so a boot after a crash does not leave `doctor`
+  // reporting a stale-pid warning nothing clears (TASK-127).
+  for (const key of ALL_SERVICES) clearStalePid(key);
   // Provision the data dir BEFORE starting Temporal. Temporal's `start-dev --db-filename
   // <dataDir>/temporal/temporal.sqlite` crashes ("failed checking dir for database file") if the
   // `temporal/` subdir does not exist yet, and the daemon (the only other caller of initDataDir)
   // starts LAST in RUNTIME_SERVICES — so on a fresh AWB_DATA_DIR the subdir must be created here.
   ensureDataDir();
-  for (const key of RUNTIME_SERVICES) {
-    startService(key);
-  }
   // With --verbose, tail the runtime services' logs to the terminal while we poll for health, so the
   // wait isn't a silent black box (temporal/worker/daemon startup, and any boot error, show live).
   const stream = opts.verbose ? streamServiceLogs(['temporal', 'worker', 'daemon']) : undefined;
   try {
-    const ready = await waitForDaemonHealth();
-    const after = ready ? await probeHealth() : undefined;
-    return { ready, alreadyReady: false, elapsedMs: Date.now() - start, runtimeConfig: after?.runtimeConfig };
+    // Dependencies first: the collector, then Temporal, which the worker and the daemon both dial.
+    for (const key of RUNTIME_SERVICES.filter((k) => k !== 'worker' && k !== 'daemon')) {
+      startService(key);
+    }
+    await waitForPort(temporalPort(), TEMPORAL_LISTEN_TIMEOUT_MS);
+    for (const key of RUNTIME_SERVICES.filter((k) => k === 'worker' || k === 'daemon')) {
+      startService(key);
+    }
+
+    await waitForDaemonHealth();
+    const readiness = await waitForRuntimeReady();
+    return {
+      ready: readiness.ready,
+      alreadyReady: false,
+      elapsedMs: Date.now() - start,
+      runtimeConfig: readiness.health.runtimeConfig,
+      blockers: readiness.blockers,
+    };
   } finally {
     stream?.stop();
   }
@@ -110,7 +160,7 @@ export function registerLifecycleCommands(program: Command): void {
       if (opts.isolated === true) applyIsolation();
       const cfg = resolveRuntimeConfig();
       const verbose = opts.verbose === true || outputOptions().verbose;
-      const { ready, alreadyReady, elapsedMs, runtimeConfig } = await ensureRuntime({ verbose });
+      const { ready, alreadyReady, elapsedMs, runtimeConfig, blockers } = await ensureRuntime({ verbose });
       const stack = {
         daemonUrl: cfg.daemonUrl,
         temporalAddress: cfg.temporalAddress,
@@ -127,13 +177,17 @@ export function registerLifecycleCommands(program: Command): void {
           stack,
           runtimeConfig: runtimeConfig ?? null,
           envMismatch: mismatch,
+          blockers,
         });
         if (!ready) process.exitCode = 1;
         return;
       }
       if (!ready) {
-        printError(`daemon unhealthy: health check timed out`);
-        printError('Next: awb logs daemon --tail 50');
+        // Name the service that is actually stuck. "daemon unhealthy" was reported even when the
+        // daemon was fine and the worker was still building its bundle (TASK-127).
+        const detail = blockers.map((b) => `${b.key}=${b.state}`).join(' ');
+        printError(`runtime not ready after ${(elapsedMs / 1000).toFixed(1)}s${detail ? `: ${detail}` : ''}`);
+        for (const b of blockers) printError(`Next: awb logs ${b.key} --tail 50`);
         process.exitCode = 1;
         return;
       }
@@ -182,16 +236,17 @@ export function registerLifecycleCommands(program: Command): void {
     .action(async (service: string | undefined) => {
       if (service === undefined) {
         for (const key of ['daemon', 'worker', 'temporal'] as ServiceKey[]) stopService(key);
-        const { ready, elapsedMs } = await ensureRuntime();
+        const { ready, elapsedMs, blockers } = await ensureRuntime();
         if (outputOptions().json) {
-          emitJson({ ok: ready, runtime: ready ? 'ready' : 'unhealthy' });
+          emitJson({ ok: ready, runtime: ready ? 'ready' : 'unhealthy', blockers });
           if (!ready) process.exitCode = 1;
           return;
         }
         if (ready) printInfo(`runtime restarted (temporal, worker, daemon) [${(elapsedMs / 1000).toFixed(1)}s]`);
         else {
-          printError('daemon unhealthy: health check timed out');
-          printError('Next: awb logs daemon --tail 50');
+          const detail = blockers.map((b) => `${b.key}=${b.state}`).join(' ');
+          printError(`runtime not ready after ${(elapsedMs / 1000).toFixed(1)}s${detail ? `: ${detail}` : ''}`);
+          for (const b of blockers) printError(`Next: awb logs ${b.key} --tail 50`);
           process.exitCode = 1;
         }
         return;
@@ -202,10 +257,16 @@ export function registerLifecycleCommands(program: Command): void {
         return;
       }
       stopService(service);
+      if (service === 'worker') {
+        // The worker dials Temporal on boot; make sure it is listening first (TASK-127).
+        await waitForPort(temporalPort(), TEMPORAL_LISTEN_TIMEOUT_MS);
+      }
       startService(service);
-      // The daemon is the health gate for the runtime; wait when it (or a dep) was restarted.
+      // Wait for the whole runtime, not just the daemon's /api/health: a restarted worker is not
+      // usable until it has rebuilt its Workflow bundle and registered as a poller.
       if (service === 'daemon' || service === 'worker' || service === 'temporal') {
         await waitForDaemonHealth();
+        await waitForRuntimeReady();
       }
       if (outputOptions().json) emitJson({ restarted: service });
       else printInfo(`restarted ${service}`);

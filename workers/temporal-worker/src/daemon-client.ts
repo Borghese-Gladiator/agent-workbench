@@ -1,4 +1,4 @@
-import type { RunStateSnapshot, SemanticEvent, PhaseObservability } from '@awb/domain';
+import type { RunStateSnapshot, SemanticEvent, PhaseObservability, TaskStateSync } from '@awb/domain';
 import { resolveRuntimeConfig } from '@awb/config';
 
 /**
@@ -43,14 +43,12 @@ async function postOrPut(method: 'POST' | 'PUT', path: string, body: unknown): P
 }
 
 export interface DaemonClient {
-  upsertTask(input: {
-    taskId: string;
-    repositoryId: string;
-    prompt: string;
-    phase?: string;
-    condition?: string;
-    deliveryState?: string;
-  }): Promise<void>;
+  /**
+   * Persist the Workflow's current lifecycle state onto the task row (TASK-123). The Workflow is the
+   * only honest source for phase/condition, so this is called on every transition it decides — not
+   * from inside a phase, which cannot see the terminal, cancelled or escalated states.
+   */
+  syncTaskState(state: TaskStateSync): Promise<void>;
   saveRunState(snapshot: RunStateSnapshot): Promise<void>;
   postEvent(event: SemanticEvent): Promise<void>;
   postObservability(payload: PhaseObservability): Promise<void>;
@@ -73,8 +71,8 @@ export interface DaemonClient {
 
 export function createDaemonClient(): DaemonClient {
   return {
-    async upsertTask(input) {
-      const { taskId, ...rest } = input;
+    async syncTaskState(state) {
+      const { taskId, ...rest } = state;
       await postOrPut('PUT', `/internal/tasks/${encodeURIComponent(taskId)}`, rest);
     },
     async saveRunState(snapshot) {
