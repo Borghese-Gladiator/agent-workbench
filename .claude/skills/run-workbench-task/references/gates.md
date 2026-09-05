@@ -74,7 +74,7 @@ Only after `pr-merged` or `pr-closed` does the task reach `completed`.
   pass with no memory of the ack**, so approving loops forever on a legitimately
   large diff. Do not loop it. Either re-slice the work smaller (see
   `decompose.md`), or restart with the cap disabled and a **fresh task**, which
-  you must clear with the user first (TASK-68):
+  you must clear with the user first:
 
   ```
   pnpm --filter @awb/cli cli -- down
@@ -88,12 +88,12 @@ Only after `pr-merged` or `pr-closed` does the task reach `completed`.
 
 - **`repeated-failure-no-progress`** — a phase's completion gate keeps failing.
   This is often a workbench false positive rather than bad agent output (for
-  example the `program-design` bodyless-signature check, TASK-67). Diagnose the
+  example the `program-design` bodyless-signature check). Diagnose the
   specific failing predicate with `triage.md` before you re-run. Do not loop
   `approve`.
 
 - **A `blocked` at `exercise` on a greenfield repo** usually means no QA start
-  command exists (TASK-65), so browser QA has nothing to launch. Approving does
+  command exists, so browser QA has nothing to launch. Approving does
   not clear it. Wire a start command, or settle the QA story with the user.
 
 When a gate reason has no row here, or a `blocked` reason has no first-class CLI
@@ -111,8 +111,7 @@ temporal workflow describe --address 127.0.0.1:7233 \
 ```
 
 Read `workflowExecutionInfo.status`. `RUNNING` is healthy. `FAILED`,
-`TERMINATED`, or `TIMED_OUT` means the run died — go to `triage.md`. A failed
-workflow is terminal and cannot be resumed; you create a fresh task.
+`TERMINATED`, or `TIMED_OUT` means the run died — go to `triage.md`.
 
 When you background a monitor, cover BOTH signals and emit on every terminal
 state. A monitor that greps only for success stays silent through a crash, and
@@ -122,7 +121,7 @@ silence is not success.
 
 A blank result — not an error, not a state — on a task that WAS advancing usually
 means a stale `@awb/*` dist crashed the CLI on import, while the daemon and the
-worker (running from source) keep advancing the task (TASK-69). Do NOT read a
+worker (running from source) keep advancing the task. Do NOT read a
 blank `task show` as a stall. Rebuild (`pnpm --filter @awb/<pkg> build`, or
 `pnpm build`), and meanwhile read ground truth from SQLite (see `triage.md`).
 
@@ -141,7 +140,7 @@ phase, condition, current activity and its age, the bounce-back signal
 `--json` a stable named-field contract, and `--watch` a live human TUI. Prefer it
 over `task list`, which shows no rollups.
 
-Rules learned the hard way (TASK-115):
+Rules learned the hard way:
 
 1. **Do not spawn one subagent per task.** A context-inheriting fork believes it
    is the coordinator, re-narrates the whole fleet, and may drive *other* tasks.

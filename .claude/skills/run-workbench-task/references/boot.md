@@ -31,8 +31,8 @@ pnpm --filter @awb/cli cli -- up
 **If `up` says "runtime already ready", the env you just passed did NOT take.** A
 warm stack keeps whatever runtime, QA, and capability env it booted with. There
 is no way to read the active runtime back — `/api/health` returns only
-`{status:"ok"}` (TASK-70). So a "live" run can silently execute as MOCK. The
-tells are a fake PR in about 90 seconds and zero tokens.
+`{status:"ok"}`. So a "live" run can silently execute as MOCK. The tells are a
+fake PR in about 90 seconds and zero tokens.
 
 To force specific env onto a warm stack, run `down`, then `up` with the env
 inline. **This is safe only before a task exists.** Never `down`/`up` mid-task.
@@ -90,20 +90,12 @@ nc -z 127.0.0.1 7233                        # MAIN Temporal (default AWB_TEMPORA
 If either responds, a MAIN stack is live. Route around it. Never `down` it, never
 create a task against it, and never ask the user which stack to use.
 
-## 2. Isolation is derived, not random
+## 2. The slot is derived from the workspace root
 
-`isolatedOverrides` (`packages/config/src/runtime-config.ts:117-143`) computes a
-per-stack offset from a **tag** and shifts every service port by it, then
-suffixes the queue, the OTel container, and the data dir with `-<tag>`:
-
-- `AWB_DAEMON_PORT = DEFAULT_DAEMON_PORT + base`
-- `AWB_TEMPORAL_PORT = DEFAULT_TEMPORAL_PORT + base`
-- `AWB_UI_PORT`, `AWB_OTEL_OTLP_PORT`, `AWB_OTEL_UI_PORT` — same stride
-- `AWB_TASK_QUEUE = awb-task-queue-<tag>`
-- `AWB_DATA_DIR = <base>-<tag>`
-
-where `tag = deriveIsolationTag(sha256(workspaceRoot))`
-(`packages/config/src/runtime-config.ts:105-107`).
+`isolatedOverrides` (`packages/config/src/runtime-config.ts:117-143`) shifts every
+default port by an offset derived from a tag, and suffixes the task queue, the
+OTel container, and the data dir with that same tag. You never compute this —
+`up --isolated --json` prints the resulting coordinates.
 
 **The tag is a pure function of the workspace root.** Two isolated stacks booted
 from the SAME worktree derive the same tag, so they take the same ports and the

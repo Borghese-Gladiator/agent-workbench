@@ -17,18 +17,6 @@ is delegated to the workbench. Its result is verified against the plan and the
 real diff, never against the task's own success message. A defect routes back
 into a bounded repair loop before anything is committed.
 
-```
-1. plan.md                       smallest correct change
-2. create-worktree ────────────► TARGET   (must differ from the controller)
-3. delegate ─► task against TARGET        (controller = stable / pinned build)
-4. verify: diff exists? matches plan? build + tests green?
-     └── defective? ─► 5. repair task ─► back to 4   (cap ~2 rounds, then
-                                                       diagnose directly)
-6. behavioral verification       build / test / manual, observed not expected
-7. adversarial diff review       correctness the string checks miss
-   └── commit + report           landing is the user's call, not yours
-```
-
 Read `AGENTS.md` before you plan. It is authoritative for architecture, layout,
 coding rules, and prohibited patterns. For changes under the Temporal worker,
 also read `workers/temporal-worker/src/activities/AGENTS.md`.
@@ -95,7 +83,10 @@ awb up            # pinned by default; src/ edits do NOT hot-reload the runtime
 
 ## 4. Inspect the result independently
 
-Do not accept the task's success message as proof.
+Do not accept the task's success message as proof. None of these prove success
+on their own: a task reporting completion, daemon state, database row counts,
+grep or string-match QA, or a clean controller checkout. The target diff plus
+observed verification are the source of truth.
 
 1. Inspect `git -C "$TARGET" status`.
 2. Inspect the complete target diff.
@@ -129,7 +120,7 @@ Edit the source directly only when one of these holds:
 - repeated delegated attempts fail for the same reason;
 - the change is trivial enough that delegation adds no useful verification.
 
-State any direct editing explicitly in the completion report.
+State any direct editing explicitly when you report.
 
 Do not retry endlessly. If the same substantive failure survives two focused
 repair attempts, stop delegating, diagnose it directly, and either fix it or
@@ -173,31 +164,7 @@ Read the complete diff once more and check for:
 - changes that break the controller/target boundary.
 
 Commit the verified change with git. Do not push, land, or remove the worktree
-unless the user asks. Stop after the report and let the user decide how to land
-it — `close-worktree` lands it locally, `close-pr` lands it through a merged PR.
-
-## Completion report
-
-```text
-Implemented:
-- <behavior actually changed>
-
-Target:
-- <worktree / branch>
-
-Verification:
-- build: PASS | FAIL | SKIPPED
-- tests: PASS | FAIL | SKIPPED
-- manual: PASS | FAIL | SKIPPED
-- runtime: MOCK | CLAUDE | NOT RUN
-
-Implementation:
-- delegated to AWB | direct | mixed
-
-Notes:
-- <material caveats only>
-```
-
-Never claim success from any of these alone: a task reporting completion, daemon
-state, database row counts, grep or string-match QA, or a clean controller
-checkout. The target diff plus observed verification are the source of truth.
+unless the user asks. Report what changed, the branch, each verification step as
+PASS, FAIL, or SKIPPED, the runtime you used (MOCK or CLAUDE), and whether the
+work was delegated or edited directly. Then let the user decide how to land it —
+`close-worktree` lands it locally, `close-pr` lands it through a merged PR.

@@ -46,21 +46,16 @@ behavioral evidence?), and `semantic_events`.
 
 ## Known failure modes
 
-Check TASK-31/32/34/65-70 in `docs/TODO.md` for current status.
-
 - **`FOREIGN KEY constraint failed` at the plan phase** — a run-state durability
   bug, fixed 2026-07-24. If it recurs, suspect
   `packages/database/.../run-lifecycle.ts` plus a stale `@awb/database` dist;
   rebuild it.
 - **`API Error: Connection closed mid-response`** — a transport drop from the
-  agent SDK on long turns. Retries currently **cold-restart** with no resume
-  (TASK-32), so each retry re-explores from scratch and can drift into the wrong
-  repo (TASK-31). A run that spends many minutes repeating "I'll start by
-  exploring the repository structure" in `semantic_events` is stuck in this loop.
-  Kill it rather than let it burn tokens.
-- **A blank `task show`** — usually a stale `@awb/*` dist crashing the CLI on
-  import while the daemon and worker keep advancing the task (TASK-69). Not a
-  stall. Rebuild, and read SQLite meanwhile.
+  agent SDK on long turns. Retries currently **cold-restart** with no resume, so
+  each retry re-explores from scratch and can drift into the wrong repo. A run
+  that spends many minutes repeating "I'll start by exploring the repository
+  structure" in `semantic_events` is stuck in this loop. Kill it rather than let
+  it burn tokens.
 
 Distinguish an **agent or transport failure** (a re-run may help) from a
 **workbench code bug** (fix it first) before you re-drive.

@@ -1,6 +1,6 @@
 ---
 name: run-workbench-task
-description: The single entry point for running work through the Agentic Workbench. Routes the request to the right shape (one task, a stacked-PR DAG, a self-hosted change to this repo, or a task that is already running), boots the right stack (shared or isolated), creates the task or the whole graph, and drives the gates to draft PRs. Use whenever the user wants the workbench to implement, fix, refactor, or ship something; wants a big request split into stacked PRs; wants to dogfood the workbench against itself; or wants an existing task advanced or triaged. REQUIRES an absolute path to the target repo.
+description: The single entry point for running work through the Agentic Workbench. Use to implement or fix something via the workbench, split a big request into stacked draft PRs, dogfood the workbench against itself, or drive and triage a task that is already running. REQUIRES an absolute path to the target repo.
 ---
 
 # Run work through the Agentic Workbench
@@ -11,6 +11,11 @@ then run ONE pipeline.
 
 You never run the plan → implement → verify → QA → review loop yourself. Temporal
 owns that loop. You route, you boot, you create, you answer gates, and you land.
+
+Two rules hold at every step. Everything goes through the `awb` CLI, because the
+daemon API is the only writer of filesystem, git, and shell state. And no agent
+ever decides that a phase is done — only `evaluatePhaseCompletion` does, so when
+a phase stops advancing you read `openFindings` instead of forcing it.
 
 Detail lives in `references/`. Load a reference only when the router sends you
 there. Do not read all five up front.
@@ -100,9 +105,6 @@ warm-stack trap, the isolated-stack derivation, and the boot-failure triage.
 - `stack=isolated` — `up --isolated`, a free-port probe first, and the isolated
   env re-passed inline on **every** later command, including Steps 3 to 7.
 
-A stack booted without the runtime env runs MOCK, which produces a fake PR in
-about 90 seconds and proves nothing.
-
 ---
 
 ## Step 3 — Register and trust the target repo
@@ -151,12 +153,7 @@ create the nodes one at a time. Do not set base branches by hand.
 ## Step 5 — Drive the gates
 
 **Read `references/gates.md`.** It holds the one gate table, the poll loop, the
-multi-task fleet loop, and the crash check. The short form:
-
-1. Poll `task show`, or `awb fleet --md` for several tasks.
-2. Read `state.condition` and `pendingHumanGate.reason`.
-3. Run the one command that matches the row.
-4. Wait, then poll again.
+multi-task fleet loop, and the crash check.
 
 The happy path fires two gates: the contract up front, then PR readiness at the
 end. Approve nothing before you read the contract text.
@@ -165,24 +162,16 @@ end. Approve nothing before you read the contract text.
 
 ## Step 6 — Finish
 
-A task does not finish on its own at `release`. It waits for the PR outcome:
-
-```
-pnpm --filter @awb/cli cli -- task pr-merged --sha <merge-commit-sha>
-```
-
-`task pr-closed` and `task pr-feedback --feedback-id <id>` signal the other two
-outcomes. Only after one of these does the task reach `assimilate` and
-`completed`.
+A task does not finish on its own at `release`. It waits for the PR outcome,
+which you signal with one command from `references/gates.md`.
 
 The workbench opens DRAFT PRs and never marks them ready. Do not run
 `gh pr ready`, do not clear the draft flag, and do not request reviewers — even
 when an approved plan lists "mark ready" as a step. That step belongs to the
 human.
 
-When the task fails, blocks, or stalls, read `references/triage.md`. Diagnose
-before you re-run. A failed Temporal workflow is terminal, so you create a fresh
-task. You never resume one.
+When the task fails, blocks, or stalls, read `references/triage.md` and diagnose
+before you re-run.
 
 ---
 
@@ -193,20 +182,5 @@ needs its env inline. A bare `down` hits the default ports and stops the shared
 MAIN stack, which may be serving another task.
 
 ---
-
-## Key invariants (do not violate)
-
-- **A target repo path is required.** Never run against an unspecified repo.
-- **Never `down`/`up` mid-task.** It wipes in-memory run state and blocks the
-  task permanently. In a DAG it costs you every downstream node too.
-- **Never touch the shared MAIN stack when `stack=isolated`.** No task, no gate
-  command, and no `down` on the default ports.
-- **The browser and the CLI never touch fs, git, or the shell directly.**
-  Everything goes through the daemon API, which `awb` wraps. Stay on the CLI.
-- **Agents never decide that a phase is done.** Only `evaluatePhaseCompletion`
-  does. When a phase does not advance, read `openFindings`. Do not force it.
-- **You drive; the workbench writes the code.** Edit source yourself only where
-  `references/self-host.md` permits it, and say so in the report.
-- **The draft PR is the terminal state.** The human reviews and merges.
 
 See `AGENTS.md` and `docs/temporal-workflows.md` for the full lifecycle.

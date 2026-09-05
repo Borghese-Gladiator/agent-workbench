@@ -8,15 +8,11 @@ once its parent opens its **draft PR**. The result is a set of **stacked draft
 PRs**, reviewed bottom-up — PR#0 against `main`, each later PR against the
 previous task's branch.
 
-You do the thinking: how to slice, what each child is, and the edges. The
-workbench does the execution: worktrees, branches, stacked draft PRs, and
-scheduling. You never hand-drive the chain.
-
 ## The model
 
 - **Node = one workbench task = one draft PR.** Scope each node so its diff is
   one coherent, reviewable change.
-- **Edges come in two modes** (TASK-102):
+- **Edges come in two modes**:
   - **`stack`** — the child's branch is *based on* the parent's delivered branch,
     AND the child does not start until that parent opens its draft PR. A git
     branch has exactly one base, so **each node has at most ONE `stack` parent**.
