@@ -1,320 +1,385 @@
 ---
 name: run-workbench-task
-description: Run an implementation task through the Agentic Workbench end to end — boot the stack, register a repo, create a task, approve the contract gate, watch it advance, and triage failures. Use when the user wants to run the workbench against a repo, implement something via the workbench, or drive a task from Claude Code. REQUIRES an absolute path to the target repo.
+description: The single entry point for running work through the Agentic Workbench. Use to implement or fix something via the workbench, split a big request into stacked draft PRs, dogfood the workbench against its own repo, or drive and triage a task that is already running. REQUIRES an absolute path to the target repo.
 ---
 
-# Run a task through the Agentic Workbench
+# Run work through the Agentic Workbench
 
-This repo IS the workbench. It runs against *other* Git repos. Running a task
-means: boot the stack, point it at a target repo, create a task, then respond to
-human gates as they arise (the contract gate up front; a plan gate only if
-planner/critic don't converge; the PR outcome at the end). You do NOT run the
-plan→implement→verify→QA→review loop yourself — Temporal owns that. You answer
-gates, watch for failure, and signal the final PR outcome.
+This repo IS the workbench. It runs against a target Git repo — sometimes
+against its own. This skill is the only entry point.
 
-Everything goes through the `awb` CLI, run buildless with the `cli` script:
+**Do not write the code, run the tests, or open the PR yourself.** Each task does
+that inside its own leased git worktree, and only `evaluatePhaseCompletion`
+decides that a phase advanced — an agent's own "done" is a candidate, never a
+decision. Your job is six commands and the gate answers between them: probe,
+boot, register, create, answer gates, signal the PR outcome. Then you read the
+diff yourself, because a task's success message is not evidence.
+
+Everything goes through the `awb` CLI, because the daemon API is the only writer
+of filesystem, git, and shell state. Run it buildless from a checkout:
 
 ```
 pnpm --filter @awb/cli cli -- <args>
 ```
 
-## 0. REQUIRED: the target repo path
+Three references hold the conditional detail. Load one only when the router
+sends you there; the rest of the run is in this file.
+
+| Reference | Load it when |
+| --- | --- |
+| `references/isolated-stack.md` | The route says `stack=isolated`. |
+| `references/decompose.md` | The route says `shape=dag`. |
+| `references/triage.md` | A task fails, blocks, or stalls, or `up` times out. |
+
+---
+
+## Step 0 — Route (three probes and one judgment call)
+
+Run the probes. Print the route on one line, so the run is auditable:
+
+```
+route: shape=<single|dag|drive-only> stack=<shared|isolated> target=<this-repo|other-repo>
+```
+
+| # | Question | Probe | If yes |
+| --- | --- | --- | --- |
+| 1 | Does a task already exist, and were you asked only to advance it? | `pnpm --filter @awb/cli cli -- task show` prints a task | `shape=drive-only` — skip to **Step 5** |
+| 2 | Is the target repo this workbench repo? | `grep -q '"name": "agentic-workbench"' "$TARGET/package.json"` | `target=this-repo`, `stack=isolated` |
+| 3 | Is a shared MAIN stack already warm? | `curl -sf http://127.0.0.1:4417/api/status` | `stack=isolated` |
+| 4 | Is the request more than one reviewable PR? | judgment — see below | `shape=dag` |
+
+**Question 4 is the only judgment call.** Answer `dag` when any of these holds:
+
+- The work crosses two or more seams the repo already has (schema, then API,
+  then UI; a migration, then the code that reads it).
+- One PR would be too large to review honestly, or would trip the slice diff cap.
+- The user says "split this", "break this up", or "stacked PRs".
+
+Answer `single` for one self-contained change. A one-node DAG is a normal task
+with ceremony. When you are unsure, propose the split and let the user choose.
+
+Questions 2 and 3 both set `stack=isolated`. A warm MAIN stack is a reason to
+isolate, never a question to raise with the user.
+
+---
+
+## Step 1 — Preflight the target repo (always)
 
 **This skill requires an absolute path to the target Git repo. If the user did
-not give one, STOP and ask — do not guess, do not default to the workbench, do
-not proceed.** The workbench edits real files and opens real PRs on whatever repo
-it's pointed at; running it against the wrong repo (or the workbench itself) is a
-real hazard. Validate before booting anything:
+not give one, STOP and ask.** Do not guess. Do not default to this repo. The
+workbench edits real files and opens real PRs against whatever you point it at.
+
+Set `TARGET` to the validated absolute path, then run all three probes:
 
 ```
-test -d "<REPO_PATH>/.git" && echo OK || echo "NOT A GIT REPO"
+test -d "$TARGET/.git" && echo OK || echo "NOT A GIT REPO"
+git -C "$TARGET" rev-parse HEAD 2>/dev/null || echo "NO COMMITS"
+git -C "$TARGET" remote -v
 ```
 
-If that prints anything but `OK` (missing path, not absolute, not a git repo),
-stop and ask the user for a valid absolute path. Only continue once it passes.
+- **Not a git repo, or the path is not absolute:** STOP and ask for a valid path.
+- **No commits:** `repo refresh` hard-fails on `git rev-parse HEAD`. Seed one
+  first: `git -C "$TARGET" commit --allow-empty -m "Initial commit"`.
+- **No remote:** the happy path ends at a gate that expects to open a PR. There
+  is nowhere to deliver. Settle the delivery story with the user now, not at the
+  gate. Either add a remote, or plan to land the worktree branch locally
+  (`references/triage.md`).
+- **Greenfield plus a large scope is the worst case.** An empty repo trips the
+  diff cap, the `program-design` checks, and the missing QA start command. Say so
+  up front. Scope the first task to a skeleton.
 
-**Then check for a greenfield / no-remote repo — a valid `.git` is not enough.** A
-repo can be a git repo with zero commits and no remote, and both break the workbench
-in ways that only surface much later (a wasted live run):
+---
 
-```
-git -C "<REPO_PATH>" rev-parse HEAD 2>/dev/null || echo "NO COMMITS"
-git -C "<REPO_PATH>" remote -v
-```
+## Step 2 — Boot the stack
 
-- **No commits (no `HEAD`):** `repo refresh` hard-fails on `git rev-parse HEAD`.
-  Seed one first: `git -C "<REPO_PATH>" commit --allow-empty -m "Initial commit"`.
-- **No remote (`origin`):** the happy path ends at a `pr-readiness` gate that expects
-  to push/open a PR — there is nowhere to deliver. Decide the delivery story with the
-  user *now*, not at the gate: either add a remote, or run "local branch only" and
-  plan to land the worktree code directly (see step 7's recover-and-land path).
-
-**Greenfield + large scope is the workbench's worst case.** An empty repo taking a
-full-app build trips several gates that a mature-repo change never sees (diff cap,
-`program-design` checks, no QA start command — TASK-65..68). If the user asks for a
-large greenfield build, say so up front and consider scoping the first task to a
-skeleton, or expect and pre-plan for those gates.
-
-Set these for the rest of the run so every command is unambiguous:
-- `REPO_PATH` = the validated absolute path (e.g. `/Users/you/GitHub/wip-browser-games`)
-- Repo/task ids are remembered between CLI calls, so you pass them only to target
-  something other than the most recent. **Arg order is positional: `[repositoryId]
-  [taskId]`** — `task cancel <taskId>` alone errors; pass repo first, or rely on the
-  remembered "most recent" and pass neither.
-
-## 1. Choose runtime, THEN boot
-
-**Always pass the runtime explicitly. This is the boot command:**
+**Always pass the runtime inline on the same command as `up`.** Shell state does
+not persist between CLI calls, and the worker reads the env when it spawns.
 
 ```
-# LIVE run (real agent, real tokens, browser QA) — use this unless told otherwise:
-AWB_AGENT_RUNTIME=claude AWB_QA_MODE=browser pnpm --filter @awb/cli cli -- up
-```
-
-Runtime env must be **inline on the same command as `up`** — shell state does not
-persist between separate CLI calls, env is read at worker spawn, and you must
-never `down`/`up` mid-task (that wipes in-memory state and permanently blocks the
-task).
-
-**A bare `up` runs MOCK, and MOCK is not a real implementation** — it produces a
-fake PR in ~90s and spends zero tokens. `mock` is the code-level fallback
-(`workers/temporal-worker/src/activities/agent-factory.ts:22-23`: an unset *or
-typo'd* runtime degrades to `mock` so deterministic tests stay offline), which
-means a misspelled runtime silently gives you a fake run rather than an error.
-Only omit the env when you explicitly want a plumbing dry-run:
-
-```
-# MOCK dry-run (plumbing check only):
-pnpm --filter @awb/cli cli -- up
+# LIVE run — real agent, real tokens, browser QA. Use this unless told otherwise:
+AWB_AGENT_RUNTIME=claude AWB_QA_MODE=browser pnpm --filter @awb/cli cli -- up --quiet
 ```
 
 Wait for `ready.`.
 
-**`DATA_DIR` — resolve it once, use it for every path below.** Logs, the SQLite
-DB, and worktrees all hang off one root: `AWB_DATA_DIR` if set, else
-`~/.agentic-workbench` (`packages/config/src/paths.ts:4-6`). If you booted with a
-non-default `AWB_DATA_DIR` (e.g. an isolated stack), every `~/.agentic-workbench/…`
-path in this skill must be re-rooted at that dir instead — reading the default
-root would show you a *different stack's* logs and tell you nothing about your run.
+**A bare `up` runs MOCK, and MOCK is not a real implementation.** It produces a
+fake PR in about 90 seconds and spends zero tokens. `mock` is the code-level
+fallback (`resolveAgentRuntime` in `workers/temporal-worker/src/activities/agent-factory.ts`): an
+unset *or misspelled* runtime degrades to `mock` so the deterministic tests stay
+offline, so a typo gives you a fake run instead of an error. Omit the env only
+for a deliberate plumbing dry-run.
+
+**If `up` says "runtime already ready", the env you just passed did NOT take.** A
+warm stack keeps whatever env it booted with. You do not have to guess which:
+`up` reports the running env, and names every difference from what you asked for.
+
+```
+pnpm --filter @awb/cli cli -- up --json     # alreadyReady, runtimeConfig, envMismatch
+pnpm --filter @awb/cli cli -- status --json # runtimeConfig on a stack you did not boot
+```
+
+A non-empty `envMismatch` means your env did NOT take — the plain-text form
+prints `runtime already ready [...]` plus a warning listing each difference.
+**Read it before you create a task**, or a "live" run executes as MOCK. To force
+new env, `down` then `up` with the env inline — **safe only before a task
+exists**. Never `down`/`up` mid-task: it wipes in-memory run state and blocks the
+task permanently, and in a DAG it costs you every downstream node.
+
+**`stack=isolated`** — read `references/isolated-stack.md` and boot from there
+instead. It owns the free-port probe, the stack coordinates, and the env you must
+re-pass inline on every later command, including Steps 3 to 8.
+
+**`target=this-repo`** — boot the controller from a **pinned** build, never
+`awb up --dev`. `--dev` runs the worker and daemon from live source through
+`tsx watch`, so a save hot-reloads the runtime while it is orchestrating itself.
+Pinned is the default:
+
+```
+pnpm -C "$TARGET" build
+```
+
+**`DATA_DIR` — resolve it once, use it everywhere.** Logs, the SQLite database,
+and the leased worktrees all hang off one root (`resolveDataDir` in
+`packages/config/src/paths.ts`):
 
 ```
 DATA_DIR="${AWB_DATA_DIR:-$HOME/.agentic-workbench}"
 ```
 
-Logs stream to `$DATA_DIR/runtime/logs/`.
+Logs stream to `$DATA_DIR/runtime/logs/`. Under an isolated stack, re-root every
+path at that stack's data dir — the default root is a *different* stack and tells
+you nothing about your run.
 
-**If `up` says "runtime already ready", the env you just passed did NOT take.** A warm
-stack from a prior session keeps whatever runtime/QA/cap env it booted with — your new
-flags are ignored (env is read at worker spawn), and there is currently no way to read
-the active runtime back (`/api/health` only returns `{status:"ok"}`; TASK-70). So a
-"live" run can silently execute as MOCK. Tells that it's MOCK: a fake PR in ~90s and
-zero tokens. If you need specific env and a stack is already warm, `down` then `up`
-with the env inline — this is safe **only before a task exists**; never `down`/`up`
-mid-task.
+If `up` times out, do NOT loop it. Go to `references/triage.md`.
 
-### If `up` times out ("Waiting for the daemon to become healthy… timed out")
+---
 
-**Do NOT loop `up` blindly.** A health timeout almost always means the daemon
-process crashed on import — read the log first:
+## Step 3 — Register and trust the target repo
 
 ```
-tail -40 "$DATA_DIR/runtime/logs/daemon.log"
+pnpm --filter @awb/cli cli -- repo add "$TARGET" --json   # parse the id
+pnpm --filter @awb/cli cli -- repo refresh                # records a snapshot
+pnpm --filter @awb/cli cli -- repo approve                # trusted — required
 ```
 
-Two common crash causes on a clean checkout (both are build-state, not config):
-- `ERR_MODULE_NOT_FOUND: Cannot find package '@awb/…'` → a workspace symlink was
-  never materialized. `pnpm install` says "up to date" and does NOT fix it. Run
-  `pnpm install --force`.
-- `SyntaxError: … does not provide an export named '…'` → a package `dist/` is
-  stale (the daemon runs via `tsx` but imports other packages from their built
-  `dist/`). Run `pnpm build`. (Its `apps/daemon` test-file TS error is harmless —
-  the package dists build fine before it.)
+A repo stays `untrusted` until you approve it, and tasks do not run against an
+untrusted repo. Trust persists in SQLite, so a repo approved in an earlier
+session stays approved.
 
-Then `down` the half-started processes and `up` again.
+Repo and task ids are remembered between calls. You pass them only to target
+something other than the most recent. The order is positional:
+`[repositoryId] [taskId]`.
 
-## 2. Register and trust the target repo
+---
 
-```
-pnpm --filter @awb/cli cli -- repo add "<REPO_PATH>" --json   # parse the `id`
-pnpm --filter @awb/cli cli -- repo refresh                    # discovers structure, records a snapshot
-pnpm --filter @awb/cli cli -- repo approve                    # marks trusted — REQUIRED before tasks run
-```
+## Step 4 — Create the work
 
-A repo is `untrusted` until approved; tasks will not run against an untrusted repo.
-(A repo trusted in a prior session stays trusted — the DB persists it.)
+The task edits its own leased worktree under `$DATA_DIR/worktrees/`, created with
+`git worktree add` in the registered repo (`packages/workspace/src/worktree.ts`).
+Your registered checkout's working tree is never touched.
 
-## 3. Create the task
+Write the prompt so it carries all of this:
 
-```
-pnpm --filter @awb/cli cli -- task create --prompt "<what to implement>" --json   # parse `taskId`
-```
+- the behavior the user asked for, in their terms;
+- the concrete files and paths the change touches — the planner and the builder
+  ground on the prompt text, and a specific prompt converges in fewer passes and
+  produces a smaller diff;
+- the instruction to make the smallest correct change;
+- the requirement to add focused tests;
+- the requirement not to land, push, or delete the worktree.
 
-Write the prompt to name the concrete files/paths the change touches — the
-planner and builder ground on it, and a specific prompt converges faster.
-
-## 4. Approve the contract gate
-
-The lifecycle pauses at the **contract** gate. Poll with `task show` — note it
-**outputs JSON by default and rejects a `--json` flag** (`error: unknown option`):
+**`shape=single`**:
 
 ```
-pnpm --filter @awb/cli cli -- task show
+pnpm --filter @awb/cli cli -- task create --prompt "<the prompt>" --json
 ```
 
-Read `pendingHumanGate`. When its `reason` is `task-contract-approval`, confirm
-the contract (`state.prompt` is the contract text at v1) matches the user's
-intent, then:
+**`shape=dag`** — read `references/decompose.md`. Propose the split, get explicit
+approval, then declare the whole graph in one atomic call. Do not create nodes
+one at a time. Do not set base branches by hand.
+
+**`target=this-repo`** — read `AGENTS.md` first and quote its constraints into
+the prompt. It is authoritative for architecture, layout, and prohibited
+patterns: strict TypeScript with no `any`, Zod at process and persistence
+boundaries, no I/O in `@awb/workflow`, Temporal I/O only in
+`workers/temporal-worker/src/activities/`, all writes through the daemon. For
+worker changes, also read `workers/temporal-worker/src/activities/AGENTS.md`.
+
+---
+
+## Step 5 — Drive the gates
+
+Poll one command, read two fields, run the one command that matches. Fill in the
+`<...>` placeholders only; do not invent flags or subcommands. Under
+`stack=isolated`, carry the isolated env inline on every command here.
+
+1. **Poll.** `pnpm --filter @awb/cli cli -- task show`
+   It prints JSON by default and **rejects a `--json` flag**
+   (`error: unknown option`).
+2. **Read two fields:** `state.condition`, and `pendingHumanGate.reason`
+   (meaningful only when `condition` is `awaiting-human`).
+3. **Run the one command** from the row below.
+4. **Wait about 30 seconds, then poll again.** Repeat until `condition` is
+   `completed`, or a row says STOP.
+
+| `state.condition` | `pendingHumanGate.reason` | Run this ONE command |
+| --- | --- | --- |
+| `running` | any or none | *nothing* — wait, then poll again |
+| `awaiting-human` | `task-contract-approval` | Read the contract (below), then `task approve-contract --contract-version <n>` |
+| `awaiting-human` | `planner-critic-non-convergence` | `task approve-plan --plan-version <n>`, or `task reject-plan --reason …` |
+| `awaiting-human` | `pr-readiness` | The draft PR is open — go to **Step 6** |
+| `awaiting-human` | `slice-diff-exceeds-cap` | STOP — see **Gates that loop** |
+| `blocked` | `repeated-failure-no-progress` | STOP — `references/triage.md` |
+| `blocked` | anything else | STOP and tell the user |
+| `completed` | — | Done. Report the result. |
+
+For `<n>`, use the version in `pendingHumanGate` (`contractVersion` /
+`planVersion`, or `state.contractVersion` / `state.planVersion`). Use `1` when
+you cannot find a number.
+
+The happy path fires two gates: the contract, then PR readiness. The plan gate
+fires only when the planner and the critic fail to converge.
+
+### Contract check — the one place you must read
+
+Before you approve, read `state.prompt` (the contract text at v1) and confirm it
+matches what the user asked for. This is a yes-or-no glance, not a rewrite. If
+the contract is about something else, or you are unsure, STOP and show the text
+to the user. A wrong contract sends the whole task down the wrong path, and there
+is no `reject-contract` command, so it is not fixable mechanically.
+
+### Gates that loop — do not answer them repeatedly
+
+- **`slice-diff-exceeds-cap`** — the implement diff exceeds the velocity cap. The
+  reused `approve-plan` update clears it, but it **re-raises on every implement
+  pass with no memory of the ack**, so approving loops forever on a legitimately
+  large diff. Either re-slice smaller (`references/decompose.md`), or restart
+  with the cap disabled and a **fresh task**, which you must clear with the user
+  first:
+
+  ```
+  pnpm --filter @awb/cli cli -- down
+  AWB_SLICE_DIFF_CAP=0 AWB_AGENT_RUNTIME=claude AWB_QA_MODE=browser \
+    pnpm --filter @awb/cli cli -- up
+  # then re-create the task; the repo stays trusted
+  ```
+
+- **`repeated-failure-no-progress`** — a phase's completion gate keeps failing.
+  Often a workbench false positive rather than bad agent output (for example the
+  `program-design` bodyless-signature check). Diagnose the specific failing
+  predicate before you re-run. Do not loop `approve`.
+
+- **A `blocked` at `exercise` on a greenfield repo** usually means no QA start
+  command exists, so browser QA has nothing to launch. Approving does not clear
+  it. Wire a start command, or settle the QA story with the user.
+
+When a gate reason has no row here, or a `blocked` reason has no CLI resolution
+(waiver, permission, budget, scope), STOP and tell the user. Do not fabricate a
+way past it.
+
+### Two ways a task lies about being alive
+
+- **A crashed workflow still reads as `running`** in daemon state. Every few
+  polls, check Temporal directly and read `workflowExecutionInfo.status`:
+  `temporal workflow describe --address 127.0.0.1:7233 -w "awb/task/<repositoryId>/<taskId>" -o json`.
+  `RUNNING` is healthy; `FAILED`, `TERMINATED`, or `TIMED_OUT` means it died — go
+  to `references/triage.md`. When you background a monitor, cover both signals: a
+  monitor that greps only for success stays silent through a crash.
+- **A blank `task show`** — not an error, not a state — usually means a stale
+  `@awb/*` dist crashed the CLI on import while the daemon and worker keep
+  advancing the task. Do NOT read it as a stall. Rebuild (`pnpm build`), and read
+  SQLite meanwhile (`references/triage.md`).
+
+### Driving several tasks at once
+
+A declared DAG, or independent tasks, are driven from **one** session with a
+single poll loop:
 
 ```
-pnpm --filter @awb/cli cli -- task approve-contract --contract-version 1
+pnpm --filter @awb/cli cli -- fleet --md
 ```
 
-Do NOT auto-approve without checking — a wrong contract sends the whole task down
-the wrong path.
+`awb fleet` composes one row per task from SQLite in a single call: phase,
+condition, current activity and its age, the bounce-back signal `#N ↩<phase>`,
+open findings, and the PR. Prefer it over `task list`, which shows no rollups.
 
-## 5. Watch it advance — AND watch for hard failure
+- **Do not spawn one subagent per task.** A context-inheriting fork believes it
+  is the coordinator, re-narrates the fleet, and may drive *other* tasks. It also
+  tends to answer one poll and end its turn, then idles into a false stall.
+- **Loop inside your own turn** — poll every 45–90 seconds with one bounded
+  `sleep`, then re-poll. Never fire one poll and end the turn expecting a wake-up.
+- **Read the pending gate from the daemon**, not from a raw SQLite column.
+- **Keep to about five live tasks on a laptop.** Heavy phases are bounded by
+  `AWB_MAX_CONCURRENT_ACTIVITIES` (default 4), but ten tasks still bury the
+  machine under parallel test runs.
 
-Poll `task show` for `state.phase` / `state.condition` / `pendingHumanGate`. But
-the daemon state alone will make a **crashed** workflow look like it's still
-running. Also check the raw Temporal workflow status, which surfaces a hard
-`Failed`:
+---
 
-```
-temporal workflow describe --address 127.0.0.1:7233 \
-  -w "awb/task/<repositoryId>/<taskId>" -o json
-```
+## Step 6 — Verify the result yourself (every repo, not just this one)
 
-Look at `workflowExecutionInfo.status`: `RUNNING` = healthy; `FAILED` /
-`TERMINATED` / `TIMED_OUT` = the run died, go to step 7. When backgrounding a
-monitor, cover BOTH signals and emit on every terminal state (a monitor that only
-greps for success stays silent through a crash — silence is not success).
+The task reached `pr-readiness`. **Its success message is not evidence.** None of
+these prove success on their own: a completion message, daemon state, database
+row counts, grep or string-match QA, or a clean checkout. The diff plus observed
+verification are the source of truth.
 
-Respond only when `condition` is `awaiting-human`, keyed on
-`pendingHumanGate.reason`:
+1. **Read the whole diff** on the task's branch — not the summary of it.
+2. **Compare it against what you asked for.** Look for unrelated edits, missing
+   tests, architecture violations, and abstraction nobody asked for.
+3. **Run the target's own build and tests** against the leased worktree:
+   `pnpm -C "$DATA_DIR/worktrees/<repoId>/<taskId>" build` and `… test`, or that
+   repo's equivalent. Report observed results, never expected ones. If a step
+   cannot run, say exactly which one and why.
+4. **Read the diff once more for correctness.** A green build and passing
+   grep-based QA routinely coexist with real runtime and data-integrity bugs, so
+   this is a separate pass, not a formality: data integrity, edits outside scope,
+   accidental generated files, stale comments, tests that assert implementation
+   details instead of behavior.
 
-| `pendingHumanGate.reason` | Respond with |
-| --- | --- |
-| `task-contract-approval` | `task approve-contract --contract-version <n>` (or `reject-contract`) |
-| `planner-critic-non-convergence` | `task approve-plan --plan-version <n>` (or `reject-plan --reason …`) |
-| `pr-readiness` (at `release`) | deliver, then `task pr-merged --sha <sha>` once merged |
+A MOCK run proves plumbing only. It never proves model-driven behavior.
 
-Happy path fires only two gates: contract, then `pr-readiness`. The plan gate
-fires only if planner/critic can't converge. If `condition` is `blocked` or the
-gate `reason` has no CLI command (waiver / permission / budget / scope), STOP and
-tell the user — do not fabricate a way past it.
+**When something is wrong, repair with another focused task** against the same
+target: give it the observed failure, the relevant diff or test output, the
+expected behavior, and an instruction to fix only that defect. **Cap it at two
+rounds.** If the same substantive failure survives twice, stop delegating,
+diagnose it directly, and either fix it or report the blocker accurately. Say so
+explicitly whenever you edited source by hand instead of delegating.
 
-**Non-happy-path gates you may hit (esp. large/greenfield tasks), and what they
-really mean:**
-- `slice-diff-exceeds-cap` — the implement diff exceeds the velocity cap. Cleared by
-  the *reused* `approve-plan` update, but it **re-raises every implement pass with no
-  memory of the ack**, so approving loops forever on a legitimately large diff. Do NOT
-  loop it: the only real escape is a restart with `AWB_SLICE_DIFF_CAP=0` + a fresh task
-  (see TASK-68), which you must clear with the user.
-- `repeated-failure-no-progress` — a phase's completion gate keeps failing. This is
-  often a workbench false-positive, not bad agent output (e.g. `program-design`'s
-  bodyless-signature check, TASK-67). Diagnose the *specific* failing predicate (step
-  7) before re-running; do not assume the agent is at fault.
-- A `blocked` at `exercise` on a greenfield repo usually means **no QA start command
-  exists** (TASK-65) — browser QA has nothing to launch. This is not resolvable by
-  approving; it needs a start command wired or the QA story decided with the user.
+Report what changed, the branch, each verification step as PASS, FAIL, or
+SKIPPED, and the runtime you used (MOCK or CLAUDE).
 
-If a gate loops, or a `blocked` reason has no first-class CLI resolve, treat the
-pipeline as stuck and go to step 7 — including the "recover the code directly" path.
+---
 
-**If `task show` returns blank/empty (not an error, not a state):** the CLI itself is
-likely the broken link, not the task — a stale `@awb/*` dist crashes the CLI on import
-while the daemon+worker (running from source) keep advancing the task (TASK-69). Do
-NOT read a blank `task show` as a stall. Rebuild the offending package
-(`pnpm --filter @awb/<pkg> build`, or `pnpm build`) and, meanwhile, read ground truth
-straight from SQLite (see step 7).
+## Step 7 — Finish
 
-## 6. Complete the task
-
-A task does NOT finish on its own at `release` — it waits for the PR outcome:
+A task does not finish on its own at `release`. It waits for the PR outcome:
 
 ```
 pnpm --filter @awb/cli cli -- task pr-merged --sha <merge-commit-sha>
+pnpm --filter @awb/cli cli -- task pr-closed
+pnpm --filter @awb/cli cli -- task pr-feedback --feedback-id <id>
 ```
 
-`task pr-closed` and `task pr-feedback --feedback-id <id>` signal the other
-outcomes. Only after `pr-merged`/`pr-closed` does the task reach
-`assimilate` / `completed`.
+Only after `pr-merged` or `pr-closed` does the task reach `assimilate` and
+`completed`. In a DAG, the open draft PR is also the release event that unblocks
+the dependent nodes.
 
-## 7. When a run fails — triage before re-running
+The workbench opens DRAFT PRs and never marks them ready. Do not run
+`gh pr ready`, do not clear the draft flag, and do not request reviewers — even
+when an approved plan lists "mark ready" as a step. That belongs to the human.
 
-A hard failure is terminal in Temporal: **the workflow cannot be resumed — you
-create a fresh task** (the repo stays trusted, so skip re-registering). But
-diagnose FIRST; blind re-runs repeat the failure and waste live tokens. The real
-error is NOT in `task show`; find it here, in order:
+When a task fails, blocks, or stalls, read `references/triage.md` and diagnose
+before you re-run.
 
-1. **Worker log** — the actual exception + stack:
-   `grep -n "Activity failed\|Error:\|returned 500" "$DATA_DIR/runtime/logs/worker.log" | tail -30`
-2. **Semantic events** — the agent's turn-by-turn stream (what it actually did):
-   `sqlite3 "$DATA_DIR/database/workbench.sqlite" "SELECT sequence, occurred_at, phase, producer, type, substr(summary,1,70) FROM semantic_events WHERE run_id='<taskId>-run' ORDER BY sequence;"`
-3. **The worktree** — code the agent wrote may be intact even if the DB write
-   never fired (do NOT report "0 changes" from a DB count alone):
-   `git -C "$DATA_DIR/worktrees/<repoId>/<taskId>" status --short`
-   `git -C "$DATA_DIR/worktrees/<repoId>/<taskId>" diff`
-   Note the agent commits its work, so `status` may be clean while the branch is
-   full — check `git log --oneline` and `git diff <baseSha> HEAD` too.
-4. **SQLite ground truth** — when the CLI is down (blank `task show`) or you need the
-   exact failing predicate, read the DB directly. Useful tables:
-   `phase_attempts` (per-phase attempts + outcomes), `program_designs`,
-   `repository_commands` (is a `start` command present?), `acceptance_claims`
-   (does the contract require QA/behavioral evidence?), `semantic_events`.
+---
 
-Known failure modes seen live (check TASK-31/32/34/65-70 in `docs/TODO.md` for status):
-- **`FOREIGN KEY constraint failed` at the plan phase** — a run-state durability
-  bug (fixed 2026-07-24; if it recurs, `packages/database/.../run-lifecycle.ts`
-  plus a stale `@awb/database` dist is the suspect — rebuild it).
-- **`API Error: Connection closed mid-response`** — transport drop from the agent
-  SDK on long turns. Retries currently **cold-restart** (no resume — TASK-32), so
-  each retry re-explores from scratch and can even drift into the wrong repo
-  (TASK-31). A run that spends many minutes with repeated "I'll start by exploring
-  the repository structure" in `semantic_events` is stuck in this loop.
-
-Distinguish an **agent/transport failure** (retry/re-run may help) from a
-**workbench code bug** (must be fixed first) before re-driving.
-
-### 7a. When the pipeline is stuck but the code is done — recover and land directly
-
-A run can be blocked late (e.g. at `exercise`/QA) with the **implementation already
-complete and past `implement` + `verify`**. The deliverable then lives in the worktree
-branch even though the task will never reach `release`. Don't throw that away chasing
-the gate — recover it:
-
-1. **Confirm the code is real and works** before touching anything — inspect the
-   branch (`git -C <worktree> log/diff`) and, for an app, actually boot it (e.g.
-   `uvicorn`/`vite` from the worktree) and hit an endpoint. A verified worktree is the
-   deliverable.
-2. **Recover BEFORE cancelling.** `task cancel` may garbage-collect the worktree — runs
-   that blocked *before* implementing leave nothing, and even a completed one is not
-   guaranteed to persist. Copy the code out first.
-3. **Land it** into the target repo (works with no remote): copy only tracked files,
-   excluding `.venv`/build cruft, via
-   `git -C <worktree> archive HEAD | tar -x -C "<REPO_PATH>"`, then commit in the
-   target repo. Verify a clean-install boot in the target (fresh venv from its own
-   manifest) so a new developer can reproduce it.
-4. This is the right ending for a **no-remote** run (step 0): there is no PR to sign
-   off, so the merged-PR gate never applies — the landed local commit *is* delivery.
-
-## 8. Tear down
+## Step 8 — Tear down
 
 ```
 pnpm --filter @awb/cli cli -- down
 ```
 
-`task list` shows all tasks created this session.
+Under `stack=isolated`, tear down with the isolated env inline
+(`references/isolated-stack.md`). A bare `down` hits the default ports and stops
+the shared MAIN stack, which may be serving another task.
 
-## Key invariants (do not violate)
-
-- **A target repo path is required** (step 0). Never run against an unspecified
-  repo or the workbench itself.
-- The browser/CLI never touch fs/git/shell directly — everything goes through the
-  daemon API, which `awb` wraps. Stay on the CLI.
-- Never `down`/`up` mid-task — it wipes in-memory run state and permanently blocks
-  the task.
-- Agents never decide a phase is done; only `evaluatePhaseCompletion` does. If a
-  phase isn't advancing, read `openFindings` — don't force it.
-- A failed Temporal workflow is terminal → fresh task, never a resume.
-- See `AGENTS.md` and `docs/temporal-workflows.md` for the full lifecycle.
+See `AGENTS.md` and `docs/temporal-workflows.md` for the full lifecycle.
