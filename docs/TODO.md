@@ -542,7 +542,7 @@ interactively, stopping at the pr-readiness gate. Capture friction as new TODO
 items here.
 
 **Where.** Operational — uses the `run-workbench-task` skill; no code target.
-Relates to `implement-feature` (self-modification flow).
+Relates to the `run-workbench-task` skill's `references/self-host.md` (self-modification flow).
 
 **How we'll know it's done.** A branch + draft PR on this repo produced by the
 workbench, with a short writeup of what was awkward.
@@ -674,7 +674,8 @@ in `qa-cold-reentry-nonconvergence`.
 (`https://github.com/langchain-ai/deep-agents-from-scratch`) teaches planning + sub-task
 decomposition backed by an explicit agent-maintained scratchpad / virtual filesystem for
 in-progress state, separate from the plan itself. (Decline its subagent framing — we
-already have the stacked-PR DAG for decomposition via `decompose-into-dag`/TASK-51; the
+already have the stacked-PR DAG for decomposition (`run-workbench-task` →
+`references/decompose.md`)/TASK-51; the
 bounded steal is just the scratchpad idea.)
 
 **What to do.** Add a persisted per-run scratchpad file (plain markdown/text, not a new
