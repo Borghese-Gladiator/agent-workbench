@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   deriveTaskTitle,
   formatAttribution,
-  formatDuration,
   renderTimeline,
   runIdForTaskId,
   eventsQueryFor,
@@ -56,20 +55,6 @@ describe('eventsQueryFor (TASK-128 logs fix)', () => {
     // afterSequence=0 silently dropped the first event of every run.
     expect(eventsQueryFor('abc-123')).toContain('afterSequence=-1');
     expect(eventsQueryFor('abc-123')).not.toContain('afterSequence=0');
-  });
-});
-
-describe('formatDuration', () => {
-  it.each([
-    [null, '-'],
-    [0, '0ms'],
-    [999, '999ms'],
-    [1500, '1.5s'],
-    [59_999, '60.0s'],
-    [60_000, '1m00s'],
-    [125_000, '2m05s'],
-  ])('renders %s as %s', (ms, expected) => {
-    expect(formatDuration(ms)).toBe(expected);
   });
 });
 

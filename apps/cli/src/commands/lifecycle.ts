@@ -7,22 +7,13 @@ import { probeHealth, type RuntimeHealth, type ServiceHealth, type RuntimeConfig
 import { RUNTIME_SERVICES, logPathFor, repoRoot, type ServiceKey } from '../services.js';
 import { startService, stopService, waitForDaemonHealth, streamServiceLogs } from '../process-control.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
-import { parseDuration } from '../duration.js';
+import { parseDuration, formatDurationCoarse } from '../duration.js';
+import { formatColumns } from '../table.js';
 
 const ALL_SERVICES: ServiceKey[] = ['otel', 'temporal', 'worker', 'daemon', 'ui'];
 
 function isServiceKey(value: string): value is ServiceKey {
   return (ALL_SERVICES as string[]).includes(value);
-}
-
-function formatUptime(ms?: number): string {
-  if (ms === undefined) return '—';
-  const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  return `${hours}h`;
 }
 
 /** Starts the three runtime services (idempotent) and waits for the daemon to answer health. */
@@ -303,12 +294,9 @@ function printVerboseTable(health: RuntimeHealth, only: ServiceKey | undefined):
   const header = ['SERVICE', 'STATUS', 'PID', 'PORT', 'UPTIME'];
   const rows = keys.map((k) => {
     const s = health.services[k];
-    return [k, s.state, s.pid ? String(s.pid) : '—', s.port ? String(s.port) : '—', formatUptime(s.uptimeMs)];
+    return [k, s.state, s.pid ? String(s.pid) : '—', s.port ? String(s.port) : '—', formatDurationCoarse(s.uptimeMs)];
   });
-  const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
-  const fmt = (cols: string[]) => cols.map((c, i) => c.padEnd(widths[i]!)).join('  ');
-  printResult(fmt(header));
-  for (const row of rows) printResult(fmt(row));
+  for (const line of formatColumns(header, rows)) printResult(line);
 }
 
 function printRecentLines(path: string, tail: number, sinceMs: number | undefined): void {

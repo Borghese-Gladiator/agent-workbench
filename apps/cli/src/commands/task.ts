@@ -5,7 +5,8 @@ import { daemonClient, daemonBaseUrl, DaemonRequestError } from '../daemon-clien
 import { rememberTaskId, resolveRepositoryId, resolveTaskId } from '../remembered.js';
 import { resolveRepoRef } from './repo.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
-import { parseDuration } from '../duration.js';
+import { parseDuration, formatDuration } from '../duration.js';
+import { formatColumns } from '../table.js';
 import { uiPort } from '../services.js';
 
 interface CreatedTask {
@@ -110,16 +111,6 @@ const ATTRIBUTION_BUCKETS = [
   ['retryBackoffMs', 'backoff'],
 ] as const;
 
-/** Compact duration for a table cell: `-` when unknown, else ms / s / m+s. */
-export function formatDuration(ms: number | null): string {
-  if (ms === null) return '-';
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1000);
-  return `${minutes}m${String(seconds).padStart(2, '0')}s`;
-}
-
 /** The non-zero runtime-attribution buckets as `label duration` pairs, biggest first. */
 export function formatAttribution(attribution: Record<string, number | string> | null): string {
   if (!attribution) return '';
@@ -131,6 +122,30 @@ export function formatAttribution(attribution: Record<string, number | string> |
     .sort((a, b) => b.ms - a.ms)
     .map((p) => `${p.label} ${formatDuration(p.ms)}`);
   return parts.join('  ');
+}
+
+/** The indented detail lines under one phase row: where the time went, sessions, QA, outputs. */
+function phaseDetails(phase: TimelineResponse['phases'][number]): string[] {
+  const details: string[] = [];
+  const attribution = formatAttribution(phase.runtimeAttribution);
+  if (attribution !== '') details.push(`where: ${attribution}`);
+  for (const session of phase.sessions) {
+    details.push(
+      `session ${session.role} (${session.model ?? session.runtime}) ${formatDuration(session.durationMs)}`,
+    );
+  }
+  for (const qa of phase.qa) {
+    details.push(`qa ${qa.kind}: ${qa.status} — ${qa.summary}`);
+  }
+  if (phase.evidence.length > 0) {
+    const passed = phase.evidence.filter((e) => e.status === 'passed').length;
+    details.push(
+      `evidence ${phase.evidence.length} (${passed} passed), artifacts ${phase.artifacts.length}`,
+    );
+  } else if (phase.artifacts.length > 0) {
+    details.push(`artifacts ${phase.artifacts.length}`);
+  }
+  return details;
 }
 
 /** Renders the timeline as plain text. Returns the lines so a test can assert on them. */
@@ -145,32 +160,19 @@ export function renderTimeline(timeline: TimelineResponse): string[] {
   }
   lines.push('');
 
-  const nameWidth = Math.max(5, ...timeline.phases.map((p) => `${p.phase} #${p.attemptNumber}`.length));
-  lines.push(`${'PHASE'.padEnd(nameWidth)}  ${'DURATION'.padEnd(9)}  OUTCOME`);
-  for (const phase of timeline.phases) {
-    const name = `${phase.phase} #${phase.attemptNumber}`;
-    lines.push(
-      `${name.padEnd(nameWidth)}  ${formatDuration(phase.durationMs).padEnd(9)}  ${phase.outcome ?? '(open)'}`,
-    );
-    const attribution = formatAttribution(phase.runtimeAttribution);
-    if (attribution !== '') lines.push(`${' '.repeat(nameWidth)}  where: ${attribution}`);
-    for (const session of phase.sessions) {
-      lines.push(
-        `${' '.repeat(nameWidth)}  session ${session.role} (${session.model ?? session.runtime}) ${formatDuration(session.durationMs)}`,
-      );
-    }
-    for (const qa of phase.qa) {
-      lines.push(`${' '.repeat(nameWidth)}  qa ${qa.kind}: ${qa.status} — ${qa.summary}`);
-    }
-    if (phase.evidence.length > 0) {
-      const passed = phase.evidence.filter((e) => e.status === 'passed').length;
-      lines.push(
-        `${' '.repeat(nameWidth)}  evidence ${phase.evidence.length} (${passed} passed), artifacts ${phase.artifacts.length}`,
-      );
-    } else if (phase.artifacts.length > 0) {
-      lines.push(`${' '.repeat(nameWidth)}  artifacts ${phase.artifacts.length}`);
-    }
-  }
+  const [header, ...rows] = formatColumns(
+    ['PHASE', 'DURATION', 'OUTCOME'],
+    timeline.phases.map((p) => [
+      `${p.phase} #${p.attemptNumber}`,
+      formatDuration(p.durationMs),
+      p.outcome ?? '(open)',
+    ]),
+  );
+  lines.push(header!);
+  rows.forEach((row, i) => {
+    lines.push(row);
+    for (const detail of phaseDetails(timeline.phases[i]!)) lines.push(`  ${detail}`);
+  });
 
   lines.push('');
   const t = timeline.totals;
