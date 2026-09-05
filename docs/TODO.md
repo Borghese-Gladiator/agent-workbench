@@ -542,7 +542,8 @@ interactively, stopping at the pr-readiness gate. Capture friction as new TODO
 items here.
 
 **Where.** Operational — uses the `run-workbench-task` skill; no code target.
-Relates to the `run-workbench-task` skill's `references/self-host.md` (self-modification flow).
+Relates to the `run-workbench-task` skill, whose `target=this-repo` route covers
+changing this repo with this repo.
 
 **How we'll know it's done.** A branch + draft PR on this repo produced by the
 workbench, with a short writeup of what was awkward.

@@ -105,7 +105,7 @@ array of typed edges.
   every predecessor has opened its draft PR. The release phase pushes the event
   to the daemon scheduler, and a periodic sweep from SQLite is the backstop
   across a daemon restart (`apps/daemon/src/scheduler.ts`).
-- **Answer each task's gates normally** — see `gates.md`, and drive the whole
+- **Answer each task's gates normally** — Step 5 of `SKILL.md`, driving the whole
   graph from one poll loop with `awb fleet --md`.
 - **Never set a node's base branch by hand, and never thread branch names between
   tasks.** Declare the edge. The scheduler resolves the base lazily from the

@@ -1,6 +1,6 @@
 # Triage a failed, blocked, or stalled task
 
-Load this when a task fails, blocks, stalls, or a gate loops.
+Load this when a task fails, blocks, stalls, a gate loops, or `up` times out.
 
 A hard failure is terminal in Temporal: **the workflow cannot be resumed — you
 create a fresh task.** The repo stays trusted, so you skip the registration.
@@ -10,6 +10,27 @@ The real error is NOT in `task show`. Resolve
 `DATA_DIR="${AWB_DATA_DIR:-$HOME/.agentic-workbench}"` first — and re-root it at
 the isolated stack's data dir when the route said `stack=isolated`. Then look
 here, in order.
+
+## 0. When `up` times out
+
+"Waiting for the daemon to become healthy… timed out" almost always means the
+daemon crashed on import. **Do not loop `up` blindly. Read the log first:**
+
+```
+tail -40 "$DATA_DIR/runtime/logs/daemon.log"
+```
+
+Two common causes on a clean checkout, both build-state and not config:
+
+- `ERR_MODULE_NOT_FOUND: Cannot find package '@awb/…'` — a workspace symlink was
+  never materialized. `pnpm install` reports "up to date" and does NOT fix it.
+  Run `pnpm install --force`.
+- `SyntaxError: … does not provide an export named '…'` — a package `dist/` is
+  stale. The daemon runs through `tsx` but imports other packages from their
+  built `dist/`. Run `pnpm build`. The `apps/daemon` test-file TS error is
+  harmless; the package dists build before it.
+
+Then `down` the half-started processes and `up` again.
 
 ## 1. Worker log — the actual exception and stack
 
