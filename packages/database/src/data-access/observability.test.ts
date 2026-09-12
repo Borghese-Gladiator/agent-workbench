@@ -525,7 +525,7 @@ describe('phase attempt close (TASK-124)', () => {
     ['candidate'],
     ['repair'],
     ['replan'],
-    ['await-human'],
+    ['unmet'],
     ['blocked'],
     ['cancelled'],
     ['failed'],

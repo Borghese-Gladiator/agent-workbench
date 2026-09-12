@@ -303,7 +303,7 @@ describe('domain schemas', () => {
 });
 
 describe('PhaseAttemptOutcomeSchema (TASK-124)', () => {
-  it.each(['candidate', 'repair', 'replan', 'await-human', 'blocked', 'cancelled', 'failed'])(
+  it.each(['candidate', 'repair', 'replan', 'unmet', 'blocked', 'cancelled', 'failed'])(
     'accepts %s',
     (outcome) => {
       expect(PhaseAttemptOutcomeSchema.parse(outcome)).toBe(outcome);

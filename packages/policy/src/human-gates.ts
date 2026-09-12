@@ -1,10 +1,12 @@
-import type { HumanGateReason } from '@awb/domain';
+import type { UnmetCriterionReason } from '@awb/domain';
 
 /**
- * Conditional human-gate trigger conditions (product spec §14). Each function answers "does this
- * specific condition require a HumanGate right now" — pure and independent of the others, so the
- * caller (a phase Activity) evaluates whichever conditions are relevant to what it just observed
- * and creates a HumanGate for the first one that returns true.
+ * Conditions that mark an acceptance claim unproven. Each function answers "does this specific
+ * condition hold right now" — pure and independent of the others, so the caller (a phase Activity)
+ * evaluates whichever conditions are relevant to what it just observed.
+ *
+ * These used to raise a human gate. Since the autonomy pivot (TASK-104) nothing waits on a human:
+ * a condition that holds becomes a labelled unmet criterion in the draft PR's report instead.
  */
 
 export interface PlanGateInputs {
@@ -18,8 +20,8 @@ export interface PlanGateInputs {
   requestsArbitraryExternalNetworkAccess: boolean;
 }
 
-export function conditionalPlanGateReasons(inputs: PlanGateInputs): HumanGateReason[] {
-  const reasons: HumanGateReason[] = [];
+export function conditionalPlanGateReasons(inputs: PlanGateInputs): UnmetCriterionReason[] {
+  const reasons: UnmetCriterionReason[] = [];
   if (inputs.introducesNewDependency) reasons.push('new-dependency');
   if (inputs.changesPublicApi) reasons.push('public-api-change');
   if (inputs.changesAuthOrAuthorization) reasons.push('auth-change');
@@ -65,26 +67,15 @@ export function waiverRequested(waiverRequestPresent: boolean): boolean {
 }
 
 /**
- * The mandatory gates (product spec §14): first-time repository trust, task-contract approval,
- * and PR readiness/final merge. These are not "conditions to check" the way the ones above are —
- * they always require a human, every time, for every task. Modeled as a fixed list so callers
- * can assert none of them were skipped.
+ * A routine low-risk change needs no extra scrutiny in the plan's report. Returns true only when the
+ * change is high-risk or at least one conditional trigger actually fired, so an ordinary task's PR
+ * is not padded with a risk section it does not need.
+ *
+ * The three mandatory gates this module used to export (`first-time-repository-trust`,
+ * `task-contract-approval`, `pr-readiness`) are gone (TASK-104). Repository trust is now the
+ * persisted `repositories.trusted` flag, checked once when the task is created; the other two were
+ * deleted, because the workbench no longer asks a human for permission to continue.
  */
-export const MANDATORY_GATE_REASONS: readonly HumanGateReason[] = [
-  'first-time-repository-trust',
-  'task-contract-approval',
-  'pr-readiness',
-];
-
-export function isMandatoryGate(reason: HumanGateReason): boolean {
-  return (MANDATORY_GATE_REASONS as readonly string[]).includes(reason);
-}
-
-/**
- * A routine low-risk task must not require a human plan approval (product spec §14: "Do not
- * require a routine human plan approval for ordinary low-risk tasks"). Returns true only when at
- * least one conditional trigger actually fired.
- */
-export function requiresPlanApprovalGate(isHighRisk: boolean, conditionalReasons: HumanGateReason[]): boolean {
+export function requiresPlanRiskReport(isHighRisk: boolean, conditionalReasons: UnmetCriterionReason[]): boolean {
   return isHighRisk || conditionalReasons.length > 0;
 }

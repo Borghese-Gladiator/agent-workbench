@@ -19,10 +19,7 @@ filesystem, or shells out.
   `GET /api/tasks/:repositoryId/:taskId` every 2s (chosen over the
   WebSocket stream for MVP simplicity); shows phase/condition/delivery
   state/attempt number/token usage/runtime-by-phase/open findings, renders
-  the pending human gate via the shared `GatePanel`, and a Cancel button.
-- **Human Approvals** (`/approvals`) — a repositoryId+taskId lookup reusing
-  `GatePanel`, since there is no daemon route aggregating pending gates
-  across all tasks yet. The UI says so explicitly.
+  the read-only unmet-criteria report, and a Cancel button.
 - **Evidence Viewer** (`/evidence`) — shows only
   `latestCandidateEvidenceIds` (plain IDs) since no daemon route yet
   exposes `Evidence`/artifact records for video/trace/assertion detail. The
@@ -30,16 +27,16 @@ filesystem, or shells out.
 - **Settings** (`/settings`) — a minimal placeholder (daemon base URL only)
   since no daemon config-read route exists yet.
 
-## `GatePanel` gate-reason mapping
+## Unmet-criteria report (read-only)
 
-`task-contract-approval` → approve/reject-contract buttons.
-`pr-readiness` → display-only (no daemon route exists for release-phase
-approval yet). Any other reason while `phase === "plan"` → approve/reject-
-plan buttons as a best-effort mapping. Everything else is display-only.
-Note: `TaskWorkflowState` doesn't carry `contractVersion`/`planVersion`
-directly, so `attemptNumber` (defaulting to 1) stands in as the closest
-available value for those Update calls — a real fix needs the daemon to
-thread the actual version through.
+`GatePanel` and the four approve/reject calls behind it are DELETED
+(TASK-107). There is no approval queue, because the workbench no longer waits
+for a human (TASK-104).
+
+When a task's bounded loop stops before proving every acceptance claim, the
+detail page renders `state.unmetCriteria` as a read-only banner: the stop
+reason, the phase it stopped in, and the claims that went unproven. The action
+a human takes is on the draft PR on GitHub, not in this UI.
 
 ## Does NOT
 

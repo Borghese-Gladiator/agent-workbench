@@ -58,24 +58,20 @@ describe('drivePhase closes the phase attempt (TASK-124)', () => {
       run: async () => ({
         kind: 'early',
         result: {
-          outcome: 'await-human',
-          gate: {
-            id: 'gate-1',
-            taskId: TASK_ID,
-            phase: 'plan',
-            reason: 'task-contract-approval',
-            summary: 'approve the contract',
-            createdAt: '2026-09-04T00:00:00.000Z',
-          },
+          outcome: 'unmet',
+          reason: 'planner-critic-non-convergence',
+          detail: 'the planner and critic did not converge',
+          unprovenClaims: ['claim-1'],
+          findings: [],
         },
       }),
     };
 
     const result = await drivePhase(handler, context(client));
 
-    expect(result.outcome).toBe('await-human');
+    expect(result.outcome).toBe('unmet');
     expect(posted).toHaveLength(1);
-    expect(posted[0]?.outcome).toBe('await-human');
+    expect(posted[0]?.outcome).toBe('unmet');
     expect(posted[0]?.phaseAttemptId).toBe(`${TASK_ID}-plan-1`);
     expect(posted[0]?.endedAt).toBeDefined();
     expect(Date.parse(posted[0]!.endedAt!)).toBeGreaterThanOrEqual(Date.parse(posted[0]!.startedAt!));

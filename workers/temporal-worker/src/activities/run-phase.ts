@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { activityInfo, Context as ActivityContext } from '@temporalio/activity';
+import { activityInfo, Context as ActivityContext, log } from '@temporalio/activity';
 import type {
   TaskPhase,
   PhaseAttemptResult,
@@ -9,6 +9,7 @@ import type {
   ValidatedCommand,
   Finding,
   ClaimCoverage,
+  Evidence,
 } from '@awb/domain';
 import type { TaskWorkflowState } from '@awb/workflow';
 import { classifyExerciseBlock, evaluatePhaseCompletion, routeLoop, type CompletionContext } from '@awb/workflow';
@@ -351,20 +352,18 @@ function buildExerciseScenarioSteps(claimCoverage: ClaimCoverage[]): BrowserQaSt
 // ---------------------------------------------------------------------------------------------
 
 /**
- * SIMPLIFIED: the Activity has no direct signal from the Workflow's `approveContract` Update (the
- * Update only mutates Workflow-local state, which isn't passed into this Activity). We use
- * `state.attemptNumber` as an observable proxy instead: the Workflow only re-invokes `runPhase`
- * for the same phase after either a repair/replan loop-back or a human gate resuming it, so a
- * second attempt at "specify" is, in this Workflow's routing, only reachable after
- * `approveContractUpdate` fired and set `condition` back to `running`. Attempt 1 always drafts a
- * fresh contract and blocks on human approval; attempt >= 2 treats the contract as approved.
+ * Specify drafts the task contract — the source of the run's falsifiable success criteria — and
+ * advances straight to plan (TASK-104). It used to draft on attempt 1, park on a
+ * `task-contract-approval` human gate, and treat attempt >= 2 as approved. That gate is gone: the
+ * workbench no longer asks permission to continue, so a well-formed contract is accepted here and
+ * the criteria it carries are what the draft PR's report is scored against (TASK-106).
  */
 const specifyHandler: PhaseHandler = {
   phase: 'specify',
   async run(ctx): Promise<PhaseOutcome> {
     const { state, runState } = ctx;
 
-    if (state.attemptNumber <= 1) {
+    if (!runState.contract) {
       // On a real-agent runtime with a real prompt, draft a contract that reflects the actual request +
       // a QA-required behavioral claim — the real plan phase produces QA scenarios that can
       // cover it. The mock runtime keeps the generic single-correctness-claim stub, since its scripted
@@ -409,33 +408,18 @@ const specifyHandler: PhaseHandler = {
       // "unclassified" becomes a concrete size). The classifier never invents a size.
       const size = state.size ?? classification?.size;
       runState.size = size;
-      const contract = markAwaitingApproval(draftContract({ ...draftInput, size }));
-      runState.contract = contract;
-      return {
-        kind: 'early',
-        result: {
-          outcome: 'await-human',
-          gate: {
-            id: `${state.taskId}-specify-gate`,
-            taskId: state.taskId,
-            phase: 'specify',
-            reason: 'task-contract-approval',
-            // Surface the problem statement + measurable success criteria in the gate
-            // summary so the human aligns on them before planning spend (no separate read route).
-            // The summary also carries the classified size the human can override here.
-            summary: formatContractGateSummary(contract),
-            createdAt: new Date().toISOString(),
-          },
-        },
-      };
+      // Accepted in one step. `markAwaitingApproval` still runs first so the contract passes through
+      // its normal state machine rather than skipping a state the schema expects.
+      runState.contract = markContractApproved(markAwaitingApproval(draftContract({ ...draftInput, size })));
+      // The criteria a human used to read at the gate now go on the record, so the summary reaches
+      // the PR report instead of an approval prompt.
+      log.info('specify accepted the task contract without a human gate (TASK-104)', {
+        taskId: state.taskId,
+        summary: formatContractGateSummary(runState.contract),
+      });
     }
 
-    if (!runState.contract) {
-      return { kind: 'early', result: blockedResult('specify', ['no contract was drafted before approval was expected']) };
-    }
-    runState.contract = markContractApproved(runState.contract);
-    // Report the classified size to the Workflow so it derives the run's phase set. The
-    // contract's size is authoritative — a gate-time human override rewrote it on the contract.
+    // Report the classified size to the Workflow so it derives the run's phase set.
     const reportedSize = runState.contract.size;
     runState.size = reportedSize;
 
@@ -636,19 +620,17 @@ const planHandler: PhaseHandler = {
       },
     });
 
+    // TASK-105: a planner/critic loop that will not converge is terminal, not a park. The Workflow
+    // routes it to the draft PR, whose body reports the unproven criteria.
     if (loopResult.outcome === 'non-convergent') {
       return {
         kind: 'early',
         result: {
-          outcome: 'await-human',
-          gate: {
-            id: `${state.taskId}-plan-gate`,
-            taskId: state.taskId,
-            phase: 'plan',
-            reason: 'planner-critic-non-convergence',
-            summary: `Planner/critic loop did not converge after ${loopResult.attempts} attempts.`,
-            createdAt: new Date().toISOString(),
-          },
+          outcome: 'unmet',
+          reason: 'planner-critic-non-convergence',
+          detail: `The planner and critic did not converge after ${loopResult.attempts} attempts.`,
+          unprovenClaims: (runState.contract?.claims ?? []).map((claim) => claim.description),
+          findings: [],
         },
       };
     }
@@ -1221,30 +1203,26 @@ const verifyHandler: PhaseHandler = {
 /**
  * TASK-75: map a blocked `exercise` decision to the right loop outcome. A real observed failure
  * (`classifyExerciseBlock === 'code-fixable'`) routes `repair → implement` — the builder can fix it
- * by re-coding. A pure evidence deficiency routes to an `await-human` gate with reason
- * `qa-inconclusive`, because re-running implement/verify can never manufacture a missing
- * recording/trace or author a QA assertion; looping there only grinds to the 3-strike
- * `repeated-failure-no-progress` park a human can't resolve by retrying. Exported so the mapping is
- * unit-testable in isolation from the QA execution the handler wraps.
+ * by re-coding. A pure evidence deficiency is terminal (`unmet`, reason `qa-inconclusive`), because
+ * re-running implement/verify can never manufacture a missing recording/trace or author a QA
+ * assertion; looping there only burns the loop budget. The Workflow carries the reason to the draft
+ * PR (TASK-105/106). Exported so the mapping is unit-testable in isolation from the QA execution
+ * the handler wraps.
  */
 export function mapExerciseBlock(
   exercise: NonNullable<CompletionContext['exercise']>,
   missing: string[],
-  taskId: string,
+  _taskId: string,
 ): PhaseAttemptResult {
   if (classifyExerciseBlock(exercise) === 'code-fixable') {
     return { outcome: 'repair', target: 'implement', findings: [] };
   }
   return {
-    outcome: 'await-human',
-    gate: {
-      id: `${taskId}-exercise-qa-inconclusive`,
-      taskId,
-      phase: 'exercise',
-      reason: 'qa-inconclusive',
-      summary: `QA evidence is incomplete and re-coding cannot supply it: ${missing.join('; ')}`,
-      createdAt: new Date().toISOString(),
-    },
+    outcome: 'unmet',
+    reason: 'qa-inconclusive',
+    detail: `QA evidence is incomplete and re-coding cannot supply it: ${missing.join('; ')}`,
+    unprovenClaims: missing,
+    findings: [],
   };
 }
 
@@ -1742,11 +1720,13 @@ const challengeHandler: PhaseHandler = {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Release is the one phase whose "complete" outcome is NOT a candidate: per product spec, completing
- * its own readiness checklist still gates on a human merge/close decision before Assimilate. So it
- * runs the completion evaluation itself and, on a complete decision, returns the `pr-readiness`
- * await-human gate (the Workflow's `pullRequestMerged`/`pullRequestClosed` handlers own the
- * transition). A non-complete decision blocks.
+ * Release is the terminal phase of EVERY task (TASK-106), converged or not. It opens (or updates) a
+ * DRAFT pull request, renders the acceptance-claim report into its body, and returns a candidate so
+ * the Workflow finishes. It used to park on a `pr-readiness` human gate instead; that gate is gone.
+ *
+ * The draft stays a draft. The workbench never marks a PR ready and never merges it — that is the
+ * human's out-of-band action on GitHub (the `close-pr` skill does it as a separate, human-invoked
+ * step), and it is the whole boundary the autonomy pivot draws.
  */
 /**
  * Task DAG orchestration: tell the daemon this task released its draft PR, so the scheduler starts
@@ -1793,19 +1773,15 @@ const releaseHandler: PhaseHandler = {
         // Task DAG orchestration: this task has delivered (branch landed) — unblock any stacked
         // children. Best-effort; the daemon's reconcile poll is the backstop.
         await notifyReleasedBestEffort(ctx, state.taskId);
+        log.info('release landed the branch locally — no remote to open a draft PR against', {
+          taskId: state.taskId,
+          branchName,
+          defaultBranch: merge.defaultBranch,
+          commitSha: merge.commitSha.slice(0, 8),
+        });
         return {
           kind: 'early',
-          result: {
-            outcome: 'await-human',
-            gate: {
-              id: `${state.taskId}-release-gate`,
-              taskId: state.taskId,
-              phase: 'release',
-              reason: 'pr-readiness',
-              summary: `Task ${state.taskId} landed locally: ${branchName} merged into ${merge.defaultBranch} (${merge.commitSha.slice(0, 8)}); no remote to open a PR against.`,
-              createdAt: new Date().toISOString(),
-            },
-          },
+          result: releaseCandidate(state, runState, evidence, merge.commitSha),
         };
       }
     }
@@ -1881,6 +1857,11 @@ const releaseHandler: PhaseHandler = {
           changedPaths,
           candidateSha,
           evidence,
+          // TASK-106: the PR body carries the honest met/unmet report. The claims come from the
+          // contract (the source of the success criteria); `unmetCriteria` is set only when the
+          // bounded loop stopped short, and marks which of those claims went unproven.
+          acceptanceClaims: (runState.contract?.claims ?? []).map((claim) => claim.description),
+          ...(state.unmetCriteria ? { unmetCriteria: state.unmetCriteria } : {}),
         },
         client,
         pushRunner,
@@ -1939,25 +1920,45 @@ const releaseHandler: PhaseHandler = {
     // daemon's reconcile poll is the correctness backstop.
     await notifyReleasedBestEffort(ctx, state.taskId);
 
-    // Per product spec, Release completing its own readiness checklist still gates on a human
-    // merge/close decision before the Workflow may proceed to Assimilate — the Workflow's
-    // `pullRequestMerged`/`pullRequestClosed` signal handlers own that transition (task-workflow.ts).
-    return {
-      kind: 'early',
-      result: {
-        outcome: 'await-human',
-        gate: {
-          id: `${state.taskId}-release-gate`,
-          taskId: state.taskId,
-          phase: 'release',
-          reason: 'pr-readiness',
-          summary: `Draft PR #${deliverResult.pr.number} for task ${state.taskId} is ready for human review/merge.`,
-          createdAt: new Date().toISOString(),
-        },
-      },
-    };
+    // The draft PR is open and carries the acceptance-claim report. That is the finish line
+    // (TASK-106): the Workflow advances to assimilate and the human decides about merging on GitHub.
+    log.info('release opened the draft PR — terminal state reached', {
+      taskId: state.taskId,
+      pullRequestNumber: deliverResult.pr.number,
+      unmet: state.unmetCriteria?.stopReason ?? 'none',
+    });
+    return { kind: 'early', result: releaseCandidate(state, runState, evidence, candidateSha) };
   },
 };
+
+/**
+ * The terminal `candidate` release returns. Release evaluates its own readiness checklist above; by
+ * the time this is called the PR (or the local merge) exists, so the candidate reports delivery
+ * rather than asking the Workflow to route anywhere else.
+ */
+function releaseCandidate(
+  state: TaskWorkflowState,
+  runState: TaskRunState,
+  evidence: Evidence[],
+  candidateSha: string,
+): PhaseAttemptResult {
+  return {
+    outcome: 'candidate',
+    candidate: buildPhaseAttempt(
+      state,
+      'release',
+      evidence.map((e) => e.id),
+      [],
+      {
+        contractVersion: runState.contract?.version ?? 1,
+        planVersion: runState.plan?.version ?? 1,
+        candidateSha,
+        ...(runState.baseSha ? { baseSha: runState.baseSha } : {}),
+        artifactManifestHash: candidateSha,
+      },
+    ),
+  };
+}
 
 // ---------------------------------------------------------------------------------------------
 // assimilate

@@ -102,10 +102,10 @@ describe('internal worker→daemon routes', () => {
         phase: 'specify',
         condition: 'awaiting-human',
         deliveryState: 'not-started',
-        pendingGateReason: 'task-contract-approval',
+        pendingGateReason: 'qa-inconclusive',
       },
     });
-    expect(getTaskSummary(database.db, TASK_ID)?.pendingGateReason).toBe('task-contract-approval');
+    expect(getTaskSummary(database.db, TASK_ID)?.pendingGateReason).toBe('qa-inconclusive');
     expect(getTaskSummary(database.db, TASK_ID)?.derivedStatus).toBe('awaiting-human');
 
     await app.inject({
@@ -205,7 +205,7 @@ describe('internal worker→daemon routes', () => {
       repositoryId: REPO_ID,
       prompt: 'do the thing',
       candidateSha: 'a'.repeat(40),
-      pendingHumanGate: 'task-contract-approval',
+      pendingHumanGate: 'qa-inconclusive',
       verificationEvidence: [],
       qaEvidence: [],
       reviewFindings: [],
@@ -218,7 +218,7 @@ describe('internal worker→daemon routes', () => {
     const summary = getTaskSummary(database.db, TASK_ID);
     expect(summary).toMatchObject({
       candidateSha: 'a'.repeat(40),
-      pendingGateReason: 'task-contract-approval',
+      pendingGateReason: 'qa-inconclusive',
     });
 
     // A later run-state write with the gate resolved clears the pending reason.

@@ -2,17 +2,13 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import {
   TaskWorkflow,
-  approveContractUpdate,
-  rejectContractUpdate,
-  approvePlanUpdate,
-  rejectPlanUpdate,
   cancelSignal,
   pullRequestMergedSignal,
   pullRequestClosedSignal,
   pullRequestFeedbackReceivedSignal,
   getCurrentStateQuery,
   getOpenFindingsQuery,
-  getPendingHumanGateQuery,
+  getUnmetCriteriaQuery,
 } from '@awb/workflow';
 import type { WorkbenchDatabase } from '@awb/database';
 import {
@@ -38,7 +34,7 @@ import {
   TaskDagSpecSchema,
   type TaskDagSpec,
 } from '@awb/domain';
-import { getChangedPaths, getDefaultBranch } from '@awb/repository';
+import { getChangedPaths, getDefaultBranch, getRepository } from '@awb/repository';
 import {
   routeFeedback,
   NO_ROUTING_SIGNAL,
@@ -145,9 +141,25 @@ export function registerTaskRoutes(
       retryOfTaskId?: string;
     };
   }>('/api/tasks', async (request, reply) => {
-    const client = await getTemporalClient();
     const taskId = randomUUID();
     const { repositoryId, prompt, size, parentTaskId, title, retryOfTaskId } = request.body;
+
+    // TASK-104: repository trust is a one-time config flag, not a per-run gate. An untrusted repo is
+    // refused HERE — up front, before any work starts — instead of parking a task mid-run on a
+    // `first-time-repository-trust` gate. Trust it with `awb repo trust <repo>`.
+    const repository = await getRepository(database.db, repositoryId);
+    if (!repository) {
+      reply.code(404);
+      return { error: `No repository with id ${repositoryId}` };
+    }
+    if (!repository.trusted) {
+      reply.code(403);
+      return {
+        error: `Repository ${repositoryId} is not trusted. Run \`awb repo trust ${repositoryId}\` before starting a task on it.`,
+      };
+    }
+
+    const client = await getTemporalClient();
 
     // Retry lineage (TASK-83/84): a retry task points at the task it retries and shares the retry
     // chain's root. Resolve the root from the parent summary (its rootTaskId, or the parent itself);
@@ -302,11 +314,11 @@ export function registerTaskRoutes(
       try {
         const state = await handle.query(getCurrentStateQuery);
         const openFindings = await handle.query(getOpenFindingsQuery);
-        const pendingHumanGate = await handle.query(getPendingHumanGateQuery);
+        const unmetCriteria = await handle.query(getUnmetCriteriaQuery);
         return {
           state,
           openFindings,
-          pendingHumanGate,
+          unmetCriteria,
           tokenBreakdown,
           runtimeAttribution,
           maintainabilityFindings,
@@ -328,8 +340,17 @@ export function registerTaskRoutes(
             deliveryState: summary.deliveryState,
           },
           openFindings: [],
-          pendingHumanGate: summary.pendingGateReason
-            ? { taskId: summary.taskId, phase: summary.phase, reason: summary.pendingGateReason }
+          // Degraded read: the projection holds only the reason label, not the full report, so
+          // rebuild the minimum shape the client renders.
+          unmetCriteria: summary.pendingGateReason
+            ? {
+                stopReason: 'converged-unmet' as const,
+                phase: summary.phase,
+                unprovenClaims: [],
+                reasons: [summary.pendingGateReason],
+                findingIds: [],
+                detail: `The loop stopped with an unmet criterion: ${summary.pendingGateReason}.`,
+              }
             : undefined,
           tokenBreakdown,
           runtimeAttribution,
@@ -340,68 +361,9 @@ export function registerTaskRoutes(
     },
   );
 
-  app.post<{ Params: { repositoryId: string; taskId: string }; Body: { contractVersion: number; size?: TaskSize } }>(
-    '/api/tasks/:repositoryId/:taskId/approve-contract',
-    async (request, reply) => {
-      const client = await getTemporalClient();
-      const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
-      try {
-        // A human may override the classified size at the gate; it wins over the classifier.
-        const { contractVersion, size } = request.body;
-        await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion, ...(size ? { size } : {}) }] });
-        if (size) upsertTask(database.db, { id: request.params.taskId, repositoryId: request.params.repositoryId, prompt: '', size });
-        return { ok: true };
-      } catch (err) {
-        reply.code(409);
-        return { error: err instanceof Error ? err.message : String(err) };
-      }
-    },
-  );
-
-  app.post<{ Params: { repositoryId: string; taskId: string }; Body: { reason: string } }>(
-    '/api/tasks/:repositoryId/:taskId/reject-contract',
-    async (request, reply) => {
-      const client = await getTemporalClient();
-      const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
-      try {
-        await handle.executeUpdate(rejectContractUpdate, { args: [{ reason: request.body.reason }] });
-        return { ok: true };
-      } catch (err) {
-        reply.code(409);
-        return { error: err instanceof Error ? err.message : String(err) };
-      }
-    },
-  );
-
-  app.post<{ Params: { repositoryId: string; taskId: string }; Body: { planVersion: number } }>(
-    '/api/tasks/:repositoryId/:taskId/approve-plan',
-    async (request, reply) => {
-      const client = await getTemporalClient();
-      const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
-      try {
-        await handle.executeUpdate(approvePlanUpdate, { args: [{ planVersion: request.body.planVersion }] });
-        return { ok: true };
-      } catch (err) {
-        reply.code(409);
-        return { error: err instanceof Error ? err.message : String(err) };
-      }
-    },
-  );
-
-  app.post<{ Params: { repositoryId: string; taskId: string }; Body: { reason: string } }>(
-    '/api/tasks/:repositoryId/:taskId/reject-plan',
-    async (request, reply) => {
-      const client = await getTemporalClient();
-      const handle = client.workflow.getHandle(workflowIdFor(request.params.repositoryId, request.params.taskId));
-      try {
-        await handle.executeUpdate(rejectPlanUpdate, { args: [{ reason: request.body.reason }] });
-        return { ok: true };
-      } catch (err) {
-        reply.code(409);
-        return { error: err instanceof Error ? err.message : String(err) };
-      }
-    },
-  );
+  // TASK-104/107: the approve-contract / reject-contract / approve-plan / reject-plan routes are
+  // GONE. The workbench no longer parks on a human, so there is nothing to approve or reject — a
+  // task runs to a draft PR and the human decides about merging on GitHub, out of band.
 
   // TASK-126: bulk-remove the corpses the reconcile pass marked terminal. A task whose Workflow is
   // gone stays in `awb fleet` forever otherwise, and this machine carried 40 such rows. Defaults to

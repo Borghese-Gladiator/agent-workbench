@@ -1,4 +1,4 @@
-import type { Evidence } from '@awb/domain';
+import type { Evidence, UnmetCriteria } from '@awb/domain';
 
 /**
  * Structured inputs for a PR's title + body. Kept provider-neutral (plain data), so the same
@@ -15,6 +15,16 @@ export interface PrContentInput {
   evidence: Evidence[];
   /** Short candidate SHA, surfaced in the body footer. */
   candidateSha: string;
+  /**
+   * The acceptance claims the task contract declared. Each becomes one checklist row in the
+   * Success criteria section (TASK-106). Omitted (or empty) suppresses the section.
+   */
+  acceptanceClaims?: string[];
+  /**
+   * Present only when the bounded loop stopped without proving every claim (TASK-105). The claims it
+   * names are rendered unmet, with the stop reason; every other claim is rendered met.
+   */
+  unmetCriteria?: UnmetCriteria;
 }
 
 const TITLE_MAX = 72;
@@ -157,6 +167,10 @@ export function renderPrBody(input: PrContentInput): string {
       '',
       ...changes,
       '',
+      '## Success criteria',
+      '',
+      renderSuccessCriteria(input),
+      '',
       '## Test plan',
       '',
       renderTestPlan(input.evidence),
@@ -165,6 +179,38 @@ export function renderPrBody(input: PrContentInput): string {
       `<sub>Delivered by the Agentic Workbench · candidate \`${input.candidateSha.slice(0, 12)}\`</sub>`,
     ].join('\n'),
   );
+}
+
+/**
+ * The Success criteria section (TASK-106): one checklist row per acceptance claim, marked met or
+ * unmet, plus the reason and last candidate SHA when the loop stopped short. Every task ends at a
+ * draft PR, converged or not, so this is the section that tells a reviewer which it was — an
+ * honest unmet list, not an implied pass.
+ */
+export function renderSuccessCriteria(input: Pick<PrContentInput, 'acceptanceClaims' | 'unmetCriteria' | 'candidateSha'>): string {
+  const claims = input.acceptanceClaims ?? [];
+  const unmet = input.unmetCriteria;
+  if (claims.length === 0 && !unmet) return '_No acceptance claims were recorded._';
+
+  // An unproven claim the contract never listed still has to appear, or the report would omit the
+  // very thing that stopped the loop.
+  const unprovenSet = new Set(unmet?.unprovenClaims ?? []);
+  const extra = [...unprovenSet].filter((c) => !claims.includes(c));
+  const rows = [...claims, ...extra].map(
+    (claim) => `- [${unprovenSet.has(claim) ? ' ' : 'x'}] ${claim}`,
+  );
+
+  if (!unmet) return rows.join('\n');
+
+  return [
+    ...rows,
+    '',
+    `> **The autonomous loop stopped before proving every claim** (\`${unmet.stopReason}\`, at phase \`${unmet.phase}\`).`,
+    `> ${unmet.detail}`,
+    ...(unmet.reasons.length > 0 ? [`> Reasons: ${unmet.reasons.map((r) => `\`${r}\``).join(', ')}`] : []),
+    ...(unmet.findingIds.length > 0 ? [`> Open findings: ${unmet.findingIds.length}`] : []),
+    `> Last candidate: \`${(unmet.candidateSha ?? input.candidateSha).slice(0, 12)}\``,
+  ].join('\n');
 }
 
 /** The Test plan section: one readable line per evidence record, grouped pass/fail, no raw claim ids. */

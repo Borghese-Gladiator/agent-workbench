@@ -41,9 +41,10 @@ export function draftContractInputFromPrompt(taskId: string, prompt: string): Dr
 }
 
 /**
- * Renders the contract's problem statement + acceptance claims into the specify gate
- * summary, so the human reviewing the `task-contract-approval` gate aligns on them before any
- * planning spend — without a separate contract read route in the daemon/UI.
+ * Renders the contract's problem statement + acceptance claims into one readable block. It used to
+ * fill the contract-approval gate summary; that gate is gone (TASK-104), so it now goes on the
+ * record when specify accepts the contract, and the same claims become the draft PR's
+ * success-criteria checklist (TASK-106).
  */
 export function formatContractGateSummary(contract: TaskContract): string {
   const claims =

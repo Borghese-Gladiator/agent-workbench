@@ -1,4 +1,4 @@
-import type { Evidence } from '@awb/domain';
+import type { Evidence, UnmetCriteria } from '@awb/domain';
 import type { GitHubClient } from './github-client.js';
 import type { GitPushRunner } from './push.js';
 import type { RepoRef, PushBranchInput, DraftPrRecord } from './types.js';
@@ -17,6 +17,10 @@ export interface DeliverInput {
   changedPaths: string[];
   candidateSha: string;
   evidence: Evidence[];
+  /** The contract's acceptance claims, rendered as the PR body's Success criteria checklist. */
+  acceptanceClaims?: string[];
+  /** Set when the bounded loop stopped short (TASK-105); the body reports the unmet claims. */
+  unmetCriteria?: UnmetCriteria;
   /** Existing PR number if this is an update to an already-open draft PR, rather than a first delivery. */
   existingPrNumber?: number;
 }
@@ -56,6 +60,8 @@ export async function deliverToGitHub(
     changedPaths: input.changedPaths,
     evidence: input.evidence,
     candidateSha: input.candidateSha,
+    acceptanceClaims: input.acceptanceClaims,
+    unmetCriteria: input.unmetCriteria,
   });
 
   let pr: DraftPrRecord | { number: number };

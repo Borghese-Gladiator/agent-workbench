@@ -14,10 +14,18 @@ import {
   isCancellation,
   log,
 } from '@temporalio/workflow';
-import type { TaskPhase, TaskSize, HumanGateReason, PhaseAttemptResult, TaskStateSync } from '@awb/domain';
+import {
+  DEFAULT_LOOP_BUDGET,
+  type TaskPhase,
+  type LoopBudget,
+  type UnmetCriteria,
+  type UnmetCriterionReason,
+  type PhaseAttemptResult,
+  type TaskStateSync,
+} from '@awb/domain';
 import { nextPhaseIn, phaseSetForSize } from './phase-order.js';
 import type { TaskWorkflowInput, TaskWorkflowState } from './workflow-types.js';
-import { shouldEscalateToHuman } from './loop-routing.js';
+import { shouldStopLooping, exhaustedBudgetLimit } from './loop-routing.js';
 
 export interface TaskActivities {
   runPhase(input: { phase: TaskPhase; state: TaskWorkflowState }): Promise<PhaseAttemptResult>;
@@ -111,19 +119,16 @@ export function isHeartbeatTimeout(err: unknown): boolean {
   return false;
 }
 
-// Updates — synchronous, validated against current state before applying.
-export const approveContractUpdate = defineUpdate<void, [{ contractVersion: number; size?: TaskSize }]>(
-  'approveContract',
-);
-export const rejectContractUpdate = defineUpdate<void, [{ reason: string }]>('rejectContract');
-export const approvePlanUpdate = defineUpdate<void, [{ planVersion: number }]>('approvePlan');
-export const rejectPlanUpdate = defineUpdate<void, [{ reason: string }]>('rejectPlan');
-export const approveWaiverUpdate = defineUpdate<void, [{ waiverId: string }]>('approveWaiver');
-export const approvePermissionUpdate = defineUpdate<void, [{ permission: string }]>('approvePermission');
+/**
+ * Updates — synchronous, validated against current state before applying.
+ *
+ * Every approval Update is gone (TASK-104): the loop never waits for a human, so there is nothing to
+ * approve. `extendBudget` survives, repurposed — it no longer releases a park, it raises the
+ * `LoopBudget` of a run that is about to stop, and only while the run is still going.
+ */
 export const extendBudgetUpdate = defineUpdate<void, [{ additionalTokens?: number; additionalMinutes?: number }]>(
   'extendBudget',
 );
-export const approveScopeChangeUpdate = defineUpdate<void, [{ description: string }]>('approveScopeChange');
 
 // Signals — asynchronous, fire-and-forget from the caller's perspective.
 export const cancelSignal = defineSignal('cancel');
@@ -146,7 +151,7 @@ export const getOpenFindingsQuery = defineQuery<string[]>('getOpenFindings');
 export const getEvidenceStatusQuery = defineQuery<string[]>('getEvidenceStatus');
 export const getRuntimeBreakdownQuery = defineQuery<TaskWorkflowState['runtimeMsByPhase']>('getRuntimeBreakdown');
 export const getTokenBreakdownQuery = defineQuery<TaskWorkflowState['tokenUsageTotal']>('getTokenBreakdown');
-export const getPendingHumanGateQuery = defineQuery<TaskWorkflowState['pendingHumanGate']>('getPendingHumanGate');
+export const getUnmetCriteriaQuery = defineQuery<TaskWorkflowState['unmetCriteria']>('getUnmetCriteria');
 
 const NO_PROGRESS_THRESHOLD = 3;
 
@@ -173,22 +178,28 @@ function initialState(input: TaskWorkflowInput): TaskWorkflowState {
     openFindingIds: [],
     tokenUsageTotal: { inputTokens: 0, outputTokens: 0 },
     runtimeMsByPhase: {},
-    // An intake size hint (CLI --size) seeds the classifier's prior; the classifier/gate can still
-    // change it. phaseSet stays undefined until specify completes and derives it.
+    // An intake size hint (CLI --size) PINS the size — it is the only override left (TASK-104), so
+    // the classifier may not overwrite it. phaseSet stays undefined until specify derives it.
     size: input.size,
+    sizePinnedAtIntake: input.size !== undefined,
+    ...(input.size ? { phaseSet: phaseSetForSize(input.size, { disableProgramDesign: input.disableProgramDesign }) } : {}),
     // Stacked-PR base override (TASK-72); prepare/release read it off the coordination state.
     baseBranch: input.baseBranch,
     // A/B knob (TASK-61): threaded from config at start so the deterministic workflow can shape the
     // phase set without reading config live; drops program-design from the derived phaseSet.
     disableProgramDesign: input.disableProgramDesign,
+    // The bound the autonomous loop runs under (TASK-105). Held in state so a continue-as-new
+    // re-seed keeps the same budget rather than handing a stuck task a fresh one.
+    loopBudget: input.loopBudget ?? DEFAULT_LOOP_BUDGET,
   };
 }
 
-function humanGateReasonForPhase(phase: TaskPhase): HumanGateReason {
-  if (phase === 'specify') return 'task-contract-approval';
-  if (phase === 'release') return 'pr-readiness';
-  return 'repeated-failure-no-progress';
-}
+/**
+ * The phase every task ends in, whatever happened on the way there (TASK-106). Release opens (or
+ * updates) the draft PR and renders the acceptance-claim report into its body, so a converged task
+ * and a stuck one terminate the same way — on GitHub, where the human decides about merging.
+ */
+const TERMINAL_PHASE: TaskPhase = 'release';
 
 /**
  * TaskWorkflow — one execution per task, workflow ID `awb/task/{repositoryId}/{taskId}`.
@@ -201,6 +212,36 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
   let cancelled = false;
   let paused = false;
   const failureStreak = new Map<TaskPhase, number>();
+  let budget: LoopBudget = state.loopBudget ?? DEFAULT_LOOP_BUDGET;
+
+  /**
+   * Stop the loop and route to the draft-PR terminal (TASK-105/106). The task does NOT end here: it
+   * runs `release` one last time so a draft PR exists to carry the report. `stopped` makes that a
+   * one-way door — a release that itself fails cannot re-enter the loop it was called to end.
+   */
+  let stopped = false;
+  const stopLoop = (
+    stopReason: UnmetCriteria['stopReason'],
+    detail: string,
+    extra?: { reasons?: UnmetCriterionReason[]; unprovenClaims?: string[]; findingIds?: string[] },
+  ): void => {
+    state = {
+      ...state,
+      unmetCriteria: {
+        stopReason,
+        phase: state.phase,
+        unprovenClaims: extra?.unprovenClaims ?? [],
+        reasons: extra?.reasons ?? [],
+        findingIds: extra?.findingIds ?? state.openFindingIds,
+        detail,
+      },
+      // `running`, not `awaiting-human`: the task is still working — it is opening its draft PR.
+      condition: 'running',
+      phase: TERMINAL_PHASE,
+      attemptNumber: 0,
+    };
+    stopped = true;
+  };
 
   // TASK-123: mirror every lifecycle transition onto the task row, so `awb fleet` reads the real
   // phase and condition instead of the values frozen at creation. `lastSynced` collapses the
@@ -208,7 +249,9 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
   // next iteration's entry sync carry the same triple) — a deterministic, replay-safe local.
   let lastSynced = '';
   const syncTaskState = async (): Promise<void> => {
-    const gateReason = state.pendingHumanGate?.reason ?? null;
+    // The projection column keeps its `pending_gate_reason` name but now answers "which criterion
+    // went unproven" (TASK-104) — nothing is pending on a human.
+    const gateReason = state.unmetCriteria?.reasons[0] ?? null;
     const key = `${state.phase}|${state.condition}|${state.deliveryState}|${gateReason ?? ''}`;
     if (key === lastSynced) return;
     lastSynced = key;
@@ -234,47 +277,23 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
     paused = false;
   });
 
-  setHandler(approveContractUpdate, (args) => {
-    if (state.phase !== 'specify' || state.pendingHumanGate?.reason !== 'task-contract-approval') {
-      throw ApplicationFailure.nonRetryable('No pending contract approval gate for this task');
+  // Raises the budget of a run that is still going, so an operator who knows the task needs more
+  // room grants it without restarting. It cannot revive a task that already stopped: the loop's
+  // terminal is a draft PR, and reopening one would contradict TASK-106.
+  setHandler(extendBudgetUpdate, (args) => {
+    if (state.unmetCriteria) {
+      throw ApplicationFailure.nonRetryable('This task already terminated; start a retry task instead');
     }
-    // A human may override the classifier's size at the gate. When they do, it wins over
-    // whatever specify's candidate later reports: pin the size + derived phase set and mark them human-set.
-    const override = args?.size;
     state = {
       ...state,
-      condition: 'running',
-      pendingHumanGate: undefined,
-      ...(override
-        ? {
-            size: override,
-            phaseSet: phaseSetForSize(override, { disableProgramDesign: state.disableProgramDesign }),
-            sizeHumanOverridden: true,
-          }
-        : {}),
+      loopBudget: {
+        maxAttemptsPerPhase: budget.maxAttemptsPerPhase,
+        maxTotalTokens: budget.maxTotalTokens + (args?.additionalTokens ?? 0),
+        maxWallClockMs: budget.maxWallClockMs + (args?.additionalMinutes ?? 0) * 60_000,
+      },
     };
-  });
-  setHandler(rejectContractUpdate, () => {
-    state = { ...state, condition: 'running', pendingHumanGate: undefined };
-  });
-  setHandler(approvePlanUpdate, () => {
-    state = { ...state, condition: 'running', pendingHumanGate: undefined };
-  });
-  setHandler(rejectPlanUpdate, () => {
-    state = { ...state, condition: 'running', pendingHumanGate: undefined };
-  });
-  setHandler(approveWaiverUpdate, () => {
-    state = { ...state, condition: 'running', pendingHumanGate: undefined };
-  });
-  setHandler(approvePermissionUpdate, () => {
-    state = { ...state, condition: 'running', pendingHumanGate: undefined };
-  });
-  setHandler(extendBudgetUpdate, () => {
-    state = { ...state, condition: 'running', pendingHumanGate: undefined };
+    budget = state.loopBudget as LoopBudget;
     failureStreak.clear();
-  });
-  setHandler(approveScopeChangeUpdate, () => {
-    state = { ...state, condition: 'running', pendingHumanGate: undefined };
   });
 
   setHandler(pullRequestFeedbackReceivedSignal, () => {
@@ -298,15 +317,37 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
   setHandler(getEvidenceStatusQuery, () => state.latestCandidateEvidenceIds);
   setHandler(getRuntimeBreakdownQuery, () => state.runtimeMsByPhase);
   setHandler(getTokenBreakdownQuery, () => state.tokenUsageTotal);
-  setHandler(getPendingHumanGateQuery, () => state.pendingHumanGate);
+  setHandler(getUnmetCriteriaQuery, () => state.unmetCriteria);
 
   while (!cancelled && state.phase !== 'assimilate') {
     await condition(() => !paused || cancelled);
     if (cancelled) break;
 
-    if (state.condition === 'awaiting-human' || state.condition === 'blocked') {
-      await condition(() => state.condition === 'running' || cancelled);
-      if (cancelled) break;
+    // The wall-clock budget's origin. Set on the first iteration only, and carried across a
+    // continue-as-new, so a re-seed cannot hand a long-running task a fresh clock.
+    if (state.loopStartedAtMs === undefined) {
+      state = { ...state, loopStartedAtMs: Date.now() };
+    }
+
+    // Budget check (TASK-105) — before spending another attempt, not after. Skipped once the loop
+    // has already stopped: the terminal release attempt must run even on an exhausted budget, or
+    // there would be no draft PR to carry the report.
+    if (!stopped) {
+      const exhausted = exhaustedBudgetLimit(
+        {
+          attemptsAtPhase: state.attemptsByPhase?.[state.phase] ?? 0,
+          totalTokens: state.tokenUsageTotal.inputTokens + state.tokenUsageTotal.outputTokens,
+          elapsedMs: Date.now() - (state.loopStartedAtMs ?? Date.now()),
+        },
+        budget,
+      );
+      if (exhausted && shouldStopLooping({ kind: 'budget-exhaustion' })) {
+        stopLoop(
+          'budget-exhausted',
+          `The loop reached its ${exhausted} budget at phase ${state.phase} after ${state.attemptsByPhase?.[state.phase] ?? 0} attempt(s).`,
+          { reasons: ['budget-exceeded'] },
+        );
+      }
     }
 
     // Continue-as-new before history grows unbounded. Do this at the top of the loop —
@@ -314,7 +355,7 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
     // starts from a clean, resumable coordination state. `state` carries everything the next run needs.
     if (
       state.condition === 'running' &&
-      !state.pendingHumanGate &&
+      !stopped &&
       workflowInfo().historyLength >= CONTINUE_AS_NEW_HISTORY_THRESHOLD
     ) {
       await continueAsNew<typeof TaskWorkflow>({
@@ -325,7 +366,14 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
       });
     }
 
-    state = { ...state, attemptNumber: state.attemptNumber + 1 };
+    state = {
+      ...state,
+      attemptNumber: state.attemptNumber + 1,
+      attemptsByPhase: {
+        ...state.attemptsByPhase,
+        [state.phase]: (state.attemptsByPhase?.[state.phase] ?? 0) + 1,
+      },
+    };
     // Entry sync: records the phase about to run, and clears a gate reason a human just resolved.
     await syncTaskState();
     const phaseThatRan = state.phase;
@@ -379,8 +427,8 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
           openFindingIds: result.candidate.openFindingIds,
         };
         // The specify candidate reports the classified size. Adopt it to derive the run's
-        // phase set — UNLESS a human already overrode it at the contract gate, which wins.
-        if (phaseThatRan === 'specify' && result.size && !state.sizeHumanOverridden) {
+        // phase set — UNLESS the caller pinned a size at intake, which wins.
+        if (phaseThatRan === 'specify' && result.size && !state.sizePinnedAtIntake) {
           state = {
             ...state,
             size: result.size,
@@ -388,18 +436,36 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
           };
         }
         failureStreak.delete(state.phase);
-        state = { ...state, phase: nextPhase(state.phase, state.phaseSet), attemptNumber: 0 };
+        // A candidate from the terminal release phase means the draft PR is open — the task is done,
+        // whether or not its report says every claim was proven (TASK-106). Merging happens
+        // out-of-band on GitHub, so the workbench records the delivery and stops.
+        state = {
+          ...state,
+          ...(phaseThatRan === TERMINAL_PHASE ? { deliveryState: 'draft-pr-open' as const } : {}),
+          phase: nextPhase(state.phase, state.phaseSet),
+          attemptNumber: 0,
+        };
         break;
       }
       case 'repair': {
+        // The terminal release attempt must never loop back: it exists only to open the draft PR.
+        if (stopped) {
+          state = { ...state, phase: 'assimilate', attemptNumber: 0 };
+          break;
+        }
         const streak = (failureStreak.get(state.phase) ?? 0) + 1;
         failureStreak.set(state.phase, streak);
-        if (shouldEscalateToHuman({ kind: 'repeated-identical-failure', occurrences: streak, threshold: NO_PROGRESS_THRESHOLD })) {
-          state = {
-            ...state,
-            condition: 'awaiting-human',
-            pendingHumanGate: makeGate(state.taskId, state.phase, 'repeated-failure-no-progress'),
-          };
+        // The same failure, this many times, with nothing moving between attempts: this is the
+        // "genuinely stuck" signal, and it stops the loop rather than parking it on a human.
+        if (shouldStopLooping({ kind: 'repeated-identical-failure', occurrences: streak, threshold: NO_PROGRESS_THRESHOLD })) {
+          stopLoop(
+            'genuinely-stuck',
+            `The ${phaseThatRan} phase failed ${streak} times with no progress between attempts.`,
+            {
+              reasons: ['repeated-failure-no-progress'],
+              findingIds: result.findings.map((f) => f.id),
+            },
+          );
         } else {
           // PhaseAttemptResult's "repair" outcome always targets "implement" (see @awb/domain) —
           // routeLoop's per-finding-category table applies to "replan"/"challenge", not here.
@@ -408,19 +474,33 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
         break;
       }
       case 'replan': {
+        if (stopped) {
+          state = { ...state, phase: 'assimilate', attemptNumber: 0 };
+          break;
+        }
         state = { ...state, phase: result.target, attemptNumber: 0 };
         break;
       }
-      case 'await-human': {
-        state = { ...state, condition: 'awaiting-human', pendingHumanGate: result.gate };
+      case 'unmet': {
+        // A phase proved it cannot satisfy a claim. No further iteration helps, so stop the loop and
+        // carry the reason to the draft PR — the replacement for the old `awaiting-human` park.
+        if (stopped) {
+          state = { ...state, phase: 'assimilate', attemptNumber: 0 };
+          break;
+        }
+        stopLoop('converged-unmet', result.detail, {
+          reasons: [result.reason],
+          unprovenClaims: result.unprovenClaims,
+          findingIds: result.findings.map((f) => f.id),
+        });
         break;
       }
       case 'blocked': {
-        state = {
-          ...state,
-          condition: 'blocked',
-          pendingHumanGate: makeGate(state.taskId, state.phase, humanGateReasonForPhase(state.phase)),
-        };
+        if (stopped) {
+          state = { ...state, phase: 'assimilate', attemptNumber: 0 };
+          break;
+        }
+        stopLoop('phase-blocked', `The ${phaseThatRan} phase reported blocked: ${result.reason}`);
         break;
       }
       case 'cancelled': {
@@ -431,13 +511,15 @@ export async function TaskWorkflow(input: TaskWorkflowInput): Promise<TaskWorkfl
     }
 
     // Exit sync: records where the routing just sent the task — the next phase, a loop-back target,
-    // a human-gate park, or a cancellation. A park writes here and then blocks at the top of the
-    // next iteration, so the row shows `awaiting-human` for as long as the task really waits.
+    // the draft-PR terminal a stopped loop routes to, or a cancellation.
     await syncTaskState();
   }
 
   if (state.phase === 'assimilate' && state.condition !== 'cancelled') {
-    state = { ...state, condition: 'completed' };
+    // A task that stopped short of proving every claim still reached its draft PR, but calling it
+    // `completed` would hide exactly what a reader needs to see. `failed` is the honest terminal:
+    // the work is delivered and reviewable, and the fleet view flags it for a look.
+    state = { ...state, condition: state.unmetCriteria ? 'failed' : 'completed' };
   }
 
   // Terminal sync. This state is decided AFTER the phase loop, so no runPhase Activity can ever
@@ -451,15 +533,3 @@ function nextPhase(phase: TaskPhase, phaseSet: TaskPhase[] | undefined): TaskPha
   return nextPhaseIn(phaseSet, phase);
 }
 
-function makeGate(taskId: string, phase: TaskPhase, reason: HumanGateReason) {
-  // `Date` inside Workflow code is patched by the Temporal SDK to be deterministic/replay-safe,
-  // so using it directly here (rather than an Activity) is correct.
-  return {
-    id: `${taskId}-${phase}-gate`,
-    taskId,
-    phase,
-    reason,
-    summary: `Task ${taskId} needs human input at phase ${phase} (${reason})`,
-    createdAt: new Date().toISOString(),
-  };
-}

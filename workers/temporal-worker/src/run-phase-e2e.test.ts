@@ -8,9 +8,6 @@ import { Worker } from '@temporalio/worker';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   TaskWorkflow,
-  approveContractUpdate,
-  pullRequestMergedSignal,
-  getCurrentStateQuery,
 } from '@awb/workflow';
 import { runPhase } from './activities/run-phase.js';
 
@@ -50,14 +47,6 @@ async function commitAll(dir: string, message: string): Promise<string> {
   return stdout.trim();
 }
 
-async function waitForCondition(check: () => Promise<boolean>, timeoutMs = 20_000, intervalMs = 100): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await check()) return;
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error('waitForCondition timed out');
-}
 
 /**
  * `TestWorkflowEnvironment.createLocal()` boots a real Temporal test server on a local port. When
@@ -130,24 +119,14 @@ describe('runPhase wired for real (E2E through TaskWorkflow)', () => {
         args: [{ taskId, repositoryId }],
       });
 
-      await waitForCondition(async () => {
-        const state = await handle.query(getCurrentStateQuery);
-        return state.phase === 'specify' && state.condition === 'awaiting-human';
-      });
-      await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion: 1 }] });
-
-      await waitForCondition(async () => {
-        const state = await handle.query(getCurrentStateQuery);
-        return state.phase === 'release' && state.condition === 'awaiting-human';
-      }, 30_000);
-      await handle.signal(pullRequestMergedSignal, { mergeCommitSha: 'e2e-merge-sha' });
-
+      // TASK-104: no contract gate, no approval Update — the run walks straight through.
       return handle.result();
     });
 
     expect(result.phase).toBe('assimilate');
     expect(result.condition).toBe('completed');
-    expect(result.deliveryState).toBe('merged');
+    // TASK-106: the draft PR is the terminal state; merging happens out-of-band on GitHub.
+    expect(result.deliveryState).toBe('draft-pr-open');
   }, 60_000);
 
   it('runs the real program-design phase for an L task (size override at the gate) (TASK-51/52)', async () => {
@@ -167,26 +146,15 @@ describe('runPhase wired for real (E2E through TaskWorkflow)', () => {
       const handle = await testEnv.client.workflow.start(TaskWorkflow, {
         taskQueue,
         workflowId: `test-run-phase-l-${taskId}`,
-        args: [{ taskId, repositoryId }],
+        // Size L now comes from the intake hint — the gate that used to carry the override is gone.
+        args: [{ taskId, repositoryId, size: 'L' as const }],
       });
 
-      await waitForCondition(async () => {
-        const state = await handle.query(getCurrentStateQuery);
-        return state.phase === 'specify' && state.condition === 'awaiting-human';
-      });
-      // Force size L at the gate so the run walks the real program-design phase.
-      await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion: 1, size: 'L' }] });
-
-      await waitForCondition(async () => {
-        const state = await handle.query(getCurrentStateQuery);
-        return state.phase === 'release' && state.condition === 'awaiting-human';
-      }, 30_000);
-      await handle.signal(pullRequestMergedSignal, { mergeCommitSha: 'e2e-merge-sha' });
       return handle.result();
     });
 
     // The run reaching release/assimilate for an L phase set is itself proof the real program-design
-    // phase ran and cleared its gate: a program-design that never completed would block before release.
+    // phase ran and completed: one that never did would block before release.
     expect(result.size).toBe('L');
     expect(result.phaseSet).toContain('program-design');
     expect(result.phase).toBe('assimilate');
@@ -210,21 +178,9 @@ describe('runPhase wired for real (E2E through TaskWorkflow)', () => {
       const handle = await testEnv.client.workflow.start(TaskWorkflow, {
         taskQueue,
         workflowId: `test-run-phase-s-${taskId}`,
-        args: [{ taskId, repositoryId }],
+        args: [{ taskId, repositoryId, size: 'S' as const }],
       });
 
-      await waitForCondition(async () => {
-        const state = await handle.query(getCurrentStateQuery);
-        return state.phase === 'specify' && state.condition === 'awaiting-human';
-      });
-      // Force S: the run must skip plan AND program-design and single-shot straight to implement.
-      await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion: 1, size: 'S' }] });
-
-      await waitForCondition(async () => {
-        const state = await handle.query(getCurrentStateQuery);
-        return state.phase === 'release' && state.condition === 'awaiting-human';
-      }, 30_000);
-      await handle.signal(pullRequestMergedSignal, { mergeCommitSha: 'e2e-merge-sha' });
       return handle.result();
     });
 

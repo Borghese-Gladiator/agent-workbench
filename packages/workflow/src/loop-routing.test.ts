@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskPhase } from '@awb/domain';
-import { routeLoop, shouldEscalateToHuman } from './loop-routing.js';
+import { routeLoop, shouldStopLooping, exhaustedBudgetLimit } from './loop-routing.js';
 
 // Phase sets the router keys off: only membership of `program-design` matters.
 const L_PHASE_SET: TaskPhase[] = [
@@ -65,16 +65,32 @@ describe('routeLoop', () => {
   });
 });
 
-describe('shouldEscalateToHuman', () => {
+describe('shouldStopLooping', () => {
   it('escalates once repeated identical failures reach the threshold', () => {
-    expect(shouldEscalateToHuman({ kind: 'repeated-identical-failure', occurrences: 3, threshold: 3 })).toBe(true);
+    expect(shouldStopLooping({ kind: 'repeated-identical-failure', occurrences: 3, threshold: 3 })).toBe(true);
   });
 
   it('does not escalate below the threshold', () => {
-    expect(shouldEscalateToHuman({ kind: 'repeated-identical-failure', occurrences: 2, threshold: 3 })).toBe(false);
+    expect(shouldStopLooping({ kind: 'repeated-identical-failure', occurrences: 2, threshold: 3 })).toBe(false);
   });
 
   it('always escalates on budget exhaustion', () => {
-    expect(shouldEscalateToHuman({ kind: 'budget-exhaustion' })).toBe(true);
+    expect(shouldStopLooping({ kind: 'budget-exhaustion' })).toBe(true);
+  });
+});
+
+// TASK-105: the budget is what makes the loop bounded without a human. Every limit must stop it,
+// and a run inside every limit must keep going.
+describe('exhaustedBudgetLimit', () => {
+  const budget = { maxAttemptsPerPhase: 3, maxTotalTokens: 1000, maxWallClockMs: 60_000 };
+  const within = { attemptsAtPhase: 1, totalTokens: 10, elapsedMs: 100 };
+
+  it.each([
+    { label: 'nothing reached', usage: within, expected: undefined },
+    { label: 'attempts reached', usage: { ...within, attemptsAtPhase: 3 }, expected: 'attempts' },
+    { label: 'tokens reached', usage: { ...within, totalTokens: 1000 }, expected: 'tokens' },
+    { label: 'wall-clock reached', usage: { ...within, elapsedMs: 60_000 }, expected: 'wall-clock' },
+  ])('reports $expected when $label', ({ usage, expected }) => {
+    expect(exhaustedBudgetLimit(usage, budget)).toBe(expected);
   });
 });

@@ -128,7 +128,7 @@ afterAll(async () => {
 });
 
 describe('daemon routes drive a task to completion', () => {
-  it('create -> approve-contract -> pr-merged, entirely over HTTP, reaches assimilate/merged', async () => {
+  it('create -> draft PR, entirely over HTTP, with no approval call in between (TASK-104/106)', async () => {
     const worker = await Worker.create({
       connection: testEnv.nativeConnection,
       taskQueue: taskQueueName(),
@@ -149,31 +149,14 @@ describe('daemon routes drive a task to completion', () => {
 
       const base = `/api/tasks/${repositoryId}/${taskId}`;
 
-      await poll(async () => {
-        const show = await server.app.inject({ method: 'GET', url: base });
-        const body = show.json();
-        return body.state?.phase === 'specify' && body.state?.condition === 'awaiting-human';
-      });
-
-      const approve = await server.app.inject({
+      // TASK-104: nothing to approve. The route is gone, and the run must reach its terminal state
+      // with no human call at all — that is the whole point of the pivot.
+      const goneRoute = await server.app.inject({
         method: 'POST',
         url: `${base}/approve-contract`,
         payload: { contractVersion: 1 },
       });
-      expect(approve.statusCode).toBe(200);
-
-      await poll(async () => {
-        const show = await server.app.inject({ method: 'GET', url: base });
-        const body = show.json();
-        return body.state?.phase === 'release' && body.state?.condition === 'awaiting-human';
-      }, 40_000);
-
-      const merged = await server.app.inject({
-        method: 'POST',
-        url: `${base}/pr-merged`,
-        payload: { mergeCommitSha: 'daemon-e2e-merge-sha' },
-      });
-      expect(merged.statusCode).toBe(200);
+      expect(goneRoute.statusCode).toBe(404);
 
       // Wait for the TERMINAL state, not just the phase: the workflow reaches `assimilate` at the
       // end of the release iteration and only sets `completed` after the phase loop exits, so a poll
@@ -182,7 +165,7 @@ describe('daemon routes drive a task to completion', () => {
         const show = await server.app.inject({ method: 'GET', url: base });
         const state = show.json().state;
         return state?.phase === 'assimilate' && state?.condition === 'completed';
-      });
+      }, 60_000);
 
       // TASK-123: the persisted row must catch up with the workflow. The terminal write is an
       // Activity dispatched after the workflow sets `completed`, so it lands just after the query
@@ -198,14 +181,15 @@ describe('daemon routes drive a task to completion', () => {
 
     expect(result.state.phase).toBe('assimilate');
     expect(result.state.condition).toBe('completed');
-    expect(result.state.deliveryState).toBe('merged');
+    // TASK-106: the draft PR is the terminal delivery state; merging is out-of-band on GitHub.
+    expect(result.state.deliveryState).toBe('draft-pr-open');
 
     // TASK-123: the persisted row must agree with the live workflow. Before the lifecycle sync it
     // stayed at `specify | running` for the whole run, which is what made `awb fleet` unreadable.
     const persisted = getTask(server.database.db, result.state.taskId as string);
     expect(persisted?.phase).toBe('assimilate');
     expect(persisted?.condition).toBe('completed');
-    expect(persisted?.deliveryState).toBe('merged');
+    expect(persisted?.deliveryState).toBe('draft-pr-open');
   }, 90_000);
 
   it('DELETE removes a task (terminating its workflow) and drops it from the list (TASK-37)', async () => {

@@ -3,7 +3,8 @@ import type {
   TaskSize,
   RunCondition,
   DeliveryState,
-  HumanGate,
+  LoopBudget,
+  UnmetCriteria,
   PhaseAttemptResult,
 } from '@awb/domain';
 
@@ -19,7 +20,26 @@ export interface TaskWorkflowState {
   attemptNumber: number;
   latestCandidateEvidenceIds: string[];
   openFindingIds: string[];
-  pendingHumanGate?: HumanGate;
+  /**
+   * Set once the bounded loop stops without proving every acceptance claim (TASK-105). Nothing waits
+   * on it — the release phase renders it into the draft PR body (TASK-106), and it is what the
+   * read-only needs-attention list reads. Absent on a task that proved every claim.
+   */
+  unmetCriteria?: UnmetCriteria;
+  /**
+   * Wall-clock epoch millis of the first phase attempt, the origin for the budget's wall-clock
+   * limit. Set on the first iteration and carried across a continue-as-new, so a re-seed does not
+   * reset the clock and hand a stuck task a fresh budget.
+   */
+  loopStartedAtMs?: number;
+  /** The bound this run loops under (TASK-105). Carried in state so a continue-as-new keeps it. */
+  loopBudget?: LoopBudget;
+  /**
+   * Total attempts spent at each phase, accumulated across loop-backs. `attemptNumber` resets to 0
+   * on every transition — including a replan that re-enters the SAME phase — so it cannot bound a
+   * loop that keeps routing to itself. This tally is what the attempts budget reads.
+   */
+  attemptsByPhase?: Partial<Record<TaskPhase, number>>;
   tokenUsageTotal: { inputTokens: number; outputTokens: number };
   runtimeMsByPhase: Partial<Record<TaskPhase, number>>;
   /**
@@ -34,10 +54,11 @@ export interface TaskWorkflowState {
    */
   phaseSet?: TaskPhase[];
   /**
-   * True when a human set `size` at the contract gate. The specify candidate's classifier
-   * result must NOT overwrite a human override, so this pins the size against the classifier.
+   * True when the caller pinned `size` at intake (CLI `--size`). The specify candidate's classifier
+   * result must NOT overwrite an explicit choice, so this pins the size against the classifier. It
+   * is the only size override left: TASK-104 removed the contract gate that used to carry one.
    */
-  sizeHumanOverridden?: boolean;
+  sizePinnedAtIntake?: boolean;
   /**
    * Base branch override (TASK-72 stacked PRs): the branch the worktree/branch is created from and
    * the PR opens against, when it must not be the repository default branch (e.g. a parent task's
@@ -57,6 +78,8 @@ export interface TaskWorkflowInput {
   taskId: string;
   repositoryId: string;
   prompt?: string;
+  /** Bound on the autonomous loop (TASK-105). Omitted means `DEFAULT_LOOP_BUDGET`. */
+  loopBudget?: LoopBudget;
   /** Optional intake size hint (e.g. CLI `--size`); the specify classifier uses it as a prior/override. */
   size?: TaskSize;
   /** Base branch override for stacked PRs (TASK-72); threaded into worktree + PR creation. */

@@ -4,7 +4,7 @@ import { ImplementationPlanSchema, ProgramDesignSchema } from './plan.js';
 import { WorkspaceLeaseSchema } from './workspace.js';
 import { EvidenceSchema, FindingSchema, ArtifactRecordSchema } from './evidence.js';
 import {
-  HumanGateReasonSchema,
+  UnmetCriterionReasonSchema,
   TaskPhaseSchema,
   RunConditionSchema,
   DeliveryStateSchema,
@@ -30,12 +30,12 @@ export const RunStateSnapshotSchema = z.object({
   baseSha: z.string().optional(),
   candidateSha: z.string().optional(),
   /**
-   * The gate reason the task is currently parked on (awaiting-human), carried so the daemon can push
-   * it into the task_summary projection on a run-state write — the state where the bare `tasks` row
-   * stops moving and the list/board would otherwise go stale on the pending reason. Absent when the
-   * task is not gated.
+   * The unmet-criterion reason this run last reported, carried so the daemon can push it into the
+   * `task_summary` projection on a run-state write. Nothing parks on it any more (TASK-104): it is
+   * the label the draft-PR report renders, and what the read-only needs-attention list reads.
+   * Absent while every claim is still on track.
    */
-  pendingHumanGate: HumanGateReasonSchema.optional(),
+  pendingHumanGate: UnmetCriterionReasonSchema.optional(),
   worktreePath: z.string().optional(),
   lease: WorkspaceLeaseSchema.optional(),
   verificationEvidence: z.array(EvidenceSchema),
@@ -79,9 +79,11 @@ export const TaskStateSyncSchema = z.object({
   condition: RunConditionSchema,
   deliveryState: DeliveryStateSchema,
   /**
-   * The gate the task parked on, projected into `task_summary`. Explicit `null` clears a resolved
-   * gate; an omitted field leaves whatever the projection already holds.
+   * The unmet-criterion reason projected into `task_summary`. Explicit `null` clears it; an omitted
+   * field leaves whatever the projection already holds. The column keeps its `pending_gate_reason`
+   * name so no migration is needed — it now answers "which claim went unproven", not "who must
+   * approve".
    */
-  pendingGateReason: HumanGateReasonSchema.nullable().optional(),
+  pendingGateReason: UnmetCriterionReasonSchema.nullable().optional(),
 });
 export type TaskStateSync = z.infer<typeof TaskStateSyncSchema>;
