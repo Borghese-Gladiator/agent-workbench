@@ -690,7 +690,7 @@ from the plan artifact. Bounded: no subagent framing, no new database table.
 **How we'll know it's done.** *Manual:* park a long-running task mid-phase, resume it, and
 confirm the resumed session picks up the scratchpad instead of cold-re-deriving state.
 
-### [ ] TASK-121: Batch/factory rollup view over `task_summary` (cross-task, not per-task)
+### [x] TASK-121: Batch/factory rollup view over `task_summary` (cross-task, not per-task)
 
 **What's wrong today.** `task_summary` (per `ui-roadmap-phase0-progress`) gives per-task
 rollups, but there's no cross-task view summarizing what a batch of tasks (e.g. one

@@ -1,8 +1,8 @@
 import type { Command } from 'commander';
-import type { FleetTaskRow } from '@awb/database';
+import type { FleetTaskRow, BatchRollup } from '@awb/database';
 import { daemonClient, DaemonRequestError } from '../daemon-client.js';
 import { emitJson, outputOptions, printError, printResult } from '../output.js';
-import { formatDurationCoarse } from '../duration.js';
+import { formatDurationCoarse, parseDuration } from '../duration.js';
 import { formatColumns } from '../table.js';
 
 interface FleetResponse {
@@ -73,8 +73,44 @@ function emitOnce(rows: FleetTaskRow[], format: 'table' | 'md'): void {
   printResult(format === 'md' ? renderMarkdown(rows) : renderTable(rows));
 }
 
+/**
+ * Renders a batch rollup for a human (TASK-121). Ordered by what an operator asks in sequence:
+ * what came out (PRs), what still needs a look, then the totals.
+ */
+export function renderRollup(rollup: BatchRollup): string {
+  if (rollup.taskCount === 0) return 'No tasks in that batch.';
+
+  const lines: string[] = [];
+  const statuses = Object.entries(rollup.byStatus)
+    .sort((a, b) => b[1] - a[1])
+    .map(([status, count]) => `${count} ${status}`)
+    .join(', ');
+  lines.push(`${rollup.taskCount} task(s): ${statuses}`);
+  if (rollup.window) lines.push(`window: ${rollup.window.from} → ${rollup.window.to}`, '');
+
+  lines.push(`Pull requests opened: ${rollup.pullRequests.length}`);
+  for (const pr of rollup.pullRequests) {
+    lines.push(`  ${shortTaskId(pr.taskId)}  ${truncate(pr.title ?? '—', 48)}  ${pr.url}`);
+  }
+
+  lines.push('', `Needs attention: ${rollup.needsAttention.length}`);
+  for (const task of rollup.needsAttention) {
+    lines.push(`  ${shortTaskId(task.taskId)}  ${truncate(task.title ?? '—', 48)}  ${task.reason}`);
+  }
+
+  const { inputTokens, outputTokens, costUsd } = rollup.totals;
+  // A batch where nothing recorded a cost reads as "not measured", never as a confident $0.00.
+  const cost = costUsd === null ? 'not measured' : `$${costUsd.toFixed(4)}`;
+  lines.push(
+    '',
+    `Open findings: ${rollup.openFindingCount}`,
+    `Tokens: ${inputTokens.toLocaleString()} in / ${outputTokens.toLocaleString()} out · cost ${cost}`,
+  );
+  return lines.join('\n');
+}
+
 export function registerFleetCommand(program: Command): void {
-  program
+  const fleet = program
     .command('fleet')
     .description('Show a composed, agent-legible status line for every task (activity, bounce, findings, PR)')
     .option('--md', 'Render a markdown table (agent-legible default for LLM monitoring)')
@@ -110,6 +146,39 @@ export function registerFleetCommand(program: Command): void {
       } catch (err) {
         if (err instanceof DaemonRequestError) printError(err.message);
         else printError(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
+      }
+    });
+
+  // TASK-121: the cross-task view. `fleet` is per-task; this is the batch above it — what one
+  // dogfooding run across N tickets actually produced, without opening each task.
+  fleet
+    .command('rollup')
+    .description('Summarize a batch of tasks: terminal states, PRs opened, what still needs a look')
+    .option('--since <duration>', 'Only tasks active within this window (e.g. 24h, 90m)', '24h')
+    .option('--all', 'Every task, ignoring --since')
+    .option('--repo <repo>', 'Restrict to one repository id')
+    .option('--root <taskId>', 'Restrict to one retry chain / stacked DAG, by its root task id')
+    .action(async (opts: { since: string; all?: boolean; repo?: string; root?: string }) => {
+      const params = new URLSearchParams();
+      if (opts.repo) params.set('repositoryId', opts.repo);
+      if (opts.root) params.set('rootTaskId', opts.root);
+      if (!opts.all) {
+        try {
+          params.set('sinceMs', String(parseDuration(opts.since)));
+        } catch (err) {
+          printError(err instanceof Error ? err.message : String(err));
+          process.exitCode = 1;
+          return;
+        }
+      }
+      try {
+        const query = params.toString();
+        const rollup = await daemonClient.get<BatchRollup>(`/api/tasks/rollup${query ? `?${query}` : ''}`);
+        if (outputOptions().json) emitJson(rollup);
+        else printResult(renderRollup(rollup));
+      } catch (err) {
+        printError(err instanceof Error ? err.message : String(err));
         process.exitCode = 1;
       }
     });

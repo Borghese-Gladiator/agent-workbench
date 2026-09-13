@@ -15,6 +15,7 @@ import { registerOverviewRoute } from './routes/overview.js';
 import { registerExecutionTreeRoute } from './routes/execution-tree.js';
 import { registerTimelineRoute } from './routes/timeline.js';
 import { registerReconcileRoute } from './routes/reconcile.js';
+import { registerRollupRoute } from './routes/rollup.js';
 import { createTaskScheduler } from './scheduler-runtime.js';
 import type { TaskScheduler } from './scheduler.js';
 
@@ -48,6 +49,7 @@ export async function buildServer(): Promise<DaemonServer> {
   registerExecutionTreeRoute(app, database);
   registerTimelineRoute(app, database);
   registerReconcileRoute(app, scheduler);
+  registerRollupRoute(app, database);
   registerWebSocketRoute(app, eventBus, database);
   registerInternalRoutes(app, database, eventBus, scheduler);
   registerMediaRoutes(app, database, layout.artifactsDir);
