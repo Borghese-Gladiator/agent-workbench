@@ -10,6 +10,7 @@ import type {
 import type { TaskWorkflowState } from '@awb/workflow';
 import { evaluatePhaseCompletion, type CompletionContext } from '@awb/workflow';
 import type { AgentRuntime, RuntimeProfile } from './agent-factory.js';
+import { appendScratchpadNote } from './run-scratchpad.js';
 import type { RunStateStore, TaskRunState } from './run-state-store.js';
 import type { ObservabilityAccumulator } from './observability-accumulator.js';
 import type { DaemonClient } from '../daemon-client.js';
@@ -177,6 +178,43 @@ export function blockedResult(phase: TaskPhase, missing: string[]): PhaseAttempt
  * `onBlocked` or `blockedResult`). Handler mutations to `ctx.runState` are persisted via the store,
  * the accumulated usage is attached to the result, and `phase.completed` is emitted with it.
  */
+/**
+ * Notes this attempt's outcome to the run scratchpad (TASK-120), so a cold re-entry reads what has
+ * already been tried instead of re-deriving it from the plan — which states INTENT and says nothing
+ * about what failed. Best-effort by contract: the scratchpad is an aid to the next attempt, never a
+ * correctness dependency of this one.
+ *
+ * Only outcomes worth re-reading are noted. A clean `candidate` is the expected case and adds
+ * nothing a resuming session needs; a loop-back or a stop is exactly what it must not repeat.
+ */
+function noteAttemptToScratchpad(handler: PhaseHandler, ctx: PhaseContext, result: PhaseAttemptResult): void {
+  const artifactsDir = ctx.runState.artifactsDir;
+  if (!artifactsDir) return;
+
+  let note: string | undefined;
+  if (result.outcome === 'repair') {
+    note = `failed and looped back to ${result.target}${describeFindings(result.findings)}`;
+  } else if (result.outcome === 'replan') {
+    note = `sent the run back to ${result.target}${describeFindings(result.findings)}`;
+  } else if (result.outcome === 'blocked') {
+    note = `blocked: ${result.reason}`;
+  } else if (result.outcome === 'await-human') {
+    note = `stopped for ${result.gate.reason}: ${result.gate.summary}`;
+  }
+  if (!note) return;
+
+  appendScratchpadNote(artifactsDir, ctx.state.taskId, {
+    phase: handler.phase,
+    attemptNumber: ctx.state.attemptNumber,
+    note,
+  });
+}
+
+function describeFindings(findings: { description: string }[]): string {
+  if (findings.length === 0) return '';
+  return ` — ${findings.slice(0, 3).map((f) => f.description).join('; ')}`;
+}
+
 export async function drivePhase(handler: PhaseHandler, ctx: PhaseContext): Promise<PhaseAttemptResult> {
   ctx.emit({
     kind: 'phase.started',
@@ -237,6 +275,10 @@ async function runHandler(handler: PhaseHandler, ctx: PhaseContext): Promise<Pha
   // runtime, whose adapter reports no usage) — the Workflow simply skips accumulation then.
   const usage = ctx.usage.forResult();
   if (usage) result = { ...result, usage };
+
+  // TASK-117: write what this attempt learned NOW, not at closeout. A session that crashes, parks
+  // or cold-re-enters never reaches closeout, and everything it learned used to be lost with it.
+  noteAttemptToScratchpad(handler, ctx, result);
 
   ctx.emit({
     kind: 'phase.completed',

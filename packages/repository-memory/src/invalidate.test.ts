@@ -10,11 +10,11 @@ function fact(overrides: Partial<RepositoryFact> & Pick<RepositoryFact, 'id'>): 
   return {
     repositoryId: 'repo-1',
     kind: 'convention',
-    statement: 'placeholder statement',
+    statement: 'The module is covered by the fixture',
     confidence: 'validated',
     observedAtSha: 'sha-1',
-    sourcePaths: [],
-    sourceHashes: [],
+    sourcePaths: ['package.json'],
+    sourceHashes: ['hash-x'],
     invalidatedByPaths: [],
     ...overrides,
   };
@@ -41,7 +41,7 @@ describe('repository fact invalidation', () => {
     });
     const unrelated = fact({
       id: 'fact-unrelated',
-      statement: 'unrelated helper util',
+      statement: 'An unrelated helper utility lives here',
       sourcePaths: ['src/unrelated/thing.ts'],
       sourceHashes: ['hash-thing'],
     });

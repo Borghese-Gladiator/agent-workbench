@@ -7,7 +7,12 @@ accesses — the incremental project-memory behavior.
 
 ## Responsibilities
 
-- `recordFacts(db, repositoryId, facts)` — persists facts with full
+- `lifecycle.ts` — the promotion/eviction policy (ADR-010):
+  `qualifiesForPromotion` gates every write, `evictSupersededFacts` retires a
+  fact an incoming one explicitly replaces or that went unconfirmed past the
+  staleness horizon. Eviction is supersession, never deletion.
+- `recordFacts(db, repositoryId, facts)` — applies the lifecycle, then persists
+  the promoted facts with full
   provenance (source paths + hashes).
 - `queryMemory(db, sqlite, repositoryId, query)` — one composable retrieval
   function covering exact path, unit prefix, changed-path directory

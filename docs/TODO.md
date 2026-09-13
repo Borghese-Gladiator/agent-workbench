@@ -20,7 +20,7 @@ Two independent seams, deliberately split so they can be built in parallel:
 They touch different tables and different commands. Do not let one branch edit the other's
 surface.
 
-### [ ] TASK-123: `tasks.phase` and `tasks.condition` are write-once — the entire fleet monitoring surface is frozen at task creation
+### [x] TASK-123: `tasks.phase` and `tasks.condition` are write-once — the entire fleet monitoring surface is frozen at task creation
 
 **What's wrong.** Nothing in production ever writes a task's phase or condition after the
 row is inserted. Every one of the 40 tasks in the local database reads `specify | running`,
@@ -140,7 +140,7 @@ fabricated equal timestamp.
 durations, and the two implement sessions (54s + 72s = 126s) sum to roughly their parent attempt's
 130s. Every `model_invocations.ended_at` reads NULL rather than equal to `started_at`.
 
-### [ ] TASK-126: Phantom `running` tasks — nothing reconciles the database against whether the Workflow still exists
+### [x] TASK-126: Phantom `running` tasks — nothing reconciles the database against whether the Workflow still exists
 
 **What's wrong.** The local database holds 40 tasks that all claim `running`, with last
 activity 17 to 36 days old. Their Temporal Workflows are long gone. Nothing ever reconciles
@@ -168,7 +168,7 @@ abandoned by the reconcile pass; a task whose Workflow is running is left untouc
 *Manual:* `awb fleet` on this machine shows zero tasks claiming `running` that have not moved
 in weeks, and a task killed mid-run flips to abandoned within one reconcile interval.
 
-### [ ] TASK-127: `awb up` exits nonzero on a worker/Temporal boot race
+### [x] TASK-127: `awb up` exits nonzero on a worker/Temporal boot race
 
 **What's wrong.** `awb up --quiet` returned exit 1 with the worker `unhealthy`, twice in a
 row, on a machine where the stack was otherwise fine. Two distinct races: the worker
@@ -565,7 +565,7 @@ spun out the build tasks below. Everything else was `decline` or `reference-only
 an existing invariant, task or learning already covered it, or because it conflicted with
 no-vector-DB / SQLite-single-writer / no-subagent / read-only-board.
 
-### [ ] TASK-116: Define a promotion/eviction policy for project memory (markdown files grow unboundedly, no lifecycle)
+### [x] TASK-116: Define a promotion/eviction policy for project memory (markdown files grow unboundedly, no lifecycle)
 
 **What's wrong today.** Project memory (`project-memory-design`) is one append-only
 markdown file per project, written at closeout. There is no rule for when a fact
@@ -594,7 +594,7 @@ together).
 closeout skill applies it (an old, superseded memory entry gets marked/removed rather than
 accumulating forever).
 
-### [ ] TASK-117: Auto-capture high-signal repo facts on first touch, not only at closeout
+### [x] TASK-117: Auto-capture high-signal repo facts on first touch, not only at closeout
 
 **What's wrong today.** Project memory is only written at session closeout. If a session
 ends without an explicit closeout (crash, park, cold re-entry), high-signal facts learned
@@ -664,7 +664,7 @@ experiment on that task.
 **How we'll know it's done.** A short before/after comparison exists and TASK-99's skill
 either adopts or explicitly declines the `design.md` input based on it.
 
-### [ ] TASK-120: Persisted per-run agent scratchpad/TODO to reduce cold re-entry
+### [x] TASK-120: Persisted per-run agent scratchpad/TODO to reduce cold re-entry
 
 **What's wrong today.** Long runs have no persisted scratchpad — only plan artifacts. On
 cold re-entry (park/resume), the agent has to reconstruct working state from the plan
