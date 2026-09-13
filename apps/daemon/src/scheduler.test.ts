@@ -12,7 +12,12 @@ import {
   insertTaskDependency,
   type WorkbenchDatabase,
 } from '@awb/database';
-import { TaskScheduler, type StartTaskFn, type DescribeWorkflowFn } from './scheduler.js';
+import {
+  TaskScheduler,
+  type StartTaskFn,
+  type DescribeWorkflowFn,
+  type ReadWorkflowStateFn,
+} from './scheduler.js';
 
 const REPO = 'repo-1';
 
@@ -45,12 +50,16 @@ describe('TaskScheduler', () => {
    * `describeWorkflow` defaults to `running`, so the DAG tests below are unaffected by the liveness
    * reconcile that shares the same tick (TASK-126). The liveness suite passes its own.
    */
-  function scheduler(describeWorkflow: DescribeWorkflowFn = async () => 'running'): TaskScheduler {
+  function scheduler(
+    describeWorkflow: DescribeWorkflowFn = async () => 'running',
+    readWorkflowState?: ReadWorkflowStateFn,
+  ): TaskScheduler {
     return new TaskScheduler({
       database: db,
       startTask: recordingStart,
       hasReleased: async (parentTaskId) => releasedParents.has(parentTaskId),
       describeWorkflow,
+      ...(readWorkflowState ? { readWorkflowState } : {}),
     });
   }
 
@@ -271,5 +280,99 @@ describe('TaskScheduler', () => {
 
       expect(getTaskSummary(db.db, 'ghost')?.derivedStatus).toBe('abandoned');
     });
+  });
+});
+
+
+// TASK-111: a network partition restarted the daemon mid-run. The worker→daemon→SQLite writes were
+// lost while it was down, so the Temporal history advanced while SQLite stayed frozen at the
+// pre-partition snapshot — and nothing told the operator which rows were merely behind and which
+// were dead. `reconcileFromWorkflows` is the recovery pass behind `awb reconcile`.
+describe('TaskScheduler.reconcileFromWorkflows (TASK-111)', () => {
+  let dir: string;
+  let db: WorkbenchDatabase;
+
+  function scheduler(
+    describeWorkflow: DescribeWorkflowFn,
+    readWorkflowState?: ReadWorkflowStateFn,
+  ): TaskScheduler {
+    return new TaskScheduler({
+      database: db,
+      startTask: async () => {},
+      hasReleased: async () => false,
+      describeWorkflow,
+      ...(readWorkflowState ? { readWorkflowState } : {}),
+    });
+  }
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'awb-reconcile-'));
+    db = createDatabase(join(dir, 'wb.sqlite'));
+    seedRepo(db);
+    upsertTask(db.db, { id: 'T', repositoryId: REPO, prompt: 'p', scheduleState: 'started' });
+  });
+
+  afterEach(async () => {
+    db.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('corrects a row left behind the running workflow', async () => {
+    const report = await scheduler(
+      async () => 'running',
+      async () => ({ phase: 'challenge', condition: 'running', deliveryState: 'branch-ready' }),
+    ).reconcileFromWorkflows();
+
+    expect(report).toEqual([
+      {
+        taskId: 'T',
+        repositoryId: REPO,
+        disposition: 'resynced',
+        before: { phase: 'specify', condition: 'running' },
+        after: { phase: 'challenge', condition: 'running' },
+      },
+    ]);
+    expect(getTask(db.db, 'T')?.phase).toBe('challenge');
+    expect(getTask(db.db, 'T')?.deliveryState).toBe('branch-ready');
+  });
+
+  it('reports in-sync and writes nothing when the row already agrees', async () => {
+    const report = await scheduler(
+      async () => 'running',
+      async () => ({ phase: 'specify', condition: 'running', deliveryState: 'not-started' }),
+    ).reconcileFromWorkflows();
+
+    expect(report[0]?.disposition).toBe('in-sync');
+    expect(report[0]?.after).toBeUndefined();
+  });
+
+  it('marks a row whose workflow is gone as abandoned, not failed', async () => {
+    const report = await scheduler(async () => 'absent').reconcileFromWorkflows();
+    expect(report[0]?.disposition).toBe('abandoned');
+    // `abandoned` is deliberately distinct from `failed`: nothing is running the work, but the
+    // workbench does not know whether it failed.
+    expect(getTask(db.db, 'T')?.condition).toBe('abandoned');
+  });
+
+  // The most important guarantee here: an outage must never mass-rewrite live tasks.
+  it.each([
+    { label: 'describeWorkflow reports unknown', describe: (async () => 'unknown') as DescribeWorkflowFn, read: undefined },
+    { label: 'describeWorkflow throws', describe: (async () => { throw new Error('temporal down'); }) as DescribeWorkflowFn, read: undefined },
+    {
+      label: 'the state query fails',
+      describe: (async () => 'running') as DescribeWorkflowFn,
+      read: (async () => { throw new Error('query timed out'); }) as ReadWorkflowStateFn,
+    },
+  ])('leaves the row untouched when $label', async ({ describe: describeWorkflow, read }) => {
+    const report = await scheduler(describeWorkflow, read).reconcileFromWorkflows();
+    expect(report[0]?.disposition).toBe('unreachable');
+    expect(getTask(db.db, 'T')?.phase).toBe('specify');
+    expect(getTask(db.db, 'T')?.condition).toBe('running');
+  });
+
+  it('records a terminal state the row never saw as a re-sync, not an abandonment', async () => {
+    const report = await scheduler(async () => 'completed').reconcileFromWorkflows();
+    expect(report[0]?.disposition).toBe('resynced');
+    expect(getTask(db.db, 'T')?.condition).toBe('completed');
   });
 });

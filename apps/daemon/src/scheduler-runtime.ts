@@ -9,6 +9,7 @@ import {
   type StartTaskFn,
   type HasReleasedFn,
   type DescribeWorkflowFn,
+  type ReadWorkflowStateFn,
   type WorkflowLiveness,
 } from './scheduler.js';
 
@@ -93,6 +94,22 @@ const realDescribeWorkflow: DescribeWorkflowFn = async ({ taskId, repositoryId }
   }
 };
 
+/**
+ * Real `readWorkflowState` (TASK-111): asks the live Workflow where it actually is, so a database
+ * left behind by a partition can be corrected from it. Returns undefined on ANY failure — a row is
+ * only ever rewritten from an answer we actually got.
+ */
+const realReadWorkflowState: ReadWorkflowStateFn = async ({ taskId, repositoryId }) => {
+  try {
+    const client = await getTemporalClient();
+    const handle = client.workflow.getHandle(workflowIdFor(repositoryId, taskId));
+    const state = await handle.query(getCurrentStateQuery);
+    return { phase: state.phase, condition: state.condition, deliveryState: state.deliveryState };
+  } catch {
+    return undefined;
+  }
+};
+
 /** Builds a production TaskScheduler wired to Temporal. */
 export function createTaskScheduler(database: WorkbenchDatabase): TaskScheduler {
   return new TaskScheduler({
@@ -100,5 +117,6 @@ export function createTaskScheduler(database: WorkbenchDatabase): TaskScheduler 
     startTask: realStartTask,
     hasReleased: realHasReleased,
     describeWorkflow: realDescribeWorkflow,
+    readWorkflowState: realReadWorkflowState,
   });
 }

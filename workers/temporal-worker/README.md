@@ -8,7 +8,10 @@ logic (agent sessions, command execution, git/worktree operations, etc.).
 
 ## Responsibilities
 
-- `src/index.ts` — worker bootstrap (`startWorker()`), pointed at the built
+- `src/index.ts` — worker bootstrap (`startWorker()`) and the supervisor
+  (`superviseWorker`) that rebuilds the connection and worker when the poll
+  loop ends, so a network partition recovers without `awb restart worker`
+  (TASK-111). Pointed at the built
   `@awb/workflow` dist output for workflow bundling.
 - `src/activities/` — the Activities. `run-phase.ts` is the real `runPhase`
   Activity (a hub that dispatches each lifecycle phase), and ~20 support modules
