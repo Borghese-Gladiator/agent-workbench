@@ -20,7 +20,7 @@ Two independent seams, deliberately split so they can be built in parallel:
 They touch different tables and different commands. Do not let one branch edit the other's
 surface.
 
-### [ ] TASK-123: `tasks.phase` and `tasks.condition` are write-once — the entire fleet monitoring surface is frozen at task creation
+### [x] TASK-123: `tasks.phase` and `tasks.condition` are write-once — the entire fleet monitoring surface is frozen at task creation
 
 **What's wrong.** Nothing in production ever writes a task's phase or condition after the
 row is inserted. Every one of the 40 tasks in the local database reads `specify | running`,
@@ -140,7 +140,7 @@ fabricated equal timestamp.
 durations, and the two implement sessions (54s + 72s = 126s) sum to roughly their parent attempt's
 130s. Every `model_invocations.ended_at` reads NULL rather than equal to `started_at`.
 
-### [ ] TASK-126: Phantom `running` tasks — nothing reconciles the database against whether the Workflow still exists
+### [x] TASK-126: Phantom `running` tasks — nothing reconciles the database against whether the Workflow still exists
 
 **What's wrong.** The local database holds 40 tasks that all claim `running`, with last
 activity 17 to 36 days old. Their Temporal Workflows are long gone. Nothing ever reconciles
@@ -168,7 +168,7 @@ abandoned by the reconcile pass; a task whose Workflow is running is left untouc
 *Manual:* `awb fleet` on this machine shows zero tasks claiming `running` that have not moved
 in weeks, and a task killed mid-run flips to abandoned within one reconcile interval.
 
-### [ ] TASK-127: `awb up` exits nonzero on a worker/Temporal boot race
+### [x] TASK-127: `awb up` exits nonzero on a worker/Temporal boot race
 
 **What's wrong.** `awb up --quiet` returned exit 1 with the worker `unhealthy`, twice in a
 row, on a machine where the stack was otherwise fine. Two distinct races: the worker
@@ -548,6 +548,11 @@ changing this repo with this repo.
 **How we'll know it's done.** A branch + draft PR on this repo produced by the
 workbench, with a short writeup of what was awkward.
 
+> **Status 2026-09-13 (TASK-118/119/122 pass).** Still blocked, and the blocker has not moved:
+> TASK-104 is implemented but sits in an open draft PR, not in `main`. Driving the dogfood now would
+> drive it through the very gate machinery TASK-104 removes. Full status, plus the friction this
+> backlog pass surfaced, in `docs/research/dogfood-status-2026-09.md`.
+>
 > **Partial dogfood run (2026-08-15).** Registered `agent-workbench` and drove a
 > task (re-tighten TASK-78's worktree-dir tests). Discovery, contract, plan,
 > prepare, and **implement all succeeded on the real repo** — the agent correctly
@@ -617,7 +622,7 @@ than being separate — triage together.
 **How we'll know it's done.** A mid-run fact survives a session that ends without a clean
 closeout (verified by killing a session mid-task and checking memory was still written).
 
-### [ ] TASK-118: Evaluate markitdown as the context-ingestion converter (PDF/docx/pptx → md), replacing ad-hoc pdfminer
+### [x] TASK-118: Evaluate markitdown as the context-ingestion converter (PDF/docx/pptx → md), replacing ad-hoc pdfminer
 
 **What's wrong today.** Context ingestion for non-markdown documents is ad hoc — the
 Karpathy PDF was converted via pdfminer as a one-off (`group-e-token-memory-graph`), not
@@ -639,7 +644,7 @@ ingestion / memory tooling).
 markitdown and confirm output quality is equal or better than the pdfminer one-off; decide
 adopt or decline.
 
-### [ ] TASK-119: Test whether a `design.md`-style structured design spec improves from-scratch UI output (flag on TASK-99)
+### [x] TASK-119: Test whether a `design.md`-style structured design spec improves from-scratch UI output (flag on TASK-99)
 
 **What's wrong today.** TASK-99's `build-ui` skill has no structured design-spec input —
 it relies on prompt guidance alone, with no tokens/layout/light-dark spec file feeding
@@ -712,7 +717,7 @@ CLI). Low priority.
 **How we'll know it's done.** *Manual:* after driving several tasks, one command/page shows
 the batch rollup (opened PRs, unmet-criteria count) without opening each task individually.
 
-### [ ] TASK-122: OS-level sandbox for untrusted repos (deferred — only if the `native-trusted` model changes)
+### [x] TASK-122: OS-level sandbox for untrusted repos (deferred — only if the `native-trusted` model changes)
 
 **What's wrong today.** Execution is confined by the capability broker + worktree
 isolation, which is explicitly `native-trusted` — **not** a hostile-code sandbox
