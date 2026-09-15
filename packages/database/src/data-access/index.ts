@@ -7,3 +7,4 @@ export * from './events.js';
 export * from './artifact-metadata-store.js';
 export * from './observability.js';
 export * from './fleet.js';
+export * from './batch-rollup.js';
