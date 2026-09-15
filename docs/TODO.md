@@ -480,7 +480,7 @@ task's real state.
 
 ## Group J — QA without a start command
 
-### [ ] TASK-73: `exercise` hard-fails (`exit 1`) when nothing resolves to a serving command — no non-browser / serve-as-is QA fallback
+### [x] TASK-73: `exercise` hard-fails (`exit 1`) when nothing resolves to a serving command — no non-browser / serve-as-is QA fallback
 
 **What's wrong.** When `AWB_QA_MODE=browser` and no resolved command has
 `serves: true` — a truly static frontend with no recognized app server, or nothing
