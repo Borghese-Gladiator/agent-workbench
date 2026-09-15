@@ -11,7 +11,7 @@ import { makeTestDb, cleanupTestDb, seedRepository, type TestDb } from './test-h
 function fact(overrides: Partial<RepositoryFact> & Pick<RepositoryFact, 'id' | 'kind'>): RepositoryFact {
   return {
     repositoryId: 'repo-1',
-    statement: 'placeholder',
+    statement: 'The fixture records a placeholder fact',
     confidence: 'validated',
     observedAtSha: 'sha-1',
     sourcePaths: ['src/x.ts'],
@@ -57,20 +57,20 @@ describe('projectMemoryToFiles', () => {
 
   it('keeps superseded facts under a Superseded section (never silently dropped)', async () => {
     await recordFacts(testDb.handle.db, 'repo-1', [
-      fact({ id: 'i1', kind: 'invariant', statement: 'stays live', sourcePaths: ['src/keep.ts'] }),
-      fact({ id: 'i2', kind: 'invariant', statement: 'gets superseded', sourcePaths: ['src/gone.ts'] }),
+      fact({ id: 'i1', kind: 'invariant', statement: 'This fact stays live across the change', sourcePaths: ['src/keep.ts'] }),
+      fact({ id: 'i2', kind: 'invariant', statement: 'This fact gets superseded by a later one', sourcePaths: ['src/gone.ts'] }),
     ]);
     await invalidateFacts(testDb.handle.db, 'repo-1', ['src/gone.ts']);
 
     await projectMemoryToFiles(testDb.handle.db, testDb.handle.sqlite, 'repo-1', outDir);
     const rules = readFileSync(join(outDir, 'rules.md'), 'utf8');
-    expect(rules).toContain('stays live');
+    expect(rules).toContain('This fact stays live across the change');
     expect(rules).toContain('## Superseded');
-    expect(rules).toContain('gets superseded');
+    expect(rules).toContain('This fact gets superseded by a later one');
   });
 
   it('regenerates wholesale — a page with no facts does not linger', async () => {
-    await recordFacts(testDb.handle.db, 'repo-1', [fact({ id: 'p1', kind: 'pitfall', statement: 'x' })]);
+    await recordFacts(testDb.handle.db, 'repo-1', [fact({ id: 'p1', kind: 'pitfall', statement: 'A pitfall recorded for this page' })]);
     await projectMemoryToFiles(testDb.handle.db, testDb.handle.sqlite, 'repo-1', outDir);
     expect(readdirSync(outDir)).toContain('pitfalls.md');
 
@@ -78,7 +78,7 @@ describe('projectMemoryToFiles', () => {
     // (FK), then the facts.
     testDb.handle.sqlite.prepare('DELETE FROM repository_fact_sources').run();
     testDb.handle.sqlite.prepare('DELETE FROM repository_facts').run();
-    await recordFacts(testDb.handle.db, 'repo-1', [fact({ id: 'c1', kind: 'command', statement: 'y' })]);
+    await recordFacts(testDb.handle.db, 'repo-1', [fact({ id: 'c1', kind: 'command', statement: 'A command recorded for this page' })]);
     await projectMemoryToFiles(testDb.handle.db, testDb.handle.sqlite, 'repo-1', outDir);
     const files = readdirSync(outDir);
     expect(files).not.toContain('pitfalls.md');

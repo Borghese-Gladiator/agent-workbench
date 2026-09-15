@@ -9,11 +9,11 @@ function fact(overrides: Partial<RepositoryFact> & Pick<RepositoryFact, 'id'>): 
   return {
     repositoryId: 'repo-1',
     kind: 'convention',
-    statement: 'placeholder statement',
+    statement: 'The module is covered by the fixture',
     confidence: 'validated',
     observedAtSha: 'sha-1',
-    sourcePaths: [],
-    sourceHashes: [],
+    sourcePaths: ['package.json'],
+    sourceHashes: ['hash-x'],
     invalidatedByPaths: [],
     ...overrides,
   };
@@ -58,7 +58,7 @@ describe('queryMemory', () => {
   it('delegates full-text search to the FTS5 helper', async () => {
     await recordFacts(testDb.handle.db, 'repo-1', [
       fact({ id: 'f1', statement: 'the repository uses drizzle orm for database access' }),
-      fact({ id: 'f2', statement: 'tests run via vitest' }),
+      fact({ id: 'f2', statement: 'The tests run via vitest' }),
     ]);
 
     const results = await queryMemory(testDb.handle.db, testDb.handle.sqlite, 'repo-1', {

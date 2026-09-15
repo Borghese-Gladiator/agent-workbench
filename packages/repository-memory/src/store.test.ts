@@ -22,7 +22,7 @@ describe('recordFacts', () => {
       id: 'fact-1',
       repositoryId: 'repo-1',
       kind: 'convention',
-      statement: 'uses pnpm workspaces',
+      statement: 'The repository uses pnpm workspaces',
       confidence: 'validated',
       observedAtSha: 'sha-abc',
       sourcePaths: ['package.json', 'pnpm-workspace.yaml'],
@@ -37,7 +37,7 @@ describe('recordFacts', () => {
       .from(repositoryFacts)
       .where(eq(repositoryFacts.id, 'fact-1'));
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.statement).toBe('uses pnpm workspaces');
+    expect(rows[0]?.statement).toBe('The repository uses pnpm workspaces');
     expect(JSON.parse(rows[0]?.sourcePathsJson ?? '[]')).toEqual([
       'package.json',
       'pnpm-workspace.yaml',
@@ -58,22 +58,22 @@ describe('recordFacts', () => {
         id: 'fact-a',
         repositoryId: 'repo-1',
         kind: 'architecture',
-        statement: 'monorepo with pnpm',
+        statement: 'The repository is a pnpm monorepo',
         confidence: 'declared',
         observedAtSha: 'sha-1',
-        sourcePaths: [],
-        sourceHashes: [],
+        sourcePaths: ['package.json'],
+        sourceHashes: ['hash-x'],
         invalidatedByPaths: [],
       },
       {
         id: 'fact-b',
         repositoryId: 'repo-1',
         kind: 'testing',
-        statement: 'tests run via vitest',
+        statement: 'The tests run via vitest',
         confidence: 'inferred',
         observedAtSha: 'sha-1',
-        sourcePaths: [],
-        sourceHashes: [],
+        sourcePaths: ['package.json'],
+        sourceHashes: ['hash-x'],
         invalidatedByPaths: [],
       },
     ];
@@ -89,11 +89,11 @@ describe('recordFacts', () => {
       id: 'fact-mismatch',
       repositoryId: 'repo-other',
       kind: 'risk',
-      statement: 'mismatched repo',
+      statement: 'A fact recorded against the wrong repository',
       confidence: 'declared',
       observedAtSha: 'sha-1',
-      sourcePaths: [],
-      sourceHashes: [],
+      sourcePaths: ['package.json'],
+      sourceHashes: ['hash-x'],
       invalidatedByPaths: [],
     };
 

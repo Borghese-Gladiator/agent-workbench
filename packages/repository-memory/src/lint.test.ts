@@ -8,11 +8,11 @@ function fact(overrides: Partial<RepositoryFact> & Pick<RepositoryFact, 'id'>): 
   return {
     repositoryId: 'repo-1',
     kind: 'invariant',
-    statement: 'placeholder statement',
+    statement: 'The module is covered by the fixture',
     confidence: 'validated',
     observedAtSha: 'sha-1',
-    sourcePaths: [],
-    sourceHashes: [],
+    sourcePaths: ['package.json'],
+    sourceHashes: ['hash-x'],
     invalidatedByPaths: [],
     ...overrides,
   };

@@ -565,7 +565,7 @@ spun out the build tasks below. Everything else was `decline` or `reference-only
 an existing invariant, task or learning already covered it, or because it conflicted with
 no-vector-DB / SQLite-single-writer / no-subagent / read-only-board.
 
-### [ ] TASK-116: Define a promotion/eviction policy for project memory (markdown files grow unboundedly, no lifecycle)
+### [x] TASK-116: Define a promotion/eviction policy for project memory (markdown files grow unboundedly, no lifecycle)
 
 **What's wrong today.** Project memory (`project-memory-design`) is one append-only
 markdown file per project, written at closeout. There is no rule for when a fact
@@ -594,7 +594,7 @@ together).
 closeout skill applies it (an old, superseded memory entry gets marked/removed rather than
 accumulating forever).
 
-### [ ] TASK-117: Auto-capture high-signal repo facts on first touch, not only at closeout
+### [x] TASK-117: Auto-capture high-signal repo facts on first touch, not only at closeout
 
 **What's wrong today.** Project memory is only written at session closeout. If a session
 ends without an explicit closeout (crash, park, cold re-entry), high-signal facts learned
@@ -664,7 +664,7 @@ experiment on that task.
 **How we'll know it's done.** A short before/after comparison exists and TASK-99's skill
 either adopts or explicitly declines the `design.md` input based on it.
 
-### [ ] TASK-120: Persisted per-run agent scratchpad/TODO to reduce cold re-entry
+### [x] TASK-120: Persisted per-run agent scratchpad/TODO to reduce cold re-entry
 
 **What's wrong today.** Long runs have no persisted scratchpad — only plan artifacts. On
 cold re-entry (park/resume), the agent has to reconstruct working state from the plan

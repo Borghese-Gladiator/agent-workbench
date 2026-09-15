@@ -9,11 +9,11 @@ function fact(overrides: Partial<RepositoryFact> & Pick<RepositoryFact, 'id'>): 
   return {
     repositoryId: 'repo-1',
     kind: 'architecture',
-    statement: 'placeholder statement',
+    statement: 'The module is covered by the fixture',
     confidence: 'inferred',
     observedAtSha: 'sha-1',
-    sourcePaths: [],
-    sourceHashes: [],
+    sourcePaths: ['package.json'],
+    sourceHashes: ['hash-x'],
     invalidatedByPaths: [],
     ...overrides,
   };
@@ -35,8 +35,8 @@ describe('compileConcepts', () => {
 
   it('folds a cluster of overlapping facts into one linked concept that preserves union provenance', async () => {
     await recordFacts(testDb.handle.db, 'repo-1', [
-      fact({ id: 'f1', statement: 'login lives here', sourcePaths: ['src/auth/login.ts'], sourceHashes: ['h1'] }),
-      fact({ id: 'f2', statement: 'logout lives here', sourcePaths: ['src/auth/logout.ts'], sourceHashes: ['h2'] }),
+      fact({ id: 'f1', statement: 'The login handler lives here', sourcePaths: ['src/auth/login.ts'], sourceHashes: ['h1'] }),
+      fact({ id: 'f2', statement: 'The logout handler lives here', sourcePaths: ['src/auth/logout.ts'], sourceHashes: ['h2'] }),
     ]);
 
     const result = await compileConcepts(testDb.handle.db, testDb.handle.sqlite, 'repo-1', complete);
@@ -67,8 +67,8 @@ describe('compileConcepts', () => {
 
   it('never re-compiles prior concept output', async () => {
     await recordFacts(testDb.handle.db, 'repo-1', [
-      fact({ id: 'c1', kind: 'concept', statement: 'existing concept', sourcePaths: ['src/x/a.ts'], sourceHashes: ['h'] }),
-      fact({ id: 'c2', kind: 'concept', statement: 'another concept', sourcePaths: ['src/x/b.ts'], sourceHashes: ['h'] }),
+      fact({ id: 'c1', kind: 'concept', statement: 'An existing concept lives in this cluster', sourcePaths: ['src/x/a.ts'], sourceHashes: ['h'] }),
+      fact({ id: 'c2', kind: 'concept', statement: 'Another concept lives in this cluster', sourcePaths: ['src/x/b.ts'], sourceHashes: ['h'] }),
     ]);
 
     const result = await compileConcepts(testDb.handle.db, testDb.handle.sqlite, 'repo-1', complete);
@@ -89,7 +89,7 @@ describe('compileConcepts', () => {
     const flaky = async () => {
       seen += 1;
       if (seen === 1) throw new Error('provider failed');
-      return JSON.stringify({ title: 'C', statement: 'ok.' });
+      return JSON.stringify({ title: 'C', statement: 'The cluster compiled without error' });
     };
 
     const result = await compileConcepts(testDb.handle.db, testDb.handle.sqlite, 'repo-1', flaky);
