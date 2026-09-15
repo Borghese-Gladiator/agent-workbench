@@ -56,11 +56,43 @@ const CONDITION_FOR_LIVENESS: Readonly<Partial<Record<WorkflowLiveness, RunCondi
   cancelled: 'cancelled',
 };
 
+/**
+ * The lifecycle state a live Workflow reports about itself (TASK-111). `describeWorkflow` answers
+ * "does a Workflow exist"; this answers "and where is it", which is what a database left behind by a
+ * partition actually needs. Returns undefined when the Workflow cannot be queried.
+ */
+export type ReadWorkflowStateFn = (input: {
+  taskId: string;
+  repositoryId: string;
+}) => Promise<{ phase: string; condition: RunCondition; deliveryState: string } | undefined>;
+
+/** What one task's reconcile pass concluded (TASK-111), for the operator-facing report. */
+export type ReconcileDisposition =
+  /** The row already agreed with Temporal. Nothing to do. */
+  | 'in-sync'
+  /** The row was BEHIND the Workflow and has been corrected from it. */
+  | 'resynced'
+  /** No Workflow backs the row; it is marked terminal. */
+  | 'abandoned'
+  /** Temporal could not be asked. The row is left exactly as it was. */
+  | 'unreachable';
+
+export interface ReconcileReportEntry {
+  taskId: string;
+  repositoryId: string;
+  disposition: ReconcileDisposition;
+  /** The row's phase/condition before the pass, and after it when they differ. */
+  before: { phase: string; condition: string };
+  after?: { phase: string; condition: string };
+}
+
 export interface TaskSchedulerOptions {
   database: WorkbenchDatabase;
   startTask: StartTaskFn;
   hasReleased: HasReleasedFn;
   describeWorkflow: DescribeWorkflowFn;
+  /** Optional: without it, reconcile still marks corpses but cannot re-sync a behind row. */
+  readWorkflowState?: ReadWorkflowStateFn;
 }
 
 /**
@@ -81,6 +113,7 @@ export class TaskScheduler {
   private readonly startTaskFn: StartTaskFn;
   private readonly hasReleased: HasReleasedFn;
   private readonly describeWorkflow: DescribeWorkflowFn;
+  private readonly readWorkflowState: ReadWorkflowStateFn | undefined;
   private timer: ReturnType<typeof setInterval> | undefined;
 
   constructor(options: TaskSchedulerOptions) {
@@ -88,6 +121,7 @@ export class TaskScheduler {
     this.startTaskFn = options.startTask;
     this.hasReleased = options.hasReleased;
     this.describeWorkflow = options.describeWorkflow;
+    this.readWorkflowState = options.readWorkflowState;
   }
 
   /**
@@ -156,6 +190,84 @@ export class TaskScheduler {
         condition,
       });
     }
+  }
+
+  /**
+   * RECOVERY path (TASK-111): re-sync every non-terminal task row FROM Temporal, and report what it
+   * found. This is the operator's answer after a network partition.
+   *
+   * Observed live: a WiFi outage restarted the daemon mid-run. The worker→daemon→SQLite writes were
+   * lost while it was down, so the Workflow history kept advancing while SQLite stayed frozen at the
+   * pre-partition snapshot. Temporal was correct and the database was not, and nothing could tell
+   * the operator which rows were merely behind and which were genuinely dead.
+   *
+   * Temporal is authoritative here, by construction: it is the only component that kept a durable
+   * record through the outage. A row that disagrees is corrected from it, never the other way round.
+   *
+   * Per-task failures are contained: a Workflow that cannot be reached reports `unreachable` and its
+   * row is untouched, so an outage can never mass-rewrite live tasks.
+   */
+  async reconcileFromWorkflows(): Promise<ReconcileReportEntry[]> {
+    const report: ReconcileReportEntry[] = [];
+
+    for (const task of listReconcilableTasks(this.database.db)) {
+      const before = { phase: task.phase, condition: task.condition };
+      const base = { taskId: task.id, repositoryId: task.repositoryId, before };
+
+      let liveness: WorkflowLiveness;
+      try {
+        liveness = await this.describeWorkflow({ taskId: task.id, repositoryId: task.repositoryId });
+      } catch {
+        report.push({ ...base, disposition: 'unreachable' });
+        continue;
+      }
+
+      if (liveness === 'unknown') {
+        report.push({ ...base, disposition: 'unreachable' });
+        continue;
+      }
+
+      // No Workflow backs this row, or it reached a terminal state the row never recorded.
+      const terminal = CONDITION_FOR_LIVENESS[liveness];
+      if (terminal) {
+        upsertTask(this.database.db, {
+          id: task.id,
+          repositoryId: task.repositoryId,
+          prompt: task.prompt,
+          condition: terminal,
+        });
+        report.push({
+          ...base,
+          disposition: liveness === 'absent' ? 'abandoned' : 'resynced',
+          after: { phase: task.phase, condition: terminal },
+        });
+        continue;
+      }
+
+      // The Workflow is running. Pull its real position and write it back if the row is behind.
+      const live = this.readWorkflowState
+        ? await this.readWorkflowState({ taskId: task.id, repositoryId: task.repositoryId }).catch(() => undefined)
+        : undefined;
+      if (!live) {
+        report.push({ ...base, disposition: this.readWorkflowState ? 'unreachable' : 'in-sync' });
+        continue;
+      }
+      if (live.phase === task.phase && live.condition === task.condition) {
+        report.push({ ...base, disposition: 'in-sync' });
+        continue;
+      }
+      upsertTask(this.database.db, {
+        id: task.id,
+        repositoryId: task.repositoryId,
+        prompt: task.prompt,
+        phase: live.phase as TaskRow['phase'],
+        condition: live.condition,
+        deliveryState: live.deliveryState as TaskRow['deliveryState'],
+      });
+      report.push({ ...base, disposition: 'resynced', after: { phase: live.phase, condition: live.condition } });
+    }
+
+    return report;
   }
 
   /** Alias used right after declaring a DAG, to start its root nodes immediately. */

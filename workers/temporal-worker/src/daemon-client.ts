@@ -18,7 +18,37 @@ export function daemonBaseUrl(): string {
 // timeout so the abort, not the activity, is what surfaces.
 const DAEMON_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 
-async function requestJson<T = unknown>(method: 'POST' | 'PUT', path: string, body: unknown): Promise<T> {
+/**
+ * Retry policy for a worker→daemon write (TASK-111).
+ *
+ * Observed live: a network partition restarted the daemon mid-run. The Temporal history kept
+ * advancing while SQLite stayed frozen at the pre-partition snapshot — `phase_attempts` stuck at
+ * `specify|1|open`, `semantic_events` max sequence 0, the contract stuck `awaiting_approval`. The
+ * database stopped being trustworthy as ground truth, and the operator had no way to tell.
+ *
+ * A daemon restart takes seconds. Retrying across it turns a permanently-behind database into a
+ * short pause, and it is safe to do: every internal route is an upsert or an append keyed by an id
+ * the worker supplies, so replaying a write that already landed is a no-op, not a duplicate.
+ */
+const WRITE_RETRY_ATTEMPTS = 4;
+const WRITE_RETRY_INITIAL_MS = 500;
+const WRITE_RETRY_MAX_INTERVAL_MS = 5_000;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Is this failure worth retrying? A refused/dropped connection or a 5xx is the daemon being
+ * restarted or briefly wedged — exactly the partition case. A 4xx is a malformed payload: the same
+ * request will fail identically forever, so retrying only delays a real error.
+ */
+export function isRetryableDaemonFailure(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (/failed to connect/.test(err.message)) return true;
+  const status = /returned (\d{3})/.exec(err.message)?.[1];
+  return status !== undefined && Number(status) >= 500;
+}
+
+async function requestOnce<T>(method: 'POST' | 'PUT', path: string, body: unknown): Promise<T> {
   const url = `${daemonBaseUrl()}${path}`;
   let response: Response;
   try {
@@ -36,6 +66,32 @@ async function requestJson<T = unknown>(method: 'POST' | 'PUT', path: string, bo
     throw new Error(`daemon ${method} ${path} returned ${response.status}: ${text}`);
   }
   return (await response.json().catch(() => ({}))) as T;
+}
+
+export async function requestJson<T = unknown>(
+  method: 'POST' | 'PUT',
+  path: string,
+  body: unknown,
+  deps: { send?: typeof requestOnce; delay?: (ms: number) => Promise<void>; attempts?: number } = {},
+): Promise<T> {
+  const send = deps.send ?? requestOnce;
+  const delay = deps.delay ?? sleep;
+  const attempts = deps.attempts ?? WRITE_RETRY_ATTEMPTS;
+  let interval = WRITE_RETRY_INITIAL_MS;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await send<T>(method, path, body);
+    } catch (err) {
+      lastError = err;
+      // A permanent failure must surface immediately; only a partition-shaped one is worth waiting on.
+      if (!isRetryableDaemonFailure(err) || attempt === attempts) throw err;
+      await delay(interval);
+      interval = Math.min(interval * 2, WRITE_RETRY_MAX_INTERVAL_MS);
+    }
+  }
+  throw lastError;
 }
 
 async function postOrPut(method: 'POST' | 'PUT', path: string, body: unknown): Promise<void> {

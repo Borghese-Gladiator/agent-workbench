@@ -58,7 +58,61 @@ export async function connectWithRetry(
   }
 }
 
-export async function startWorker(): Promise<Worker> {
+/**
+ * How long the supervisor waits before rebuilding a worker whose poll loop ended (TASK-111). Backs
+ * off so a Temporal server that is down for minutes is not hammered, and caps so recovery after a
+ * WiFi outage is quick rather than exponentially late.
+ */
+const SUPERVISOR_INITIAL_BACKOFF_MS = 1_000;
+const SUPERVISOR_MAX_BACKOFF_MS = 30_000;
+
+/**
+ * Keeps a worker polling across a network partition (TASK-111).
+ *
+ * Observed live: a WiFi outage killed the activities with `Connection closed mid-response`, and the
+ * temporal-worker then went **idle for about three hours** — task-queue backlog 0, pollers apparently
+ * alive, no workflow tasks executed. Only an explicit `awb restart worker` brought it back. A worker
+ * whose poll loop ends must rebuild itself; nothing should require an operator at a keyboard.
+ *
+ * `worker.run()` resolving is ALSO how a clean shutdown looks, so the supervisor stops when asked
+ * (`shouldContinue`) and otherwise treats the end of the loop — resolved or rejected — as a partition
+ * to recover from. `build` and `delay` are injected so the recovery is unit-testable without
+ * Temporal.
+ */
+export async function superviseWorker(deps: {
+  build: () => Promise<Worker>;
+  shouldContinue: () => boolean;
+  delay?: (ms: number) => Promise<void>;
+  onRestart?: (info: { attempt: number; backoffMs: number; reason: string }) => void;
+  maxRestarts?: number;
+}): Promise<void> {
+  const delay = deps.delay ?? sleep;
+  let backoff = SUPERVISOR_INITIAL_BACKOFF_MS;
+  let attempt = 0;
+
+  while (deps.shouldContinue()) {
+    let reason = 'the poll loop ended';
+    try {
+      const worker = await deps.build();
+      await worker.run();
+      // A clean shutdown and a partition look identical from here, so `shouldContinue` is what
+      // separates them — check it before treating this as something to recover from.
+      if (!deps.shouldContinue()) return;
+    } catch (err) {
+      reason = err instanceof Error ? err.message : String(err);
+    }
+    if (!deps.shouldContinue()) return;
+
+    attempt += 1;
+    if (deps.maxRestarts !== undefined && attempt > deps.maxRestarts) return;
+    deps.onRestart?.({ attempt, backoffMs: backoff, reason });
+    await delay(backoff);
+    backoff = Math.min(backoff * 2, SUPERVISOR_MAX_BACKOFF_MS);
+  }
+}
+
+/** Builds a connected worker. Separated from `startWorker` so the supervisor can rebuild one. */
+export async function buildWorker(): Promise<Worker> {
   // Boot OpenTelemetry before any activity runs. A no-op unless `awb up` set an OTLP
   // endpoint, so a plain test/dev run starts no exporter.
   initTelemetry('awb-worker');
@@ -85,8 +139,30 @@ export async function startWorker(): Promise<Worker> {
     // small env-driven value keeps the box responsive; the deferred activities run as slots free up.
     maxConcurrentActivityTaskExecutions: cfg.maxConcurrentActivities,
   });
-  await worker.run();
   return worker;
+}
+
+/**
+ * Boots the worker and keeps it polling. The supervisor rebuilds the connection AND the worker on
+ * each restart: after a partition the old `NativeConnection` is attached to a dead socket, so
+ * reusing it reproduces the very wedge this exists to fix.
+ */
+export async function startWorker(): Promise<void> {
+  const logger = createLogger('awb-worker');
+  let running = true;
+  const stop = (): void => {
+    running = false;
+  };
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
+
+  await superviseWorker({
+    build: buildWorker,
+    shouldContinue: () => running,
+    onRestart: ({ attempt, backoffMs, reason }) => {
+      logger.warn('worker poll loop ended — rebuilding', { attempt, backoffMs, reason });
+    },
+  });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -10,7 +10,7 @@ import {
   type ServiceHealth,
   type RuntimeConfigHealth,
 } from '../health.js';
-import { RUNTIME_SERVICES, logPathFor, repoRoot, temporalPort, type ServiceKey } from '../services.js';
+import { RUNTIME_SERVICES, logPathFor, repoRoot, temporalPort, daemonPort, type ServiceKey } from '../services.js';
 import {
   startService,
   stopService,
@@ -18,6 +18,7 @@ import {
   waitForDaemonHealth,
   waitForPort,
   streamServiceLogs,
+  inspectServicePort,
 } from '../process-control.js';
 import { emitJson, outputOptions, printError, printInfo, printResult } from '../output.js';
 import { parseDuration, formatDurationCoarse } from '../duration.js';
@@ -35,6 +36,41 @@ function isServiceKey(value: string): value is ServiceKey {
  */
 const TEMPORAL_LISTEN_TIMEOUT_MS = 30_000;
 
+export interface PortConflict {
+  key: ServiceKey;
+  port: number;
+  pid?: number;
+  command?: string;
+  detail: string;
+}
+
+/**
+ * Ports a managed service needs that a FOREIGN process already holds (TASK-111). A port held by this
+ * checkout's own recorded pid is a warm stack, not a conflict, so it is not reported.
+ *
+ * Only ports AWB binds directly are checked. The OTel collector runs in a container with its own
+ * port handling, and Temporal is started before the worker by the ordering above.
+ */
+export function detectPortConflicts(): PortConflict[] {
+  const conflicts: PortConflict[] = [];
+  for (const [key, port] of [
+    ['daemon', daemonPort()],
+    ['temporal', temporalPort()],
+  ] as const) {
+    const holder = inspectServicePort(key, port);
+    if (holder.state !== 'foreign') continue;
+    const who = holder.command ? `${holder.command} (pid ${holder.pid})` : `pid ${holder.pid}`;
+    conflicts.push({
+      key,
+      port,
+      ...(holder.pid !== undefined ? { pid: holder.pid } : {}),
+      ...(holder.command ? { command: holder.command } : {}),
+      detail: `port ${port} is held by ${who}, which this checkout did not start`,
+    });
+  }
+  return conflicts;
+}
+
 /**
  * Starts the runtime services (idempotent) and waits until the whole runtime reports ready.
  *
@@ -51,6 +87,8 @@ async function ensureRuntime(opts: { verbose?: boolean } = {}): Promise<{
   runtimeConfig?: RuntimeConfigHealth;
   /** Services still not ready when the wait ended. Empty on success; drives the error message. */
   blockers: { key: ServiceKey; state: string }[];
+  /** Ports held by a process this checkout did not start (TASK-111). Non-empty means nothing was started. */
+  portConflicts?: PortConflict[];
 }> {
   const start = Date.now();
   const before = await probeHealth();
@@ -66,6 +104,20 @@ async function ensureRuntime(opts: { verbose?: boolean } = {}): Promise<{
       blockers: [],
     };
   }
+  // TASK-111: refuse to boot into someone else's port rather than crash-looping on EADDRINUSE. A
+  // stale `tsx watch` daemon from a DIFFERENT worktree held 4417 once and the main daemon restarted
+  // against it ~70 times; the only symptom was a stack that never became healthy.
+  const conflicts = detectPortConflicts();
+  if (conflicts.length > 0) {
+    return {
+      ready: false,
+      alreadyReady: false,
+      elapsedMs: Date.now() - start,
+      blockers: conflicts.map((c) => ({ key: c.key, state: c.detail })),
+      portConflicts: conflicts,
+    };
+  }
+
   // Drop pid files left by a crashed service, so a boot after a crash does not leave `doctor`
   // reporting a stale-pid warning nothing clears (TASK-127).
   for (const key of ALL_SERVICES) clearStalePid(key);
@@ -160,7 +212,7 @@ export function registerLifecycleCommands(program: Command): void {
       if (opts.isolated === true) applyIsolation();
       const cfg = resolveRuntimeConfig();
       const verbose = opts.verbose === true || outputOptions().verbose;
-      const { ready, alreadyReady, elapsedMs, runtimeConfig, blockers } = await ensureRuntime({ verbose });
+      const { ready, alreadyReady, elapsedMs, runtimeConfig, blockers, portConflicts } = await ensureRuntime({ verbose });
       const stack = {
         daemonUrl: cfg.daemonUrl,
         temporalAddress: cfg.temporalAddress,
@@ -178,11 +230,21 @@ export function registerLifecycleCommands(program: Command): void {
           runtimeConfig: runtimeConfig ?? null,
           envMismatch: mismatch,
           blockers,
+          portConflicts: portConflicts ?? [],
         });
         if (!ready) process.exitCode = 1;
         return;
       }
       if (!ready) {
+        // TASK-111: a foreign port holder is a different failure from a slow boot, and it has a
+        // different fix. Say which, and name the process, instead of leaving it in daemon.log.
+        if (portConflicts && portConflicts.length > 0) {
+          printError('refusing to start: another process already holds a port this stack needs');
+          for (const c of portConflicts) printError(`  - ${c.key}: ${c.detail}`);
+          printError('Next: stop that process, or run `awb up --isolated` to use a private port block.');
+          process.exitCode = 1;
+          return;
+        }
         // Name the service that is actually stuck. "daemon unhealthy" was reported even when the
         // daemon was fine and the worker was still building its bundle (TASK-127).
         const detail = blockers.map((b) => `${b.key}=${b.state}`).join(' ');

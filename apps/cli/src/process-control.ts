@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { writeFileSync, readFileSync, existsSync, unlinkSync, openSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { logPathFor, pidPathFor, serviceDefinition, uiPort, type ServiceKey } from './services.js';
@@ -201,4 +201,51 @@ export function streamServiceLogs(keys: ServiceKey[]): { stop: () => void } {
       clearInterval(interval);
     },
   };
+}
+
+/**
+ * Who, if anyone, is holding `port` — and is it a service this checkout started? (TASK-111)
+ *
+ * Observed live: a `tsx watch` daemon from a DIFFERENT worktree held 4417, and the main daemon
+ * crash-looped against it — `daemon.log` filled with ~70 alternating "daemon listening" and
+ * `EADDRINUSE` lines. Nothing detected or refused the second binding, so the only symptom was a
+ * stack that never became healthy and a log nobody had a reason to read.
+ *
+ * `foreign` is the case worth refusing: the port is taken by a process that is not the pid this
+ * checkout recorded, so starting the service can only reproduce the crash-loop.
+ */
+export type PortHolder =
+  | { state: 'free' }
+  /** Held by the pid this checkout's own pid file names — a warm stack, which is fine. */
+  | { state: 'ours'; pid: number }
+  /** Held by something else entirely (another worktree's daemon, an unrelated process). */
+  | { state: 'foreign'; pid?: number; command?: string };
+
+/**
+ * The pid holding a TCP port, via `lsof`. Returns undefined when the port is free, `lsof` is absent,
+ * or the lookup fails — callers treat "unknown" as "free" so a missing tool can never block a boot.
+ */
+export function pidHoldingPort(port: number): { pid: number; command?: string } | undefined {
+  try {
+    const out = execFileSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpc'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    // `-F` output is one field per line, prefixed by its type: `p<pid>`, `c<command>`.
+    const pid = /^p(\d+)$/m.exec(out)?.[1];
+    if (!pid) return undefined;
+    const command = /^c(.+)$/m.exec(out)?.[1];
+    return { pid: Number(pid), ...(command ? { command } : {}) };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Classifies the holder of a managed service's port against the pid this checkout recorded. */
+export function inspectServicePort(key: ServiceKey, port: number): PortHolder {
+  const holder = pidHoldingPort(port);
+  if (!holder) return { state: 'free' };
+  const ours = readServicePid(key);
+  if (ours !== undefined && ours === holder.pid) return { state: 'ours', pid: holder.pid };
+  return { state: 'foreign', pid: holder.pid, ...(holder.command ? { command: holder.command } : {}) };
 }
