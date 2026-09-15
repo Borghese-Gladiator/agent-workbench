@@ -548,6 +548,11 @@ changing this repo with this repo.
 **How we'll know it's done.** A branch + draft PR on this repo produced by the
 workbench, with a short writeup of what was awkward.
 
+> **Status 2026-09-13 (TASK-118/119/122 pass).** Still blocked, and the blocker has not moved:
+> TASK-104 is implemented but sits in an open draft PR, not in `main`. Driving the dogfood now would
+> drive it through the very gate machinery TASK-104 removes. Full status, plus the friction this
+> backlog pass surfaced, in `docs/research/dogfood-status-2026-09.md`.
+>
 > **Partial dogfood run (2026-08-15).** Registered `agent-workbench` and drove a
 > task (re-tighten TASK-78's worktree-dir tests). Discovery, contract, plan,
 > prepare, and **implement all succeeded on the real repo** — the agent correctly
@@ -617,7 +622,7 @@ than being separate — triage together.
 **How we'll know it's done.** A mid-run fact survives a session that ends without a clean
 closeout (verified by killing a session mid-task and checking memory was still written).
 
-### [ ] TASK-118: Evaluate markitdown as the context-ingestion converter (PDF/docx/pptx → md), replacing ad-hoc pdfminer
+### [x] TASK-118: Evaluate markitdown as the context-ingestion converter (PDF/docx/pptx → md), replacing ad-hoc pdfminer
 
 **What's wrong today.** Context ingestion for non-markdown documents is ad hoc — the
 Karpathy PDF was converted via pdfminer as a one-off (`group-e-token-memory-graph`), not
@@ -639,7 +644,7 @@ ingestion / memory tooling).
 markitdown and confirm output quality is equal or better than the pdfminer one-off; decide
 adopt or decline.
 
-### [ ] TASK-119: Test whether a `design.md`-style structured design spec improves from-scratch UI output (flag on TASK-99)
+### [x] TASK-119: Test whether a `design.md`-style structured design spec improves from-scratch UI output (flag on TASK-99)
 
 **What's wrong today.** TASK-99's `build-ui` skill has no structured design-spec input —
 it relies on prompt guidance alone, with no tokens/layout/light-dark spec file feeding
@@ -712,7 +717,7 @@ CLI). Low priority.
 **How we'll know it's done.** *Manual:* after driving several tasks, one command/page shows
 the batch rollup (opened PRs, unmet-criteria count) without opening each task individually.
 
-### [ ] TASK-122: OS-level sandbox for untrusted repos (deferred — only if the `native-trusted` model changes)
+### [x] TASK-122: OS-level sandbox for untrusted repos (deferred — only if the `native-trusted` model changes)
 
 **What's wrong today.** Execution is confined by the capability broker + worktree
 isolation, which is explicitly `native-trusted` — **not** a hostile-code sandbox

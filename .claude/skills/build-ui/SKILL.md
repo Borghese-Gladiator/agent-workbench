@@ -65,9 +65,15 @@ If the interface still looks good after removing an effect, remove the effect.
 
 ## Establish the system first
 
-Before building more than a tiny one-screen UI, define a small visual system in code or in a short `design.md`.
+Before building more than a tiny one-screen UI, write `design.md` from
+`references/design-template.md` and fill it in. Write it BEFORE any component.
 
-Specify:
+This is required, not optional (TASK-119). Scattering the same values through component code
+satisfies nobody: there is then no single place where light and dark can be seen to disagree, and
+no artifact a reviewer can check. The template exists so the file has the same shape every time and
+can be diffed between runs.
+
+It specifies:
 
 * surface and text tokens for light and dark
 * one accent color
@@ -430,6 +436,8 @@ Finish only when:
 
 * React + Tailwind + shadcn/ui are used consistently unless the project requires otherwise
 * the screen follows the restrained Linear/Vercel/Raycast-inspired house style
+* `design.md` exists, is filled in, and its own check list passes
+* every color in a component traces to a token in `design.md` — no stray hex values
 * light and dark tokens are coherent
 * typography and spacing use a limited scale
 * hierarchy and primary action are obvious
