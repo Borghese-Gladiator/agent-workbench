@@ -86,7 +86,6 @@ export const ArtifactKindSchema = z.enum([
   'agent-input',
   'agent-output',
   'review-report',
-  'repository-map',
   'program-design',
   'manifest',
   'other',

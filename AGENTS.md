@@ -20,9 +20,6 @@ direct response to why v1–v4 were replaced.
 - SQLite + Drizzle ORM (workbench state), FTS5 (search)
 - Git CLI, Octokit/`gh` (GitHub delivery)
 - Playwright (browser QA + PR video upload), FFmpeg (video processing)
-- web-tree-sitter (repository symbol/unit extraction — native `tree-sitter`
-  does not build against Node 24's C++20 V8 headers on this machine; see
-  `packages/repository-map/README.md`)
 - Vitest (all tests)
 
 ## Architecture
@@ -82,7 +79,6 @@ top-level `tests/`. Nothing under `packages/` runs on its own — `apps/` and
 | `~/.agentic-workbench` layout, config.yaml | `packages/config` |
 | Content-addressed artifact store | `packages/evidence` |
 | Git inspection, command discovery, snapshots | `packages/repository` |
-| tree-sitter unit/symbol/import extraction | `packages/repository-map` |
 | Project memory (facts, FTS5 retrieval, invalidation) | `packages/repository-memory` |
 | Temporal Workflows + deterministic completion policy | `packages/workflow` |
 | Git worktree/branch/port lease management | `packages/workspace` |

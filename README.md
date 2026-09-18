@@ -165,7 +165,7 @@ pnpm --filter @awb/daemon dev
 apps/                    cli, daemon (Fastify API), web (React/Vite dashboard)
 workers/temporal-worker  Temporal Activities (the only place I/O happens) + Workflow registration
 packages/                domain, config, database, evidence, repository,
-                         repository-map, repository-memory, workflow, workspace,
+                         repository-memory, workflow, workspace,
                          execution, agent-gateway, capability-broker, planning,
                          verification, qa, review, github, policy, telemetry —
                          see docs/dependencies.md for the dependency graph

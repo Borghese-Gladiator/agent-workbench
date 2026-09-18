@@ -28,8 +28,8 @@ detection, fact extraction, and snapshot persistence.
 - Store or invalidate `RepositoryFact`s long-term — this package produces
   facts as part of a snapshot; `@awb/repository-memory` owns storage,
   retrieval, and invalidation across snapshots.
-- Extract symbols or build an import graph — that's `@awb/repository-map`
-  (tree-sitter-based), a distinct concern from Git/command/unit discovery.
+- Extract symbols or build an import graph — a distinct concern from
+  Git/command/unit discovery.
 - Validate that discovered commands actually succeed — commands start life
   as `declared`/`inferred`; validation (running them) is a later milestone
   (`@awb/verification`).

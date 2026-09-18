@@ -174,6 +174,5 @@ export const RepositorySnapshotSchema = z.object({
    * from-scratch UI slice should be pointed at the `build-ui` skill.
    */
   hasExistingFrontend: z.boolean(),
-  repositoryMapArtifactId: z.string().optional(),
 });
 export type RepositorySnapshot = z.infer<typeof RepositorySnapshotSchema>;

@@ -26,8 +26,7 @@ export type MemorySort = 'recency' | 'confidence';
  *    (validated > declared > inferred).
  *
  * Symbol-name lookup is intentionally NOT implemented here: this package doesn't own a symbol
- * index (that's `repository_symbols` / `@awb/repository-map`'s domain). `symbolLookup` is a
- * pass-through hook — if provided, its result paths are unioned into the path/proximity
+ * index. `symbolLookup` is a pass-through hook — if provided, its result paths are unioned into the path/proximity
  * filtering so a symbol-name query can compose with this package's fact store once a symbol
  * index is wired up by the caller.
  */

@@ -22,9 +22,6 @@ Every package under `packages/` ships its own `*.test.ts` files, run via
   fingerprints compare equal; any one differing compares unequal.
 - Artifact hashing + content-addressed dedup (`packages/evidence`) — see
   `artifact-store.test.ts`.
-- Cache-key construction (`packages/repository-map`) — same inputs (repo SHA,
-  file hash, tool/parser version, config hash) produce the same key; any
-  differing input changes the key.
 - Permission/capability-broker policies (`packages/capability-broker`) — each
   role's allow/deny table is exercised positively and negatively.
 - Human-gate trigger conditions (`packages/policy`) — each conditional gate

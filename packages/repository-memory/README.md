@@ -18,8 +18,8 @@ accesses — the incremental project-memory behavior.
   function covering exact path, unit prefix, changed-path directory
   proximity, FTS5 full-text (delegated to `@awb/database`), confidence
   filter, and recency/confidence sort. A `symbolLookup` hook lets callers
-  compose symbol-name queries against `@awb/repository-map`'s symbol table
-  without this package owning a symbol index itself.
+  compose symbol-name queries against a symbol index without this package
+  owning one itself.
 - `invalidateFacts(db, repositoryId, changedPaths)` — soft-invalidates any
   fact whose `sourcePaths` or `invalidatedByPaths` overlap the changed set
   (via the pre-existing `supersededBy` column), leaving unaffected facts
