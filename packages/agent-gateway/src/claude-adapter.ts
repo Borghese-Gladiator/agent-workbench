@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
-import { query } from '@anthropic-ai/claude-agent-sdk';
+import { query, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
+import type { McpSdkServerConfigWithInstance, SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
 import type { ModelUsage } from '@awb/domain';
 import type {
   AgentAssignment,
@@ -115,6 +116,11 @@ export interface ClaudeSdkQueryOptions {
   model?: string;
   abortController?: AbortController;
   /**
+   * In-process MCP servers (from `createSdkMcpServer`) exposing custom tools for this query. Only
+   * set when the caller granted `CreateAgentSessionInput.tools`.
+   */
+  mcpServers?: Record<string, McpSdkServerConfigWithInstance>;
+  /**
    * The SDK's permission mode. Workbench sessions run headless in a worker with no human to answer
    * interactive tool-permission prompts, so the default mode leaves every tool call denied ("Claude
    * requested permissions … but you haven't granted it yet") and the agent makes no edits. Sessions
@@ -133,6 +139,18 @@ export type ClaudeQueryFn = (params: { prompt: string; options?: ClaudeSdkQueryO
 
 /** Default query function: the real SDK. */
 const realQuery: ClaudeQueryFn = (params) => query(params) as unknown as ClaudeSdkQueryHandle;
+
+/** The one in-process MCP server name this adapter registers a session's custom `tools` under. */
+const CUSTOM_TOOLS_MCP_SERVER_NAME = 'awb-tools';
+
+/**
+ * The fully-qualified SDK tool name for a custom tool registered via `CreateAgentSessionInput.tools`
+ * — the SDK exposes an MCP server's tools as `mcp__<server>__<tool>`. A caller must put this in
+ * `allowedTools` for the tool to actually be usable (granting `tools` alone does not auto-approve it).
+ */
+export function sdkMcpToolName(toolName: string): string {
+  return `mcp__${CUSTOM_TOOLS_MCP_SERVER_NAME}__${toolName}`;
+}
 
 /** Thrown by `completeOnce` when the completion did not produce usable text (SDK error, error result, or empty output). */
 export class CompletionError extends Error {
@@ -194,6 +212,8 @@ interface ClaudeSessionState {
   model?: string;
   resumeSessionId?: string;
   liveQuery?: ClaudeSdkQueryHandle;
+  /** Built once at createSession from `CreateAgentSessionInput.tools`, when present. */
+  mcpServer?: McpSdkServerConfigWithInstance;
 }
 
 /**
@@ -287,6 +307,13 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
       // Seed the resume token if the caller is resuming a prior (possibly cross-process)
       // session. When set, `execute` skips the context preamble and passes `resume` to the SDK.
       resumeSessionId: input.resumeSessionId,
+      mcpServer:
+        input.tools && input.tools.length > 0
+          ? createSdkMcpServer({
+              name: CUSTOM_TOOLS_MCP_SERVER_NAME,
+              tools: input.tools as SdkMcpToolDefinition<any>[],
+            })
+          : undefined,
     });
     return session;
   }
@@ -329,6 +356,7 @@ export class ClaudeAgentAdapter implements CodingAgentAdapter {
         maxTurns: assignment.stopConditions?.maxTurns,
         resume: state.resumeSessionId,
         model: state.model,
+        mcpServers: state.mcpServer ? { [CUSTOM_TOOLS_MCP_SERVER_NAME]: state.mcpServer } : undefined,
         abortController,
         // Headless worker: no human to answer per-tool permission prompts. See the option's doc.
         permissionMode: 'bypassPermissions',

@@ -39,6 +39,16 @@ export interface CreateAgentSessionInput {
    * The mock adapter accepts and ignores it.
    */
   resumeSessionId?: string;
+  /**
+   * Custom in-process tool definitions this session should expose, beyond whatever core SDK tools
+   * `allowedTools` grants. Built with `@awb/agent-gateway`'s re-exported `tool()` helper — kept as
+   * `unknown[]` here (not the SDK's own type) so this provider-neutral interface stays neutral.
+   * Only the Claude adapter honors this (it wraps them in one `createSdkMcpServer` and passes it as
+   * the SDK's `mcpServers`); every other adapter ignores it, the same as `model`/`resumeSessionId`.
+   * A caller granting a custom tool must ALSO put its fully-qualified name (`sdkMcpToolName(name)`)
+   * in `allowedTools`, or the SDK denies it like any other ungranted tool.
+   */
+  tools?: unknown[];
 }
 
 export interface AgentSession {

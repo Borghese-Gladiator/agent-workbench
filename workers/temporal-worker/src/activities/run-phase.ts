@@ -8,7 +8,6 @@ import type {
   ProgramDesign,
   ValidatedCommand,
   Finding,
-  ClaimCoverage,
   Evidence,
 } from '@awb/domain';
 import type { TaskWorkflowState } from '@awb/workflow';
@@ -33,8 +32,7 @@ import {
   resolveHasExistingFrontend,
   installWorktreeDependencies,
 } from './command-support.js';
-import { runBrowserQaViaServer } from './browser-qa-support.js';
-import { selectQaMode, detectRepoShape } from './qa-mode.js';
+import { runQaExecutorSession, type QaExecutorSessionResult } from './qa-executor-support.js';
 import { draftContractInputFromPrompt, formatContractGateSummary } from './contract-support.js';
 import { classifyTaskSize, SIZE_CLASSIFIER_MODEL } from './classifier-support.js';
 import { programDesignInstruction, parseProgramDesignOutput } from './program-design-support.js';
@@ -64,15 +62,10 @@ import {
 } from '@awb/verification';
 import {
   runCliQa,
-  runBrowserQa,
-  runHttpApiQa,
-  runLibraryQa,
   evaluateBehavioralClaimCoverage,
   behavioralClaimsWithUntouchedTarget,
-  buildInteractiveScenarioSteps,
   scenarioStrength,
   type QaEvidenceContext,
-  type BrowserQaStep,
 } from '@awb/qa';
 import {
   runAdversarialReview,
@@ -318,34 +311,6 @@ function slugForId(text: string): string {
       .replace(/^-+|-+$/g, '')
       .slice(0, 40) || 'slice'
   );
-}
-
-/** The framework-agnostic landmark liveness scenario, used when a plan declared no expected
- *  per-claim assertions to derive interactive steps from. A navigate + landmark `expectVisible`
- *  proves the page rendered real content; it is (deliberately) all-liveness/structural, so a plan
- *  that relies on it alone scores `weak` at the exercise gate and cannot cover a behavior claim. */
-const LANDMARK_FALLBACK_STEPS: BrowserQaStep[] = [
-  { kind: 'navigate', url: '/' },
-  {
-    kind: 'expectVisible',
-    selector: 'h1, h2, header, nav, main, [role="banner"], [role="main"]',
-    livenessOnly: true,
-  },
-  { kind: 'screenshot', name: 'landing' },
-];
-
-/**
- * Build the browser exercise scenario from the plan's per-claim expected assertions. Each claim
- * with declared `expectedAssertions` contributes real interactive steps (click the control + a
- * strong assertion, plus a repeated-click socket-idempotency check when applicable) via
- * `buildInteractiveScenarioSteps`; a claim with none contributes nothing on its own. When the plan
- * declares no expected assertions at all, we fall back to the landmark liveness scenario — which
- * is deliberately weak, so `scenarioStrength` scores it `weak` and it cannot cover a behavior claim.
- */
-function buildExerciseScenarioSteps(claimCoverage: ClaimCoverage[]): BrowserQaStep[] {
-  const expected = claimCoverage.flatMap((c) => c.expectedAssertions ?? []);
-  if (expected.length === 0) return LANDMARK_FALLBACK_STEPS;
-  return [{ kind: 'navigate', url: '/' }, ...buildInteractiveScenarioSteps(expected)];
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1246,147 +1211,106 @@ const exerciseHandler: PhaseHandler = {
       claimIds: runState.contract?.claims.map((c) => c.id) ?? [],
     };
 
-    // Real browser QA: when AWB_QA_MODE=browser and the repo has a discovered dev-server
-    // start command, start it and run runBrowserQa (real chromium → real .webm video + .zip trace)
-    // against it. Otherwise fall back to the CLI QA executor. `ranBrowserQa` tracks which path ran so
-    // `browserScenariosHaveTraces` reflects a real trace artifact rather than a hardcoded true.
-    // QA executor selection by repo surface. AWB_QA_MODE picks the executor: `browser`
-    // (real dev-server + chromium), `http-api` (scripted real HTTP against a running API), `library`
-    // (a real consumer script exercising the built library), or the default CLI executor. The
-    // http-api/library modes were fully-implemented but had no runtime caller before this.
-    type QaResult =
-      | Awaited<ReturnType<typeof runCliQa>>
-      | Awaited<ReturnType<typeof runBrowserQa>>
-      | Awaited<ReturnType<typeof runHttpApiQa>>
-      | Awaited<ReturnType<typeof runLibraryQa>>;
+    // TASK-131: the mock path stays exactly what the retired ladder's always-pass `cli-default`
+    // fallback ran — every existing deterministic test is unaffected. The real path (below) runs
+    // one qa-executor agent session instead of picking a fixed executor by repo-shape guesswork.
+    type QaResult = Awaited<ReturnType<typeof runCliQa>> | QaExecutorSessionResult;
     let qaResult: QaResult;
     let ranBrowserQa = false;
-    const qaMode = ctx.profile.usesRealAgent ? process.env.AWB_QA_MODE : undefined;
-    // TASK-65: resolve the start command against the task WORKTREE (post-implement), not just the
-    // registered-repo snapshot — a greenfield app's runnable form only exists after implement, so the
-    // DB `start` row is empty. Tiers: persisted command → worktree discovery → framework inference.
-    const resolvedStart =
-      qaMode === 'browser' && runState.worktreePath
-        ? await resolveStartCommandForWorktree({
-            repositoryId: state.repositoryId,
-            worktreePath: runState.worktreePath,
-            requestedBaseUrl: process.env.AWB_QA_BASE_URL,
-          })
-        : undefined;
 
-    // TASK-73: one decision, made once, in a pure function. `AWB_QA_MODE=browser` is a REQUEST — it
-    // is honored only when something actually serves, and otherwise degrades to a defined
-    // non-browser mode instead of the old `exit 1` dead-end. Repo shape is read only when the
-    // fallback might need it, so the happy path costs no extra disk reads.
-    const needsShape = qaMode === 'browser' && resolvedStart?.serves !== true && Boolean(runState.worktreePath);
-    const selection = selectQaMode({
-      requestedMode: qaMode,
-      resolved: resolvedStart,
-      repoShape: needsShape
-        ? await detectRepoShape(runState.worktreePath as string)
-        : { servesHttp: false, isLibrary: false },
-      requestedBaseUrl: process.env.AWB_QA_BASE_URL,
-    });
-    if (selection.mode !== 'browser' && qaMode === 'browser') {
-      log.info('browser QA was requested but nothing serves — running a non-browser QA fallback (TASK-73)', {
-        taskId: state.taskId,
-        fallbackMode: selection.mode,
-        resolvedServes: resolvedStart?.serves ?? null,
-      });
-    }
-
-    if (selection.mode === 'browser' && runState.worktreePath) {
-      ranBrowserQa = true;
-      // A caller-supplied AWB_QA_BASE_URL still wins; otherwise use the resolver's baseUrl (which the
-      // framework-inference tier matches to the port its start command binds to).
-      const baseUrl = selection.baseUrl;
-      qaResult = await ctx.observability.time('qaExecutionMs', () =>
-        runBrowserQaViaServer({
-          startCommand: selection.command,
-          worktreePath: runState.worktreePath as string,
-          baseUrl,
-          scenario: {
-            baseUrl,
-            steps: buildExerciseScenarioSteps(runState.plan?.claimCoverage ?? []),
-          },
-          context,
-          artifactStore: runState.artifactStore,
-        }),
-      );
-      // The dev server booted (runBrowserQaViaServer throws otherwise). If this command came from
-      // inference/worktree-discovery rather than the already-persisted profile row, write it back so
-      // the next exercise run is a Tier-1 hit instead of re-inferring. Best-effort — QA already
-      // passed, so a persist failure must not fail the phase. Mock/non-durable path has no daemon.
-      if (ctx.daemon && resolvedStart?.source !== 'repository-commands') {
-        try {
-          await ctx.daemon.persistStartCommand({
-            repositoryId: state.repositoryId,
-            command: selection.command,
-            cwd: runState.worktreePath,
-            validatedAtSha: context.candidateSha,
-          });
-        } catch {
-          // non-fatal: the profile just misses the cache and re-infers next time
-        }
-      }
-    } else if (selection.mode === 'cli-run') {
-      // TASK-73: the project resolved to a one-shot run / CLI / compiled binary. Run its OWN command
-      // and assert it exits cleanly — the `serves: false` consumer `run-command.ts:26-28` and
-      // `command-support.ts:143-145` both anticipated and neither wrote.
+    if (!ctx.profile.usesRealAgent) {
       qaResult = await ctx.observability.time('qaExecutionMs', () =>
         runCliQa(
           {
-            command: 'sh',
-            args: ['-c', selection.command],
+            command: 'echo',
+            args: ['qa-ok'],
             cwd,
-            expectations: [{ kind: 'exitCode', equals: 0 }],
-          },
-          context,
-          runState.artifactStore,
-        ),
-      );
-    } else if (selection.mode === 'http-api') {
-      const baseUrl = process.env.AWB_QA_BASE_URL ?? 'http://localhost:3000';
-      qaResult = await ctx.observability.time('qaExecutionMs', () =>
-        runHttpApiQa(
-          {
-            baseUrl,
-            requests: [{ method: 'GET', path: '/', expectations: [{ kind: 'status', equals: 200 }] }],
-          },
-          context,
-          runState.artifactStore,
-        ),
-      );
-    } else if (selection.mode === 'library') {
-      qaResult = await ctx.observability.time('qaExecutionMs', () =>
-        runLibraryQa(
-          {
-            consumerScriptSource:
-              process.env.AWB_QA_LIBRARY_SCRIPT ?? 'console.log("ASSERT:library-importable=true");',
+            expectations: [{ kind: 'exitCode', equals: 0 }, { kind: 'stdoutContains', text: 'qa-ok' }],
           },
           context,
           runState.artifactStore,
         ),
       );
     } else {
-      // The generic CLI executor. It covers no behavioral claim on its own — and that is fine,
-      // because `everyBehavioralClaimCovered` in the exercise completion gate is what blocks an
-      // unproven claim. TASK-73 removed the `exit 1` that used to sit here: a missing dev server is
-      // a QA-mode problem, not a reason to dead-end a finished, verified change.
+      const worktreePath = requireWorktreeCwd(ctx.profile, runState.worktreePath, 'exercise', state.taskId);
+      // TASK-65's resolver still runs — but only as a non-binding HINT the qa-executor session may
+      // ignore. `detectRepoShape`'s guessing ladder and the old `cli-default` always-pass fallback
+      // are retired: a wrong/missing hint no longer determines the outcome, the agent does.
+      const resolvedStart = await resolveStartCommandForWorktree({
+        repositoryId: state.repositoryId,
+        worktreePath,
+        requestedBaseUrl: process.env.AWB_QA_BASE_URL,
+      });
 
-      qaResult = await ctx.observability.time('qaExecutionMs', () =>
-        runCliQa(
-        {
-          command: 'echo',
-          args: ['qa-ok'],
-          cwd,
-          expectations: [{ kind: 'exitCode', equals: 0 }, { kind: 'stdoutContains', text: 'qa-ok' }],
-        },
-        context,
-        runState.artifactStore,
-        ),
+      const claims = runState.contract?.claims.filter((c) => c.qaEvidenceRequired) ?? [];
+      const expectedAssertionsByClaim = Object.fromEntries(
+        (runState.plan?.claimCoverage ?? []).map((c) => [c.claimId, c.expectedAssertions ?? []]),
       );
+
+      const adapter = createAgentAdapter(ctx.strategy, resolveRuntimeConfig(), 'exercise');
+      const { sink, flush } = createPhaseEventSink({
+        artifactsDir: runState.artifactsDir as string,
+        taskId: state.taskId,
+        role: 'qa-executor',
+        phase: 'exercise',
+        attemptNumber: state.attemptNumber,
+        durable: ctx.profile.usesDurableRunState,
+      });
+      await ctx.controlPlane?.sessionStarted({ role: 'qa-executor', cwd: worktreePath, resumeKey: 'exercise' });
+      const qaStart = Date.now();
+      const attempt = await ctx.observability.time('qaExecutionMs', () =>
+        runQaExecutorSession({
+          adapter,
+          taskId: state.taskId,
+          worktreePath,
+          context,
+          artifactStore: runState.artifactStore,
+          claims,
+          expectedAssertionsByClaim,
+          startCommandHint:
+            resolvedStart?.serves === true ? { command: resolvedStart.command, baseUrl: resolvedStart.baseUrl } : undefined,
+          disallowedTools: deniedToolsForBrokerRole('qa-executor', ctx.profile),
+          tokenBudget: 10_000,
+          runtimeBudgetMs: 5 * 60_000,
+          eventSink: sink,
+        }),
+      );
+      ctx.usage.record(attempt.usage, attempt.runtimeMs);
+      ctx.observability.recordSession({
+        sessionId: `${state.taskId}-exercise-${state.attemptNumber}`,
+        taskId: state.taskId,
+        runId: `${state.taskId}-run`,
+        phaseAttemptId: context.phaseAttemptId,
+        phase: 'exercise',
+        role: 'qa-executor',
+        runtime: ctx.strategy,
+        usage: attempt.usage,
+        runtimeMs: attempt.runtimeMs,
+        startedAtMs: qaStart,
+        contextComposition: estimateContextComposition({ claims }, ''),
+        resumeSessionId: attempt.sessionId,
+      });
+      await flush();
+
+      // The agent found and validated a working run command itself — cache it the same way the
+      // retired ladder's Tier-1 write-back did, best-effort, so the next exercise run is a hit.
+      if (ctx.daemon && attempt.discoveredStartCommand && resolvedStart?.source !== 'repository-commands') {
+        try {
+          await ctx.daemon.persistStartCommand({
+            repositoryId: state.repositoryId,
+            command: attempt.discoveredStartCommand.command,
+            cwd: worktreePath,
+            validatedAtSha: context.candidateSha,
+          });
+        } catch {
+          // non-fatal: the profile just misses the cache and re-infers next time
+        }
+      }
+
+      ranBrowserQa = attempt.artifacts.some((a) => a.kind === 'browser-trace');
+      qaResult = attempt;
     }
+
     runState.qaEvidence.push(qaResult.evidence);
     const structuredAssertionsPass = qaResult.assertions.every((a) => a.passed);
     const hasTraceArtifact = qaResult.artifacts.some((a) => a.kind === 'browser-trace');

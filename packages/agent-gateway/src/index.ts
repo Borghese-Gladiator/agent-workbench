@@ -14,3 +14,7 @@ export * from './runtime-profile.js';
 export * from './phase-model-routing.js';
 export * from './capability-tools.js';
 export * from './transport-errors.js';
+// Re-exported so a caller can build `CreateAgentSessionInput.tools` (custom in-process MCP tools,
+// see claude-adapter.ts's `sdkMcpToolName`) without taking a direct dependency on the SDK package.
+export { tool } from '@anthropic-ai/claude-agent-sdk';
+export type { SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
