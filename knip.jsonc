@@ -1,0 +1,48 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    "apps/*": {},
+    "packages/*": {},
+    "workers/*": {},
+    // Real usage, but via `require.resolve(`tree-sitter-wasms/out/${name}.wasm`)` in
+    // parser.ts -- a dynamic subpath knip's static import analysis can't trace.
+    "packages/repository-map": { "ignoreDependencies": ["tree-sitter-wasms"] },
+    // The rest below are confirmed-unused (grep-verified 2026-09-18), not tool false
+    // positives. Left in place: removing them touches each package's own package.json,
+    // which is a source change outside TASK-129's scope (add the tool + a first triage).
+    "packages/capability-broker": { "ignoreDependencies": ["@awb/domain"] },
+    "packages/database": { "ignoreDependencies": ["@awb/config", "drizzle-kit"] },
+    "packages/evidence": { "ignoreDependencies": ["zod"] },
+    "packages/execution": { "ignoreDependencies": ["@awb/domain"] },
+    "packages/github": { "ignoreDependencies": ["@awb/evidence"] },
+    "packages/repository": { "ignoreDependencies": ["yaml"] },
+    "packages/review": { "ignoreDependencies": ["@awb/evidence"] },
+    "packages/telemetry": { "ignoreDependencies": ["@opentelemetry/semantic-conventions"] },
+    "packages/workflow": { "ignoreDependencies": ["@temporalio/activity"] }
+  },
+  "ignore": [
+    // Kept intentionally as historical reference per AGENTS.md.
+    "archive/**",
+    // Documented manual diagnostics, not a package with exports to track.
+    "scripts/**",
+    // shadcn scaffolds the full component API on `add`; not every generated primitive,
+    // sub-part, or variant export is wired into a page yet. Kept in full, same rationale
+    // as archive/ above, rather than pruned to only what's currently consumed.
+    "apps/web/src/components/ui/**"
+  ],
+  // Confirmed-unused (grep-verified 2026-09-18), root-level only declaration.
+  "ignoreDependencies": ["gray-matter"],
+  "rules": {
+    // First triage pass (2026-09-18): the 19 exports + 19 types findings are a mix of
+    // real dead code (e.g. buildExecutionTree, detectPortConflicts -- confirmed unused
+    // by grep) and types used only for structural inference (e.g. the apps/web API
+    // response interfaces). Keep both as visible signal for now; don't block the build
+    // on them yet (see TASK-129: "confirm signal quality before deciding whether it
+    // should gate"). Deleting the confirmed-dead ones is a source change, out of scope
+    // for this ticket.
+    "exports": "warn",
+    "types": "warn",
+    "nsExports": "warn",
+    "nsTypes": "warn"
+  }
+}
