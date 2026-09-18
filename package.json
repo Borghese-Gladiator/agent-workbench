@@ -16,7 +16,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "report:tokens": "tsx scripts/token-usage-report.ts",
-    "audit:docs": "scripts/audit-docs.sh"
+    "audit:docs": "scripts/audit-docs.sh",
+    "audit:deadcode": "knip"
   },
   "devDependencies": {
     "@awb/config": "workspace:*",
@@ -26,6 +27,7 @@
     "@typescript-eslint/parser": "^8.18.0",
     "eslint": "^9.17.0",
     "gray-matter": "^4.0.3",
+    "knip": "^6.37.0",
     "prettier": "^3.4.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
