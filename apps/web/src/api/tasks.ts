@@ -1,5 +1,20 @@
 export type TaskSize = 'S' | 'M' | 'L';
 
+/**
+ * The report a bounded loop produces when it stops without proving every acceptance claim
+ * (TASK-105). Mirrors `@awb/domain`'s `UnmetCriteria`; the web app keeps its own wire types so it
+ * does not depend on the backend package.
+ */
+export interface UnmetCriteria {
+  stopReason: 'converged-unmet' | 'budget-exhausted' | 'genuinely-stuck' | 'phase-blocked';
+  phase: string;
+  unprovenClaims: string[];
+  reasons: string[];
+  candidateSha?: string;
+  findingIds: string[];
+  detail: string;
+}
+
 export interface TaskWorkflowState {
   taskId: string;
   repositoryId: string;
@@ -13,14 +28,11 @@ export interface TaskWorkflowState {
   phaseSet?: string[];
   latestCandidateEvidenceIds: string[];
   openFindingIds: string[];
-  pendingHumanGate?: {
-    id: string;
-    taskId: string;
-    phase: string;
-    reason: string;
-    summary: string;
-    createdAt: string;
-  };
+  /**
+   * Set when the bounded loop stopped without proving every acceptance claim (TASK-105). Read-only:
+   * there is nothing to approve, and the draft PR carries the full report.
+   */
+  unmetCriteria?: UnmetCriteria;
   tokenUsageTotal: { inputTokens: number; outputTokens: number };
   runtimeMsByPhase: Record<string, number>;
 }
@@ -88,7 +100,7 @@ export interface TaskFreshness {
 export interface TaskStateResponse {
   state: TaskWorkflowState;
   openFindings: string[];
-  pendingHumanGate: TaskWorkflowState['pendingHumanGate'];
+  unmetCriteria: TaskWorkflowState['unmetCriteria'];
   /** Advisory maintainability findings (category maintainability, severity note). */
   maintainabilityFindings?: MaintainabilityFinding[];
   /** By-model token/cost rollup (already computed server-side; previously dropped by client types). */
@@ -235,14 +247,8 @@ export const tasksApi = {
     request<ExecutionTreeResponse>('GET', `/tasks/${repositoryId}/${taskId}/execution-tree`),
   listMedia: (repositoryId: string, taskId: string) =>
     request<TaskMediaArtifact[]>('GET', `/tasks/${repositoryId}/${taskId}/media`),
-  approveContract: (repositoryId: string, taskId: string, contractVersion: number, size?: TaskSize) =>
-    request('POST', `/tasks/${repositoryId}/${taskId}/approve-contract`, { contractVersion, ...(size ? { size } : {}) }),
-  rejectContract: (repositoryId: string, taskId: string, reason: string) =>
-    request('POST', `/tasks/${repositoryId}/${taskId}/reject-contract`, { reason }),
-  approvePlan: (repositoryId: string, taskId: string, planVersion: number) =>
-    request('POST', `/tasks/${repositoryId}/${taskId}/approve-plan`, { planVersion }),
-  rejectPlan: (repositoryId: string, taskId: string, reason: string) =>
-    request('POST', `/tasks/${repositoryId}/${taskId}/reject-plan`, { reason }),
+  // TASK-107: the four approval calls are gone with the routes behind them. Nothing in the UI
+  // approves anything any more — a task runs to a draft PR and the human acts on GitHub.
   cancel: (repositoryId: string, taskId: string) => request('POST', `/tasks/${repositoryId}/${taskId}/cancel`),
   remove: (repositoryId: string, taskId: string) =>
     request<{ removed: string }>('DELETE', `/tasks/${repositoryId}/${taskId}`),

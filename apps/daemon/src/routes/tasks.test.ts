@@ -80,6 +80,33 @@ describe('task PR-lifecycle signal routes', () => {
     setTemporalClientForTesting(undefined);
   });
 
+  // TASK-104: repository trust stopped being a per-run human gate and became a one-time config
+  // flag. An untrusted repo is refused UP FRONT — no task row, no workflow — rather than parked
+  // mid-run on a gate nobody can clear any more.
+  describe('repository trust is enforced at task creation (TASK-104)', () => {
+    it.each([
+      { label: 'an untrusted repository', id: 'repo-untrusted', trusted: false, expected: 403 },
+      { label: 'an unknown repository', id: 'repo-missing', trusted: undefined, expected: 404 },
+    ])('refuses $label with $expected', async ({ id, trusted, expected }) => {
+      const iso = new Date().toISOString();
+      if (trusted !== undefined) {
+        database.db
+          .insert(repositories)
+          .values({ id, canonicalPath: '/tmp/untrusted', name: id, remoteUrl: null, defaultBranch: 'main', trusted, createdAt: iso, updatedAt: iso })
+          .run();
+      }
+      const res = await app.inject({ method: 'POST', url: '/api/tasks', payload: { repositoryId: id, prompt: 'do it' } });
+      expect(res.statusCode).toBe(expected);
+      // Nothing was started: a refusal must not leave a half-created task behind.
+      expect(recorded).toEqual([]);
+    });
+
+    it('starts a task on a trusted repository', async () => {
+      const res = await app.inject({ method: 'POST', url: '/api/tasks', payload: { repositoryId: 'repo-1', prompt: 'do it' } });
+      expect(res.statusCode).toBe(201);
+    });
+  });
+
   it('POST /pr-merged signals pullRequestMerged with the merge SHA', async () => {
     const res = await app.inject({
       method: 'POST',

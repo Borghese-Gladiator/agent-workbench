@@ -5,7 +5,7 @@ import type {
   DeliveryState,
   ScheduleState,
   TaskSize,
-  HumanGateReason,
+  UnmetCriterionReason,
 } from '@awb/domain';
 import { deriveTaskStatus } from '@awb/domain';
 import {
@@ -270,7 +270,7 @@ export function listTasksWithRepository(db: DrizzleDb): TaskWithRepository[] {
  * run-state write. Passing `null` explicitly clears the field (e.g. gate resolved).
  */
 export interface TaskSummaryContext {
-  pendingGateReason?: HumanGateReason | null;
+  pendingGateReason?: UnmetCriterionReason | null;
   candidateSha?: string | null;
   pullRequestUrl?: string | null;
 }
@@ -296,7 +296,7 @@ export interface TaskSummaryWithRepository {
   inputTokens: number;
   outputTokens: number;
   costUsd: number | null;
-  pendingGateReason: HumanGateReason | null;
+  pendingGateReason: UnmetCriterionReason | null;
   candidateSha: string | null;
   pullRequestUrl: string | null;
   createdAt: string;
@@ -366,7 +366,7 @@ export function refreshTaskSummary(db: DrizzleDb, taskId: string, context: TaskS
   const pendingGateReason =
     context.pendingGateReason !== undefined
       ? context.pendingGateReason
-      : (prior?.pendingGateReason as HumanGateReason | null | undefined) ?? null;
+      : (prior?.pendingGateReason as UnmetCriterionReason | null | undefined) ?? null;
   const candidateSha =
     context.candidateSha !== undefined ? context.candidateSha : prior?.candidateSha ?? null;
   const pullRequestUrl =

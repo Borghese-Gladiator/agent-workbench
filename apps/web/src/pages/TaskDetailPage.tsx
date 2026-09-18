@@ -20,7 +20,6 @@ import {
 } from '../api/tasks.js';
 import { useDebouncedRefresh } from '../hooks/useDebouncedRefresh.js';
 import { useEventStream } from '../hooks/useEventStream.js';
-import { GatePanel } from './GatePanel.js';
 import { ExecutionTree } from '../components/tasks/ExecutionTree.js';
 import { VerificationTab } from '../components/tasks/VerificationTab.js';
 import { UsageAndTime } from '../components/tasks/UsageAndTime.js';
@@ -231,31 +230,22 @@ export function TaskDetailPage() {
         </div>
       )}
 
-      {/* Gate on top: the one thing a human must act on comes before everything else. */}
-      {state.pendingHumanGate && (
-        <div className="mb-4">
-          <GatePanel
-            repositoryId={repositoryId}
-            taskId={taskId}
-            phase={state.phase}
-            gate={state.pendingHumanGate}
-            size={state.size}
-            busy={busy}
-            onApproveContract={(sizeOverride) =>
-              void withBusy(() =>
-                tasksApi.approveContract(repositoryId, taskId, state.attemptNumber || 1, sizeOverride),
-              )
-            }
-            onRejectContract={() =>
-              void withBusy(() => tasksApi.rejectContract(repositoryId, taskId, 'rejected from UI'))
-            }
-            onApprovePlan={() =>
-              void withBusy(() => tasksApi.approvePlan(repositoryId, taskId, state.attemptNumber || 1))
-            }
-            onRejectPlan={() =>
-              void withBusy(() => tasksApi.rejectPlan(repositoryId, taskId, 'rejected from UI'))
-            }
-          />
+      {/* TASK-107: read-only, not an approval queue. A stopped loop reports what it could not
+          prove; the action a human takes is on the draft PR, not here. */}
+      {state.unmetCriteria && (
+        <div className="mb-4 rounded-md border border-warn/40 bg-warn/10 px-3 py-2 text-sm">
+          <div className="font-medium text-warn">
+            The loop stopped before proving every claim ({state.unmetCriteria.stopReason}) at phase{' '}
+            {state.unmetCriteria.phase}.
+          </div>
+          <p className="mt-1 text-muted-foreground">{state.unmetCriteria.detail}</p>
+          {state.unmetCriteria.unprovenClaims.length > 0 && (
+            <ul className="mt-2 list-disc pl-5 text-muted-foreground">
+              {state.unmetCriteria.unprovenClaims.map((claim) => (
+                <li key={claim}>{claim}</li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 

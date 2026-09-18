@@ -33,7 +33,7 @@ const overview: OverviewResponse = {
       inputTokens: 0,
       outputTokens: 0,
       costUsd: null,
-      pendingGateReason: 'task-contract-approval',
+      pendingGateReason: 'qa-inconclusive',
       candidateSha: null,
       pullRequestUrl: null,
       title: 'Fix the flake',

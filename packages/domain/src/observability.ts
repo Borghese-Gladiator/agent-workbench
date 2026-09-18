@@ -88,7 +88,7 @@ export const PhaseAttemptOutcomeSchema = z.enum([
   'candidate',
   'repair',
   'replan',
-  'await-human',
+  'unmet',
   'blocked',
   'cancelled',
   'failed',

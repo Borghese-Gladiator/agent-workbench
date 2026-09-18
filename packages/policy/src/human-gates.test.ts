@@ -8,9 +8,7 @@ import {
   qaRemainsInconclusive,
   reviewerFindingRequiresProductDecision,
   waiverRequested,
-  isMandatoryGate,
-  requiresPlanApprovalGate,
-  MANDATORY_GATE_REASONS,
+  requiresPlanRiskReport,
   type PlanGateInputs,
 } from './human-gates.js';
 
@@ -153,30 +151,12 @@ describe('waiverRequested', () => {
   });
 });
 
-describe('mandatory gates', () => {
-  it('classifies exactly the three mandatory reasons as mandatory', () => {
-    expect(MANDATORY_GATE_REASONS).toHaveLength(3);
-    for (const reason of MANDATORY_GATE_REASONS) {
-      expect(isMandatoryGate(reason)).toBe(true);
-    }
-  });
-
-  it('does not classify a conditional reason as mandatory', () => {
-    expect(isMandatoryGate('new-dependency')).toBe(false);
-    expect(isMandatoryGate('scope-expansion')).toBe(false);
-  });
-});
-
-describe('requiresPlanApprovalGate', () => {
-  it('does not require approval for a routine low-risk plan with no conditional triggers', () => {
-    expect(requiresPlanApprovalGate(false, [])).toBe(false);
-  });
-
-  it('requires approval for a high-risk plan even with no conditional triggers', () => {
-    expect(requiresPlanApprovalGate(true, [])).toBe(true);
-  });
-
-  it('requires approval for a low-risk plan if a conditional trigger fired', () => {
-    expect(requiresPlanApprovalGate(false, ['new-dependency'])).toBe(true);
+describe('requiresPlanRiskReport', () => {
+  it.each([
+    { label: 'a routine low-risk plan with no trigger', highRisk: false, reasons: [], expected: false },
+    { label: 'a high-risk plan with no trigger', highRisk: true, reasons: [], expected: true },
+    { label: 'a low-risk plan whose trigger fired', highRisk: false, reasons: ['new-dependency'], expected: true },
+  ] as const)('returns $expected for $label', ({ highRisk, reasons, expected }) => {
+    expect(requiresPlanRiskReport(highRisk, [...reasons])).toBe(expected);
   });
 });

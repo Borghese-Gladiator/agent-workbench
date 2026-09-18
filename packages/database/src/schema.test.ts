@@ -482,7 +482,7 @@ describe('schema round trips', () => {
       id: 'human-decision-1',
       taskId: 'task-1',
       phase: 'plan',
-      reason: 'task-contract-approval',
+      reason: 'qa-inconclusive',
       decision: 'approved',
       decidedAt: '2026-01-01T00:00:00Z',
     });

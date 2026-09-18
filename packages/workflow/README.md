@@ -10,8 +10,9 @@ it depends on — the core of the whole system's lifecycle enforcement.
 - `evaluate-completion.ts` — `evaluatePhaseCompletion(candidate, context)`,
   the only function permitted to decide a `TaskPhase` is complete. Pure,
   exhaustively tested per-phase.
-- `loop-routing.ts` — `routeLoop`/`shouldEscalateToHuman`, the loop-routing
-  table and human-gate escalation policy.
+- `loop-routing.ts` — `routeLoop`/`shouldStopLooping`/`exhaustedBudgetLimit`,
+  the loop-routing table and the bounded loop's stop policy (TASK-105). A stop
+  routes to the draft-PR terminal; nothing escalates to a human.
 - `failure-fingerprint.ts` — deterministic failure fingerprinting and
   no-progress detection for the builder loop.
 - `invalidation.ts` — the evidence invalidation cascade:

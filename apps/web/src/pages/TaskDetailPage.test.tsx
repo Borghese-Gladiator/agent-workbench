@@ -47,7 +47,7 @@ const stateResponse: TaskStateResponse = {
     runtimeMsByPhase: { implement: 5000 },
   },
   openFindings: [],
-  pendingHumanGate: undefined,
+  unmetCriteria: undefined,
 };
 
 const tree: ExecutionTreeResponse = {

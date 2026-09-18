@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   derivePrTitle,
   renderPrBody,
+  renderSuccessCriteria,
   renderQaMediaSection,
   withClaudeCodeSignature,
   CLAUDE_CODE_SIGNATURE,
@@ -236,5 +237,61 @@ describe('posted messages carry the Claude Code signature', () => {
 
   it('renderQaMediaSection stays empty (unsigned) when there is nothing to show', () => {
     expect(renderQaMediaSection({ ref: { owner: 'o', repo: 'r' }, branch: 'b', items: [] })).toBe('');
+  });
+});
+
+// TASK-106: every task ends at a draft PR, converged or not, so the body must say honestly which
+// acceptance claims were proven. A stuck run that rendered a clean checklist would be the worst
+// possible outcome of the autonomy pivot.
+describe('renderSuccessCriteria (TASK-106)', () => {
+  const claims = ['The endpoint returns 404 for a missing id.', 'The list page paginates.'];
+
+  it('marks every claim met when the loop proved them all', () => {
+    const rendered = renderSuccessCriteria({ acceptanceClaims: claims, candidateSha: 'abc123def456' });
+    expect(rendered).toBe(`- [x] ${claims[0]}\n- [x] ${claims[1]}`);
+    expect(rendered).not.toContain('stopped');
+  });
+
+  it('marks only the unproven claims unmet and reports why the loop stopped', () => {
+    const rendered = renderSuccessCriteria({
+      acceptanceClaims: claims,
+      candidateSha: 'abc123def456',
+      unmetCriteria: {
+        stopReason: 'budget-exhausted',
+        phase: 'verify',
+        unprovenClaims: [claims[1] as string],
+        reasons: ['budget-exceeded'],
+        findingIds: ['finding-1'],
+        detail: 'The loop reached its attempts budget at phase verify.',
+      },
+    });
+    expect(rendered).toContain(`- [x] ${claims[0]}`);
+    expect(rendered).toContain(`- [ ] ${claims[1]}`);
+    expect(rendered).toContain('budget-exhausted');
+    expect(rendered).toContain('The loop reached its attempts budget at phase verify.');
+    expect(rendered).toContain('`budget-exceeded`');
+    expect(rendered).toContain('Open findings: 1');
+    expect(rendered).toContain('`abc123def456`');
+  });
+
+  it('still lists an unproven claim the contract never declared', () => {
+    const rendered = renderSuccessCriteria({
+      acceptanceClaims: claims,
+      candidateSha: 'abc123def456',
+      unmetCriteria: {
+        stopReason: 'converged-unmet',
+        phase: 'exercise',
+        unprovenClaims: ['No QA scenario covered the behavioral claim.'],
+        reasons: ['qa-inconclusive'],
+        findingIds: [],
+        detail: 'QA evidence is incomplete.',
+      },
+    });
+    expect(rendered).toContain('- [ ] No QA scenario covered the behavioral claim.');
+    expect(rendered).toContain(`- [x] ${claims[0]}`);
+  });
+
+  it('says so plainly when no claims were recorded', () => {
+    expect(renderSuccessCriteria({ candidateSha: 'abc123def456' })).toBe('_No acceptance claims were recorded._');
   });
 });

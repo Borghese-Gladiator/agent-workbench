@@ -58,18 +58,42 @@ function routeChallengeFinding(category: FindingCategory, phaseSet: TaskPhase[] 
 }
 
 /**
- * Escalation triggers that must produce a HumanGate rather than another loop iteration, even
- * though the phase itself hasn't reached a terminal outcome.
+ * Triggers that must STOP the bounded loop rather than run another iteration, even though the phase
+ * itself has not reached a terminal outcome (TASK-105). Nothing here escalates to a human any more:
+ * a stop routes the task to its draft-PR terminal with an `UnmetCriteria` report.
  */
-export type EscalationTrigger =
+export type StopTrigger =
   | { kind: 'repeated-identical-failure'; occurrences: number; threshold: number }
   | { kind: 'budget-exhaustion' };
 
-export function shouldEscalateToHuman(trigger: EscalationTrigger): boolean {
+export function shouldStopLooping(trigger: StopTrigger): boolean {
   switch (trigger.kind) {
     case 'repeated-identical-failure':
       return trigger.occurrences >= trigger.threshold;
     case 'budget-exhaustion':
       return true;
   }
+}
+
+/**
+ * Which `LoopBudget` limit (if any) this run has reached. Pure and total, so the Workflow's stop
+ * decision stays deterministic and replay-safe: every input is already Workflow-local state.
+ *
+ * `elapsedMs` must come from the Workflow's patched `Date.now()`, which the Temporal SDK makes
+ * replay-deterministic — never from an Activity.
+ */
+export interface LoopBudgetUsage {
+  attemptsAtPhase: number;
+  totalTokens: number;
+  elapsedMs: number;
+}
+
+export function exhaustedBudgetLimit(
+  usage: LoopBudgetUsage,
+  budget: { maxAttemptsPerPhase: number; maxTotalTokens: number; maxWallClockMs: number },
+): 'attempts' | 'tokens' | 'wall-clock' | undefined {
+  if (usage.attemptsAtPhase >= budget.maxAttemptsPerPhase) return 'attempts';
+  if (usage.totalTokens >= budget.maxTotalTokens) return 'tokens';
+  if (usage.elapsedMs >= budget.maxWallClockMs) return 'wall-clock';
+  return undefined;
 }

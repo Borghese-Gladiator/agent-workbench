@@ -4,13 +4,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PhaseAttemptResult, TaskPhase, TaskStateSync } from '@awb/domain';
 import {
   TaskWorkflow,
-  approveContractUpdate,
   extendBudgetUpdate,
   cancelSignal,
   pullRequestMergedSignal,
   pullRequestClosedSignal,
   getCurrentStateQuery,
-  getPendingHumanGateQuery,
+  getUnmetCriteriaQuery,
 } from './task-workflow.js';
 import { createScriptedActivities, THROW, type ScriptEntry } from './test-activities.js';
 import type { TaskWorkflowInput } from './workflow-types.js';
@@ -48,20 +47,25 @@ function candidate(phase: TaskPhase): PhaseAttemptResult {
   };
 }
 
-function awaitHuman(phase: TaskPhase, reason: Parameters<typeof makeGate>[1]): PhaseAttemptResult {
-  return { outcome: 'await-human', gate: makeGate(phase, reason) };
+/**
+ * A phase reporting "I cannot prove this claim" (TASK-105). This replaced `await-human`: the
+ * workflow records the reason and routes to the draft-PR terminal instead of parking.
+ */
+function unmet(reason: 'qa-inconclusive' | 'waiver-request', detail = 'test unmet criterion'): PhaseAttemptResult {
+  return { outcome: 'unmet', reason, detail, unprovenClaims: ['claim-1'], findings: [] };
 }
 
-function makeGate(phase: TaskPhase, reason: 'task-contract-approval' | 'pr-readiness' | 'qa-inconclusive') {
-  return {
-    id: `gate-${phase}`,
-    taskId: 'task-1',
-    phase,
-    reason,
-    summary: 'test gate',
-    createdAt: new Date().toISOString(),
-  };
-}
+/** The full happy-path script every phase needs to walk from specify to a released draft PR. */
+const FULL_ROUTE: Partial<Record<TaskPhase, ScriptEntry[]>> = {
+  specify: [candidate('specify')],
+  plan: [candidate('plan')],
+  prepare: [candidate('prepare')],
+  implement: [candidate('implement')],
+  verify: [candidate('verify')],
+  exercise: [candidate('exercise')],
+  challenge: [candidate('challenge')],
+  release: [candidate('release')],
+};
 
 function candidateWithUsage(
   phase: TaskPhase,
@@ -187,19 +191,13 @@ describe('TaskWorkflow', () => {
     expect(result.phaseSet).not.toContain('program-design');
   }, 30_000);
 
-  it('a human size override at the contract gate wins over the classifier (TASK-51)', async () => {
-    // Classifier says L, but the human approves with size S — the run must skip plan/program-design.
+  // TASK-104 removed the contract gate where a human used to override the classifier. The intake
+  // hint is the only remaining override, and it must still beat the classifier.
+  it('an intake size hint wins over the classifier (TASK-51/104)', async () => {
     const { result } = await runWithActivities(
-      {
-        specify: [awaitHuman('specify', 'task-contract-approval'), sizedSpecifyCandidate('L')],
-      },
-      async (handle) => {
-        await waitForCondition(async () => {
-          const state = await handle.query(getCurrentStateQuery);
-          return state.condition === 'awaiting-human';
-        });
-        await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion: 1, size: 'S' }] });
-      },
+      { specify: [sizedSpecifyCandidate('L')] },
+      async () => {},
+      { taskId: 'task-1', repositoryId: 'repo-1', size: 'S' },
     );
     expect(result.phase).toBe('assimilate');
     expect(result.size).toBe('S');
@@ -252,20 +250,21 @@ describe('TaskWorkflow', () => {
     expect(result.runtimeMsByPhase.implement).toBe(3000);
   }, 30_000);
 
-  it('blocks at specify awaiting contract approval, then resumes once approved', async () => {
+  // TASK-104: the three mandatory gates are gone. A routine task must walk the whole route with
+  // ZERO `awaiting-human` transitions — this is the headline acceptance check for the pivot.
+  it('advances specify through release with no awaiting-human transition (TASK-104)', async () => {
+    const syncLog: TaskStateSync[] = [];
     const { result } = await runWithActivities(
-      {
-        specify: [awaitHuman('specify', 'task-contract-approval'), candidate('specify')],
-      },
-      async (handle) => {
-        await waitForCondition(async () => {
-          const state = await handle.query(getCurrentStateQuery);
-          return state.condition === 'awaiting-human';
-        });
-        await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion: 1 }] });
-      },
+      FULL_ROUTE,
+      async () => {},
+      { taskId: 'task-1', repositoryId: 'repo-1' },
+      syncLog,
     );
     expect(result.phase).toBe('assimilate');
+    expect(result.condition).toBe('completed');
+    expect(result.deliveryState).toBe('draft-pr-open');
+    expect(syncLog.map((entry) => entry.condition)).not.toContain('awaiting-human');
+    expect(result.unmetCriteria).toBeUndefined();
   }, 30_000);
 
   it('loops verify failure back to implement, then succeeds on repair', async () => {
@@ -304,28 +303,21 @@ describe('TaskWorkflow', () => {
   // replay. Two repairs then a throw on verify reach NO_PROGRESS_THRESHOLD — the throw is the final
   // strike (a single THROW keeps the real activity-retry backoff paid just once). createScriptedActivities
   // holds the THROW across all of its retries before advancing, so the escalation is deterministic.
-  it('counts a stuck runPhase throw toward repeated-failure-no-progress escalation (TASK-105)', async () => {
-    let observedReason: string | undefined;
+  it('counts a stuck runPhase throw toward the genuinely-stuck stop (TASK-105)', async () => {
     const { result } = await runWithActivities(
       {
         specify: [candidate('specify')],
         plan: [candidate('plan')],
         verify: [repair(), repair(), THROW, candidate('verify')],
+        release: [candidate('release')],
       },
-      async (handle) => {
-        await waitForCondition(async () => {
-          const state = await handle.query(getCurrentStateQuery);
-          if (state.condition === 'awaiting-human') {
-            observedReason = (await handle.query(getPendingHumanGateQuery))?.reason;
-            return true;
-          }
-          return false;
-        }, 60_000);
-        await handle.signal(cancelSignal);
-      },
+      async () => {},
     );
-    expect(observedReason).toBe('repeated-failure-no-progress');
-    expect(result.condition).toBe('cancelled');
+    // The stop is terminal and autonomous: no park, and the run still opened its draft PR.
+    expect(result.unmetCriteria?.stopReason).toBe('genuinely-stuck');
+    expect(result.unmetCriteria?.reasons).toEqual(['repeated-failure-no-progress']);
+    expect(result.deliveryState).toBe('draft-pr-open');
+    expect(result.condition).toBe('failed');
   }, 90_000);
 
   it('routes a plan-critic rejection (replan) back to plan', async () => {
@@ -369,158 +361,150 @@ describe('TaskWorkflow', () => {
     expect(result.phaseSet).toContain('program-design');
   }, 30_000);
 
-  it('escalates to a human gate after repeated identical repair outcomes, then resumes after extendBudget', async () => {
+  // TASK-105: repeated identical repairs stop the loop and route to the draft PR. This is the
+  // behaviour that replaced the `repeated-failure-no-progress` park.
+  it('stops the loop after repeated identical repairs and terminates at the draft PR (TASK-105/106)', async () => {
+    const syncLog: TaskStateSync[] = [];
     const { result } = await runWithActivities(
       {
         specify: [candidate('specify')],
         plan: [candidate('plan')],
         verify: [repair(), repair(), repair(), candidate('verify')],
+        release: [candidate('release')],
+      },
+      async () => {},
+      { taskId: 'task-1', repositoryId: 'repo-1' },
+      syncLog,
+    );
+    expect(result.unmetCriteria?.stopReason).toBe('genuinely-stuck');
+    expect(result.unmetCriteria?.phase).toBe('verify');
+    expect(result.deliveryState).toBe('draft-pr-open');
+    expect(syncLog.map((entry) => entry.condition)).not.toContain('awaiting-human');
+  }, 30_000);
+
+  // TASK-105: the budget is the other stop. A task that keeps replanning burns attempts at one
+  // phase; once `maxAttemptsPerPhase` is reached the loop stops rather than iterating forever.
+  it('stops the loop when the per-phase attempt budget is exhausted (TASK-105)', async () => {
+    const { result } = await runWithActivities(
+      {
+        // `specify` replans to itself, so every iteration re-enters specify and never advances.
+        specify: [replan('specify'), replan('specify'), replan('specify'), candidate('specify')],
+        release: [candidate('release')],
+      },
+      async () => {},
+      {
+        taskId: 'task-1',
+        repositoryId: 'repo-1',
+        loopBudget: { maxAttemptsPerPhase: 2, maxTotalTokens: 1_000_000, maxWallClockMs: 3_600_000 },
+      },
+    );
+    expect(result.unmetCriteria?.stopReason).toBe('budget-exhausted');
+    expect(result.unmetCriteria?.reasons).toEqual(['budget-exceeded']);
+    expect(result.deliveryState).toBe('draft-pr-open');
+  }, 30_000);
+
+  // `extendBudget` no longer releases a park — it raises the ceiling of a run that is still going.
+  it('extendBudget raises the budget of a live run (TASK-105)', async () => {
+    const { result } = await runWithActivities(
+      {
+        specify: [candidate('specify')],
+        plan: [candidate('plan')],
+        implement: [candidate('implement')],
       },
       async (handle) => {
-        await waitForCondition(async () => {
-          const state = await handle.query(getCurrentStateQuery);
-          return state.condition === 'awaiting-human';
-        });
         await handle.executeUpdate(extendBudgetUpdate, { args: [{ additionalMinutes: 30 }] });
       },
     );
     expect(result.phase).toBe('assimilate');
+    expect(result.loopBudget?.maxWallClockMs).toBe(4 * 60 * 60 * 1000 + 30 * 60_000);
   }, 30_000);
 
-  // TASK-75 problem (1): an exercise *evidence deficiency* now surfaces as an await-human
-  // `qa-inconclusive` gate. It must park on the FIRST occurrence — no failureStreak, so it can
-  // never reach the 3-strike `repeated-failure-no-progress` trap that a `repair → implement` loop
-  // produced. Contrast with the escalation test above: three `repair()`s were needed to escalate.
-  it('parks an exercise qa-inconclusive gate on first hit, not repeated-failure-no-progress (TASK-75)', async () => {
-    let observedReason: string | undefined;
-    let observedAfterOneExercise = false;
+  // TASK-75/105: an exercise *evidence deficiency* is an `unmet` outcome. It stops the loop on the
+  // FIRST occurrence — no failureStreak, so it can never be mislabelled as repeated-failure — and
+  // the task still terminates at a draft PR carrying the unproven claim.
+  it('stops on a first-hit exercise qa-inconclusive, not repeated-failure (TASK-75/105)', async () => {
+    let observedPhase: string | undefined;
     const { result } = await runWithActivities(
       {
         specify: [candidate('specify')],
         plan: [candidate('plan')],
-        // The exercise handler returns this exact shape for a pure evidence deficiency (see
-        // mapExerciseBlock). It is scripted ONCE — if the workflow looped it into implement and
-        // re-ran exercise, the streak logic would eventually escalate with a DIFFERENT reason.
-        exercise: [awaitHuman('exercise', 'qa-inconclusive')],
+        // Scripted ONCE. If the workflow looped it into implement and re-ran exercise, the streak
+        // logic would eventually stop with a DIFFERENT reason.
+        exercise: [unmet('qa-inconclusive', 'No QA scenario covered the behavioral claim.')],
+        release: [candidate('release')],
       },
       async (handle) => {
         await waitForCondition(async () => {
-          const state = await handle.query(getCurrentStateQuery);
-          if (state.condition === 'awaiting-human') {
-            const gate = await handle.query(getPendingHumanGateQuery);
-            observedReason = gate?.reason;
-            // Prove the gate opened while still ON the exercise phase (not after bouncing to
-            // implement): attemptNumber is the first exercise attempt and phase is exercise.
-            observedAfterOneExercise = state.phase === 'exercise';
+          const criteria = await handle.query(getUnmetCriteriaQuery);
+          if (criteria) {
+            observedPhase = criteria.phase;
             return true;
           }
           return false;
         });
-        // Resolve the gate (as a human supplying QA config would) so the run can finish and the
-        // test env tears down cleanly. Re-scripting exercise as a candidate lets it proceed.
-        await handle.signal(cancelSignal);
       },
     );
-    expect(observedReason).toBe('qa-inconclusive');
-    expect(observedReason).not.toBe('repeated-failure-no-progress');
-    expect(observedAfterOneExercise).toBe(true);
-    expect(result.condition).toBe('cancelled');
+    expect(result.unmetCriteria?.stopReason).toBe('converged-unmet');
+    expect(result.unmetCriteria?.reasons).toEqual(['qa-inconclusive']);
+    expect(result.unmetCriteria?.unprovenClaims).toEqual(['claim-1']);
+    expect(result.unmetCriteria?.detail).toBe('No QA scenario covered the behavioral claim.');
+    // The stop was recorded while still ON exercise, not after bouncing through implement.
+    expect(observedPhase).toBe('exercise');
+    // And it still delivered: every task terminates at a draft PR (TASK-106).
+    expect(result.deliveryState).toBe('draft-pr-open');
+    expect(result.condition).toBe('failed');
   }, 30_000);
 
-  // TASK-75 problem (2): a candidate that satisfies its claim and passes must EXIT the exercise
-  // gate and reach pr-readiness — it must not accumulate any failure and must not park at
-  // repeated-failure-no-progress. A clean exercise `candidate()` walks straight through to release.
-  it('a passing exercise candidate reaches pr-readiness without a no-progress park (TASK-75)', async () => {
-    let sawRepeatedFailurePark = false;
+  // TASK-106: a phase that cannot run at all is terminal too — it reports `blocked`, and the
+  // workflow routes to release rather than waiting for a human to unblock it.
+  it('routes a blocked phase to the draft-PR terminal (TASK-106)', async () => {
     const { result } = await runWithActivities(
       {
         specify: [candidate('specify')],
-        plan: [candidate('plan')],
-        prepare: [candidate('prepare')],
-        implement: [candidate('implement')],
-        verify: [candidate('verify')],
-        exercise: [candidate('exercise')],
-        challenge: [candidate('challenge')],
-        release: [awaitHuman('release', 'pr-readiness')],
+        plan: [{ outcome: 'blocked', reason: 'no planner available' } as PhaseAttemptResult],
+        release: [candidate('release')],
       },
-      async (handle) => {
-        await waitForCondition(async () => {
-          const state = await handle.query(getCurrentStateQuery);
-          const gate = await handle.query(getPendingHumanGateQuery);
-          if (gate?.reason === 'repeated-failure-no-progress') sawRepeatedFailurePark = true;
-          return state.phase === 'release' && state.condition === 'awaiting-human';
-        });
-        await handle.signal(pullRequestMergedSignal, { mergeCommitSha: 'abc123' });
-      },
+      async () => {},
     );
-    // Reached the pr-readiness gate (release) and never parked at a no-progress human gate.
-    expect(sawRepeatedFailurePark).toBe(false);
+    expect(result.unmetCriteria?.stopReason).toBe('phase-blocked');
+    expect(result.unmetCriteria?.detail).toContain('no planner available');
+    expect(result.deliveryState).toBe('draft-pr-open');
+  }, 30_000);
+
+  // TASK-75 problem (2): a candidate that satisfies its claim and passes must reach the draft PR
+  // with no failure accumulated and no unmet report.
+  it('a passing exercise candidate reaches the draft PR with every claim met (TASK-75/106)', async () => {
+    const { result } = await runWithActivities(FULL_ROUTE, async () => {});
+    expect(result.unmetCriteria).toBeUndefined();
     expect(result.phase).toBe('assimilate');
-    expect(result.deliveryState).toBe('merged');
+    expect(result.condition).toBe('completed');
+    expect(result.deliveryState).toBe('draft-pr-open');
   }, 30_000);
 
   it('marks the task cancelled on a cancel signal', async () => {
     const { result } = await runWithActivities(
-      {
-        specify: [awaitHuman('specify', 'task-contract-approval')],
-      },
+      { specify: [candidate('specify')], plan: [candidate('plan')] },
       async (handle) => {
-        await waitForCondition(async () => {
-          const state = await handle.query(getCurrentStateQuery);
-          return state.condition === 'awaiting-human';
-        });
         await handle.signal(cancelSignal);
       },
     );
     expect(result.condition).toBe('cancelled');
   }, 30_000);
 
-  it('routes to assimilate with deliveryState "merged" on a pullRequestMerged signal', async () => {
+  // The merge/close signals survive the pivot, but they can only land while the run is still going:
+  // merging is an out-of-band human action on GitHub AFTER the workbench has already terminated.
+  it.each([
+    { signal: pullRequestMergedSignal, args: [{ mergeCommitSha: 'abc123' }], expected: 'merged' },
+    { signal: pullRequestClosedSignal, args: [], expected: 'closed' },
+  ])('records deliveryState "$expected" when the signal lands mid-run', async ({ signal, args, expected }) => {
     const { result } = await runWithActivities(
-      {
-        specify: [candidate('specify')],
-        plan: [candidate('plan')],
-        prepare: [candidate('prepare')],
-        implement: [candidate('implement')],
-        verify: [candidate('verify')],
-        exercise: [candidate('exercise')],
-        challenge: [candidate('challenge')],
-        release: [awaitHuman('release', 'pr-readiness')],
-      },
+      { specify: [candidate('specify')], plan: [candidate('plan')] },
       async (handle) => {
-        await waitForCondition(async () => {
-          const state = await handle.query(getCurrentStateQuery);
-          return state.phase === 'release' && state.condition === 'awaiting-human';
-        });
-        await handle.signal(pullRequestMergedSignal, { mergeCommitSha: 'abc123' });
+        await handle.signal(signal as never, ...(args as never[]));
       },
     );
     expect(result.phase).toBe('assimilate');
-    expect(result.deliveryState).toBe('merged');
-  }, 30_000);
-
-  it('routes to assimilate with deliveryState "closed" on a pullRequestClosed signal', async () => {
-    const { result } = await runWithActivities(
-      {
-        specify: [candidate('specify')],
-        plan: [candidate('plan')],
-        prepare: [candidate('prepare')],
-        implement: [candidate('implement')],
-        verify: [candidate('verify')],
-        exercise: [candidate('exercise')],
-        challenge: [candidate('challenge')],
-        release: [awaitHuman('release', 'pr-readiness')],
-      },
-      async (handle) => {
-        await waitForCondition(async () => {
-          const state = await handle.query(getCurrentStateQuery);
-          return state.phase === 'release' && state.condition === 'awaiting-human';
-        });
-        await handle.signal(pullRequestClosedSignal);
-      },
-    );
-    expect(result.phase).toBe('assimilate');
-    expect(result.deliveryState).toBe('closed');
+    expect(result.deliveryState).toBe(expected);
   }, 30_000);
 
   // TASK-123: before this, nothing in production wrote tasks.phase/condition after the row was
@@ -578,28 +562,25 @@ describe('TaskWorkflow', () => {
       expect(seen.slice(firstVerify)).toContain('implement|running');
     }, 30_000);
 
-    it('writes the park and its gate reason when the run awaits a human', async () => {
+    // TASK-104/123: the projection column keeps its name but now carries the unmet-criterion
+    // reason. The task never reads `awaiting-human`, and the reason reaches the row.
+    it('writes the unmet-criterion reason, never an awaiting-human park', async () => {
       const syncLog: TaskStateSync[] = [];
       await runWithActivities(
-        { specify: [awaitHuman('specify', 'task-contract-approval'), candidate('specify')] },
-        async (handle) => {
-          await waitForCondition(async () => {
-            const state = await handle.query(getCurrentStateQuery);
-            return state.condition === 'awaiting-human';
-          });
-          await handle.executeUpdate(approveContractUpdate, { args: [{ contractVersion: 1 }] });
+        {
+          specify: [candidate('specify')],
+          plan: [candidate('plan')],
+          exercise: [unmet('qa-inconclusive')],
+          release: [candidate('release')],
         },
+        async () => {},
         { taskId: 'task-1', repositoryId: 'repo-1' },
         syncLog,
       );
 
-      const park = syncLog.find((s) => s.condition === 'awaiting-human');
-      expect(park).toBeDefined();
-      expect(park?.phase).toBe('specify');
-      expect(park?.pendingGateReason).toBe('task-contract-approval');
-      // Resolving the gate clears the reason on the next write, so the row stops reading as gated.
-      const afterPark = syncLog.slice(syncLog.indexOf(park!) + 1);
-      expect(afterPark.some((s) => s.condition === 'running' && s.pendingGateReason === null)).toBe(true);
+      expect(syncLog.map((entry) => entry.condition)).not.toContain('awaiting-human');
+      expect(syncLog.some((entry) => entry.pendingGateReason === 'qa-inconclusive')).toBe(true);
+      expect(syncLog.at(-1)?.condition).toBe('failed');
     }, 30_000);
 
     it('writes the terminal condition on a cancel signal', async () => {

@@ -264,7 +264,7 @@ open a draft PR with an honest unmet-criteria report rather than parking a queue
   `buildExerciseScenarioSteps` (`run-phase.ts:343`) scores an all-liveness scenario `weak`
   so it cannot cover a behavior claim. This dependency is met — do not rebuild it.
 
-### [ ] TASK-104: Remove all human gates — repo-trust becomes one-time config, contract-approval and pr-readiness deleted
+### [x] TASK-104: Remove all human gates — repo-trust becomes one-time config, contract-approval and pr-readiness deleted
 
 **What's wrong.** The lifecycle has three mandatory human gates
 (`MANDATORY_GATE_REASONS`, `packages/policy/src/human-gates.ts:73-77`:
@@ -306,7 +306,7 @@ it becomes config, not un-enforced).
 mid-run. *Manual:* drive a task on a trusted local repo with `--no-input` and it reaches a
 draft PR without a single approval prompt.
 
-### [ ] TASK-105: Bounded autonomous loop against falsifiable success criteria (replaces human parking on non-convergence)
+### [x] TASK-105: Bounded autonomous loop against falsifiable success criteria (replaces human parking on non-convergence)
 
 **What's wrong.** Today, when the loop can't satisfy criteria it escalates to a human gate:
 `repeated-failure-no-progress` at `NO_PROGRESS_THRESHOLD = 3`
@@ -344,7 +344,7 @@ terminates with a populated `UnmetCriteria` (claims + SHA + findings + stop-reas
 *Manual:* drive an intentionally-unsatisfiable task and confirm it stops at the budget and
 produces the unmet-criteria object, not a parked gate.
 
-### [ ] TASK-106: Draft PR is the terminal state for EVERY task — with an honest met/unmet success-criteria report in the body
+### [x] TASK-106: Draft PR is the terminal state for EVERY task — with an honest met/unmet success-criteria report in the body
 
 **What's wrong.** Release today parks on a `pr-readiness` human gate
 (`run-phase.ts:1598,1747`) rather than treating the draft PR as the finish line. There is
@@ -377,7 +377,7 @@ evidence. *Manual:* drive one converged and one intentionally-unsatisfiable task
 as draft PRs, the first with all claims met + evidence links, the second with the unmet
 claims and reasons clearly listed — neither is auto-merged.
 
-### [ ] TASK-107: Delete the `/approvals` control-plane surface and its supporting queue concept
+### [x] TASK-107: Delete the `/approvals` control-plane surface and its supporting queue concept
 
 **What's wrong.** The current UI has an `/approvals` surface (a stub cross-task gate lookup)
 that the autonomy pivot makes obsolete — there is no human approval queue any more.

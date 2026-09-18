@@ -16,22 +16,22 @@ of Temporal/database/agent concerns.
   `qaRemainsInconclusive`, `reviewerFindingRequiresProductDecision`,
   `waiverRequested` — the remaining conditional triggers, each a small pure
   function so every condition is independently unit-tested.
-- `MANDATORY_GATE_REASONS` / `isMandatoryGate` — the three gates that are
-  never conditional (first-time repository trust, task-contract approval,
-  PR readiness) — always required, not evaluated against a condition.
-- `requiresPlanApprovalGate` — encodes "do not require routine human plan
-  approval for ordinary low-risk tasks": only high risk or an
-  actual conditional trigger forces a gate.
+- `requiresPlanRiskReport` — encodes "say nothing extra about an ordinary
+  low-risk task": only high risk or an actual conditional trigger adds a risk
+  section to the plan's report.
 
 ## Does NOT
 
-- Create or persist `HumanGate` rows — callers (phase Activities in
-  `workers/temporal-worker`) use these predicates to decide whether to
-  construct one.
-- Duplicate `packages/workflow`'s `shouldEscalateToHuman` (repeated-failure/
-  budget-exhaustion routing during the phase loop) — this package covers
-  the broader conditional-gate table; `packages/workflow`'s
-  version is scoped specifically to the loop-routing escalation path.
+- Park a task on a human. Since the autonomy pivot (TASK-104) there are no
+  human gates: callers (phase Activities in `workers/temporal-worker`) use
+  these predicates to LABEL an unmet acceptance criterion, which the draft PR
+  reports. The three mandatory gates are gone — repository trust is the
+  persisted `repositories.trusted` flag, and contract approval and PR
+  readiness were deleted.
+- Duplicate `packages/workflow`'s `shouldStopLooping` (repeated-failure /
+  budget-exhaustion routing during the phase loop) — this package covers the
+  broader conditional table; `packages/workflow`'s version is scoped
+  specifically to the loop's stop decision.
 
 ## Dependencies
 

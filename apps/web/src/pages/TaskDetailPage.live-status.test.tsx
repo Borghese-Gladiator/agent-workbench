@@ -41,7 +41,7 @@ function baseState(overrides: Partial<TaskWorkflowState> = {}): TaskWorkflowStat
 }
 
 function stateResponse(state: TaskWorkflowState): TaskStateResponse {
-  return { state, openFindings: [], pendingHumanGate: undefined, maintainabilityFindings: [] };
+  return { state, openFindings: [], unmetCriteria: undefined, maintainabilityFindings: [] };
 }
 
 function ev(sequence: number): SemanticEvent {

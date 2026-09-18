@@ -146,12 +146,12 @@ describe('task_summary projection', () => {
   });
 
   it('preserves prior gate context when a later refresh omits it, and clears on explicit null', () => {
-    upsertTask(db.db, { id: 'task-G', repositoryId: REPO_ID, prompt: 'p' }, { pendingGateReason: 'task-contract-approval' });
-    expect(getTaskSummary(db.db, 'task-G')?.pendingGateReason).toBe('task-contract-approval');
+    upsertTask(db.db, { id: 'task-G', repositoryId: REPO_ID, prompt: 'p' }, { pendingGateReason: 'qa-inconclusive' });
+    expect(getTaskSummary(db.db, 'task-G')?.pendingGateReason).toBe('qa-inconclusive');
 
     // A plain sync (no context) must not wipe the gate reason.
     upsertTask(db.db, { id: 'task-G', repositoryId: REPO_ID, prompt: 'p', phase: 'plan' });
-    expect(getTaskSummary(db.db, 'task-G')?.pendingGateReason).toBe('task-contract-approval');
+    expect(getTaskSummary(db.db, 'task-G')?.pendingGateReason).toBe('qa-inconclusive');
 
     // Explicit null clears it.
     refreshTaskSummary(db.db, 'task-G', { pendingGateReason: null });

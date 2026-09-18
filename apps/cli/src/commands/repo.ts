@@ -62,7 +62,10 @@ export function registerRepoCommands(program: Command): void {
     .command('add [path]')
     .description('Register a local Git repository (defaults to the current directory)')
     .option('--name <name>', 'Display name for the repository')
-    .action(async (path: string | undefined, opts: { name?: string }) => {
+    // TASK-104: trust is a one-time config flag, so registering and trusting in one step is the
+    // normal path for a repo you already own. A task on an untrusted repo is refused up front.
+    .option('--trust', 'Also mark the repository trusted, so tasks may run against it')
+    .action(async (path: string | undefined, opts: { name?: string; trust?: boolean }) => {
       const db = openWorkbenchDatabase().db;
       const target = resolve(path ?? '.');
       const canonicalPath = gitTopLevel(target) ?? target;
@@ -72,13 +75,19 @@ export function registerRepoCommands(program: Command): void {
         enterpriseRepoRoots: loadEnterpriseRepoRoots(),
       });
       rememberRepositoryId(repository.id);
+      if (opts.trust) await approveRepository(db, repository.id);
       if (outputOptions().json) {
-        emitJson(repository);
+        emitJson({ ...repository, trusted: opts.trust === true });
         return;
       }
       printResult(repository.id);
-      printInfo(`Registered ${repository.name} — untrusted until approved.`);
-      printInfo(`Next: awb repo sync ${repository.id} && awb repo approve ${repository.id}`);
+      if (opts.trust) {
+        printInfo(`Registered ${repository.name} — trusted.`);
+        printInfo(`Next: awb repo sync ${repository.id}`);
+      } else {
+        printInfo(`Registered ${repository.name} — untrusted until approved.`);
+        printInfo(`Next: awb repo sync ${repository.id} && awb repo trust ${repository.id}`);
+      }
     });
 
   repo
@@ -159,8 +168,11 @@ export function registerRepoCommands(program: Command): void {
     });
 
   repo
-    .command('approve [repo]')
-    .description('Mark a discovered repository profile as trusted')
+    .command('trust [repo]')
+    .alias('approve')
+    // TASK-104: this is the ONLY trust decision in the system. It is made once, here, out of band —
+    // never mid-run. `approve` stays as an alias so existing scripts keep working.
+    .description('Mark a repository trusted, so tasks may run against it')
     .action(async (ref: string | undefined) => {
       const db = openWorkbenchDatabase().db;
       const id = await resolveRepoRef(ref);
