@@ -4,7 +4,7 @@ Prioritized List of Things to Fix
 
 ## Group AE — Static dead-code detection
 
-### [ ] TASK-129: Add knip for automated dead-code detection, plus a run command
+### [x] TASK-129: Add knip for automated dead-code detection, plus a run command
 
 **What's wrong.** Every dead-code finding on this repo so far (`packages/repository-map`
 with zero callers outside itself; `packages/workflow/src/stuck-phase-classification.test.ts`
