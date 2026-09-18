@@ -32,7 +32,7 @@ changes.
 `main` after triaging/allowlisting known false positives. *Manual:* delete a known-unused
 export on a throwaway branch and confirm the command flags it.
 
-### [ ] TASK-130: Delete `packages/repository-map` — dead, zero callers, and its own file walk would repeat the fender O(n²) failure if ever wired in
+### [x] TASK-130: Delete `packages/repository-map` — dead, zero callers, and its own file walk would repeat the fender O(n²) failure if ever wired in
 
 **What's wrong.** `packages/repository-map` (tree-sitter symbol/import extraction, ~1000
 lines with tests) has no caller outside its own package — confirmed by grepping every
