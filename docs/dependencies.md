@@ -11,7 +11,6 @@ instead of reaching sideways.
 @awb/evidence           → domain
 @awb/database           → domain, config
 @awb/repository         → domain, database
-@awb/repository-map     → domain
 @awb/repository-memory  → domain, database
 @awb/workflow           → domain   (+ @temporalio/* — no other @awb deps: Workflow code
                                      must stay deterministic and cannot reach into

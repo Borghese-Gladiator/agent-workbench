@@ -49,12 +49,11 @@ garbage collection may remove. GC only ever deletes a blob when no
 
 ## Disposable cache directory
 
-`~/.agentic-workbench/cache/`. Repository maps, parsed AST data, symbol
-indexes, dependency graphs, test-to-source maps, video thumbnails, token
-estimates, temporary context packs. Cache keys always include the inputs
-that would invalidate them (repository SHA, file hash, tool/parser version,
-configuration hash) — see `packages/repository-map` for the concrete key
-construction. Deleting the entire cache directory must never lose task
+`~/.agentic-workbench/cache/`. Parsed AST data, symbol indexes, dependency
+graphs, test-to-source maps, video thumbnails, token estimates, temporary
+context packs. Cache keys always include the inputs that would invalidate
+them (repository SHA, file hash, tool/parser version, configuration hash).
+Deleting the entire cache directory must never lose task
 state, evidence, project memory, or workflow state; this is verified by a
 unit test that clears the cache dir and re-derives everything from Git +
 workbench SQLite.

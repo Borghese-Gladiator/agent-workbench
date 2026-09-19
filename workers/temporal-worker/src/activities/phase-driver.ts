@@ -198,8 +198,8 @@ function noteAttemptToScratchpad(handler: PhaseHandler, ctx: PhaseContext, resul
     note = `sent the run back to ${result.target}${describeFindings(result.findings)}`;
   } else if (result.outcome === 'blocked') {
     note = `blocked: ${result.reason}`;
-  } else if (result.outcome === 'await-human') {
-    note = `stopped for ${result.gate.reason}: ${result.gate.summary}`;
+  } else if (result.outcome === 'unmet') {
+    note = `stopped for ${result.reason}: ${result.detail}`;
   }
   if (!note) return;
 

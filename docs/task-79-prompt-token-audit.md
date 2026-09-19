@@ -12,7 +12,7 @@
 
 Definitions: **static** context = the fixed instruction/prompt scaffolding
 (`instruction_tokens`). **injected** context = task-specific material
-(contract, plan, diff, evidence, findings, repository-map, memory).
+(contract, plan, diff, evidence, findings, memory).
 
 ## Observed spend (live DB snapshot, all tasks)
 

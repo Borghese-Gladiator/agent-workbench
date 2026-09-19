@@ -165,7 +165,6 @@ export async function refreshRepositorySnapshot(
     headSha: snapshot.headSha,
     createdAt: snapshot.createdAt,
     hasExistingFrontend: snapshot.hasExistingFrontend,
-    repositoryMapArtifactId: snapshot.repositoryMapArtifactId,
   });
 
   for (const unit of snapshot.units) {
