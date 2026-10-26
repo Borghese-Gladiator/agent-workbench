@@ -1,12 +1,13 @@
-# Archive — four generations of an agentic dev-task system
+# Archive — five generations of an agentic dev-task system
 
 Each folder below is a **frozen, self-contained snapshot** of a full attempt at the
 same underlying problem: let an AI agent implement a feature end-to-end against a
 real repo, without the result being unreviewed, unaudited, or untrustworthy. None of
 these folders are wired into any build — they exist purely as a paper trail for what
 was tried, why it stopped being enough, and what the next version kept or discarded.
-Full commit-by-commit history for all four is in
-[`agentic-development-task-system-v4__ai/LOG.md`](agentic-development-task-system-v4__ai/LOG.md).
+Full commit-by-commit history is in
+[`agentic-development-task-system-v4__ai/LOG.md`](agentic-development-task-system-v4__ai/LOG.md) (v1-v4) and
+[`agentic-development-task-system-v5__ai/LOG.md`](agentic-development-task-system-v5__ai/LOG.md) (v5).
 
 ## v1 — `agentic-development-task-system-v1__ai`
 
@@ -108,3 +109,47 @@ Why it was archived
 - QA artifacts were different every time, so it was difficult to use and validate. I want an actual webm video or screenshot. Since it was entirely reliant on the model, it was RNG if it produced something that I could use to actually verify functionality
 - Lifecycle stages were not enforced well enough. Tasks would move through towards completion
 - Retries reran with the entirety of the cached tokens and increased costs by a decent amount
+
+## v5 — `agentic-development-task-system-v5__ai`
+
+The "Agentic Workbench" (`awb`). A TypeScript monorepo of about 19 packages: a
+daemon, a Temporal worker, a web UI, and an `awb` CLI. A task ran through nine
+fixed lifecycle phases, and each phase had its own completion rule, routing rule,
+and cache rule. Runtime profiles (claude, codex, pi, opencode) were data, not
+code branches. The system ran many tasks at the same time and delivered each one as
+a draft PR. The last work removed every human gate so a task looped to a draft PR
+alone. Full detail is in [`README.md`](agentic-development-task-system-v5__ai/README.md),
+[`AGENTS.md`](agentic-development-task-system-v5__ai/AGENTS.md), and
+[`docs/v1-feature-inventory.md`](agentic-development-task-system-v5__ai/docs/v1-feature-inventory.md).
+
+**What this fixed over v4:** v5 added durable workflows that survive a crash,
+a read-back of real phase and session timing, fleet-level monitoring, a
+multi-adapter runtime layer, and real QA with browser media. Ordinary runs
+reached a draft PR without a human at each gate.
+
+**Why it was archived:** v5 did not fail on features. It cost too much to run and
+to keep correct. A rebuild ([`docs/v2-proposal.md`](agentic-development-task-system-v5__ai/docs/v2-proposal.md))
+replaces it. The reasons are below.
+
+- **Runtime.** The system needed Temporal, a daemon, a worker, and a web server
+  at the same time. Ports, queues, and stale `dist` builds broke boot often. Ten
+  concurrent tasks pushed the host load to about 377. A network partition wedged
+  the worker.
+- **Very wasteful with tokens.** Cost came from the context inside each session,
+  not from the prompt preamble. Every phase started a new session and rebuilt
+  context. A retry replayed the full cached context. The measured audits are in
+  `docs/token-cost-measurement.md` and `docs/task-79-prompt-token-audit.md`.
+- **Wrong validation from lifecycle stages.** Each fixed phase made its own
+  decision about "done". Gates passed on agent completion, not on test results.
+  Static string checks accepted runtime bugs. One QA executor always passed. A
+  task could reach a PR without proof that the feature worked.
+- **Better models.** Current models follow instructions much better. They do not
+  need a rigid phase machine to stay on task. A short playbook of exact steps now
+  gives the same control with far less code.
+- **Too many moving parts.** The phase table, workflow, completion function, and
+  a 2,172-line `run-phase.ts` hub all had to change together for one new step.
+  Many parts made failures hard to trace and debug. A bug could sit in Temporal,
+  the daemon, the worker, the database, or the adapter.
+
+The v2 plan keeps one hard rule in code: no PR claims a feature works without
+proof. It targets less than half the code and no Temporal and no daemon.
