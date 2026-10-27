@@ -47,7 +47,7 @@ Classified against the five-axis multi-agent taxonomy from [Wang et al., *agents
 | **Safety — additional** | write boundary; dependency boundary; final diff review | prompt-injection handling; dangerous command classifier |
 | **Orchestration** | state machine; plan-act-review; human checkpoint orchestration | simple request-response; ReAct loop; plan-and-execute; declarative workflow; event-driven; hierarchical planning; autonomous bounded loop |
 
-Implementation pointers: lifecycle FSM in [`agent-workbench-live/schemas/transitions.yaml`](agent-workbench-live/schemas/transitions.yaml); transition engine in [`agent-workbench-live/lib/transitions.py`](agent-workbench-live/lib/transitions.py); event log schema in [`agent-workbench-live/schemas/events.jsonl`](agent-workbench-live/schemas/events.jsonl); subagent + session discipline in [`agent-workbench-live/AGENTS.md`](agent-workbench-live/AGENTS.md).
+Implementation pointers: lifecycle FSM in [`agent-workbench-live/schemas/transitions.yaml`](code/agent-workbench-live/schemas/transitions.yaml); transition engine in [`agent-workbench-live/lib/transitions.py`](code/agent-workbench-live/lib/transitions.py); event log schema in [`agent-workbench-live/schemas/events.jsonl`](code/agent-workbench-live/schemas/events.jsonl); subagent + session discipline in [`agent-workbench-live/AGENTS.md`](code/agent-workbench-live/AGENTS.md).
 
 ## Why orchestration is centralized
 

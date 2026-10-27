@@ -328,7 +328,7 @@ Two ways to clear the four human gates:
   **blindly**, in sequence, without reading artifacts. Right for a smoke run or a
   mock-runtime task you trust.
 - **Gate-by-gate** — read before you decide, then act. This is what the
-  [`wb-drive`](skills/wb-drive/SKILL.md) skill automates from a Claude Code
+  [`wb-drive`](code/skills/wb-drive/SKILL.md) skill automates from a Claude Code
   session for real (`claude`-runtime) tasks:
 
   ```bash

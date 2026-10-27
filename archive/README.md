@@ -1,5 +1,7 @@
 # Archive — five generations of an agentic dev-task system
 
+Each version folder has the same layout. The root holds the docs: `README.md`, `docs/`, and any `FEATURES.md`, `LOG.md`, or `CLAUDE.md`. The `code/` folder holds everything else. To look back, read the root docs first.
+
 Each folder below is a **frozen, self-contained snapshot** of a full attempt at the
 same underlying problem: let an AI agent implement a feature end-to-end against a
 real repo, without the result being unreviewed, unaudited, or untrustworthy. None of

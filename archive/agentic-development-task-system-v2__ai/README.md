@@ -262,9 +262,9 @@ failure — the whole point of the event log is to be a faithful audit trail.
 
 Event-log writes are **best-effort**: a failure prints a warning but never blocks
 the script. `metadata.yaml` is canonical; the event log is the audit trail, not a
-gate. See [`lib/events.py`](lib/events.py).
+gate. See [`lib/events.py`](code/lib/events.py).
 
-Separately, [`lib/transitions.py`](lib/transitions.py) declares the required
+Separately, [`lib/transitions.py`](code/lib/transitions.py) declares the required
 evidence for every documented edge (e.g. `qa → merged` requires `tests_passed`,
 `pr_url`, `merge_sha`). All five lifecycle scripts now call
 `transition_with_evidence`; missing or empty evidence is a hard rejection.
@@ -508,7 +508,7 @@ are slash commands under [`.claude/commands/`](./.claude/commands):
    stitches `pr-summary.md` from `spec.md` + `decisions.md` + `qa-log.md` +
    `run-log.md` per the canonical template structure.
 
-All three call into [`lib/run.py`](lib/run.py) for the shared
+All three call into [`lib/run.py`](code/lib/run.py) for the shared
 load-and-validate step. See [`docs/architecture.md`](docs/architecture.md)
 for why these are slash commands instead of scripts.
 

@@ -3,12 +3,12 @@
 Every run moves through a small, explicit state machine. The current state lives in
 `runs/<run_id>/metadata.yaml` under the `status:` key. The history of how a run got
 to its current state lives in `runs/<run_id>/events.jsonl` — see
-[`lib/events.py`](../lib/events.py).
+[`lib/events.py`](../code/lib/events.py).
 
 Every transition that crosses a meaningful gate carries **evidence**: a small
 dict of named fields that must be present and non-empty for the transition to be
 accepted. The evidence is validated by `lib.transitions.transition_with_evidence`
-([`lib/transitions.py`](../lib/transitions.py)) and recorded in the corresponding
+([`lib/transitions.py`](../code/lib/transitions.py)) and recorded in the corresponding
 `TransitionApplied` event's payload.
 
 ## States
@@ -89,7 +89,7 @@ where QA happened outside the workbench.
 |---|---|---|---|
 | _any non-terminal_ | `abandoned` | `abandoned_reason` | `scripts/complete-run.sh --abandon --reason "..."` |
 
-This edge is encoded as a wildcard in [`lib/transitions.py`](../lib/transitions.py)
+This edge is encoded as a wildcard in [`lib/transitions.py`](../code/lib/transitions.py)
 (`ANY_NON_TERMINAL`). Terminal states (`merged`, `abandoned`) cannot be abandoned.
 
 ## Diagram — feature path

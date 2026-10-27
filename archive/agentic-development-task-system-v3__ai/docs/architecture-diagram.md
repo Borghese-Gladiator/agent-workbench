@@ -2,7 +2,7 @@
 
 Visual companion to [`architecture.md`](../architecture.md). That file is the prose
 ("why"); this file is the picture ("what talks to what"). Source of truth for the
-lifecycle FSM is [`agent-workbench-live/schemas/transitions.yaml`](../agent-workbench-live/schemas/transitions.yaml).
+lifecycle FSM is [`agent-workbench-live/schemas/transitions.yaml`](../code/agent-workbench-live/schemas/transitions.yaml).
 
 ## 1. System layers
 
@@ -139,6 +139,6 @@ Legend: 🧠 LLM-bearing (Skill/subagents) · ✋ human gate · plain = determin
 
 - Prose rationale & design goals — [`architecture.md`](../architecture.md)
 - Lifecycle narrative — [`docs/lifecycle.md`](lifecycle.md)
-- In-run discipline (who may write status, only-`draft`-asks-questions) — [`agent-workbench-live/AGENTS.md`](../agent-workbench-live/AGENTS.md)
-- FSM source of truth — [`agent-workbench-live/schemas/transitions.yaml`](../agent-workbench-live/schemas/transitions.yaml)
-- Context library index — [`agent-workbench-live/context/README.md`](../agent-workbench-live/context/README.md)
+- In-run discipline (who may write status, only-`draft`-asks-questions) — [`agent-workbench-live/AGENTS.md`](../code/agent-workbench-live/AGENTS.md)
+- FSM source of truth — [`agent-workbench-live/schemas/transitions.yaml`](../code/agent-workbench-live/schemas/transitions.yaml)
+- Context library index — [`agent-workbench-live/context/README.md`](../code/agent-workbench-live/context/README.md)
