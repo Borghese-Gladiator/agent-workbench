@@ -120,7 +120,7 @@ code branches. The system ran many tasks at the same time and delivered each one
 a draft PR. The last work removed every human gate so a task looped to a draft PR
 alone. Full detail is in [`README.md`](agentic-development-task-system-v5__ai/README.md),
 [`AGENTS.md`](agentic-development-task-system-v5__ai/AGENTS.md), and
-[`docs/v1-feature-inventory.md`](agentic-development-task-system-v5__ai/docs/v1-feature-inventory.md).
+[`docs/v5-feature-inventory.md`](../docs/v5-feature-inventory.md).
 
 **What this fixed over v4:** v5 added durable workflows that survive a crash,
 a read-back of real phase and session timing, fleet-level monitoring, a
@@ -128,7 +128,7 @@ multi-adapter runtime layer, and real QA with browser media. Ordinary runs
 reached a draft PR without a human at each gate.
 
 **Why it was archived:** v5 did not fail on features. It cost too much to run and
-to keep correct. A rebuild ([`docs/v2-proposal.md`](agentic-development-task-system-v5__ai/docs/v2-proposal.md))
+to keep correct. A rebuild ([`docs/v6-proposal.md`](../docs/v6-proposal.md))
 replaces it. The reasons are below.
 
 - **Runtime.** The system needed Temporal, a daemon, a worker, and a web server
@@ -151,5 +151,5 @@ replaces it. The reasons are below.
   Many parts made failures hard to trace and debug. A bug could sit in Temporal,
   the daemon, the worker, the database, or the adapter.
 
-The v2 plan keeps one hard rule in code: no PR claims a feature works without
-proof. It targets less than half the code and no Temporal and no daemon.
+The v6 plan keeps one hard rule in code: no PR claims a feature works without
+proof. It targets less than half the code, no Temporal, no worker, and one small daemon for the UI.
