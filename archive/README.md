@@ -120,7 +120,7 @@ code branches. The system ran many tasks at the same time and delivered each one
 a draft PR. The last work removed every human gate so a task looped to a draft PR
 alone. Full detail is in [`README.md`](agentic-development-task-system-v5__ai/README.md),
 [`AGENTS.md`](agentic-development-task-system-v5__ai/AGENTS.md), and
-[`docs/v5-feature-inventory.md`](../docs/v5-feature-inventory.md).
+[`FEATURES.md`](agentic-development-task-system-v5__ai/FEATURES.md).
 
 **What this fixed over v4:** v5 added durable workflows that survive a crash,
 a read-back of real phase and session timing, fleet-level monitoring, a
@@ -128,7 +128,7 @@ multi-adapter runtime layer, and real QA with browser media. Ordinary runs
 reached a draft PR without a human at each gate.
 
 **Why it was archived:** v5 did not fail on features. It cost too much to run and
-to keep correct. A rebuild ([`docs/v6-proposal.md`](../docs/v6-proposal.md))
+to keep correct. A rebuild ([`PROPOSAL.md`](../PROPOSAL.md))
 replaces it. The reasons are below.
 
 - **Runtime.** The system needed Temporal, a daemon, a worker, and a web server
