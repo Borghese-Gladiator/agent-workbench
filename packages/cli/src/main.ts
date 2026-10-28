@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { awbHome, ensureDaemon, findDaemon, api } from "./home.ts";
-import { gitInfo, playbookPath, claudeArgs } from "./launch.ts";
+import { gitInfo, playbookPath, claudeArgs, awbSettings } from "./launch.ts";
 import { doctor } from "./doctor.ts";
 
 const home = awbHome();
@@ -65,7 +65,7 @@ async function launch(passThrough: string[]): Promise<number> {
   console.error(`awb: session ${session.id} on ${git.branch}, daemon port ${daemon.port}`);
 
   const claude = process.env.AWB_CLAUDE || "claude";
-  const args = claudeArgs(passThrough, playbookPath(git.worktree), { env: { AWB_HOME: home } });
+  const args = claudeArgs(passThrough, playbookPath(git.worktree), awbSettings(home));
   const child = spawn(claude, args, { stdio: "inherit", env: { ...process.env, AWB_HOME: home, AWB_SESSION_ID: session.id } });
 
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(sig, () => child.kill(sig));

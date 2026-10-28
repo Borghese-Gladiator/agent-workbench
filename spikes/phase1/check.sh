@@ -37,9 +37,10 @@ sleep 1.5
 
 echo "== 2. both sessions show in the UI while open"
 URL=$("$AWB" ui --no-open 2>/dev/null)
-PAGE=$(curl -sf "$URL")
-for r in repo1 repo2; do grep -q "$WORK/$r" <<<"$PAGE" || fail "$r is not on the UI page"; done
-[ "$(grep -o '<td>open</td>' <<<"$PAGE" | wc -l | tr -d ' ')" = 2 ] || fail "UI does not show 2 open sessions"
+curl -sf "$URL" | grep -q 'EventSource("/api/feed")' || fail "UI page does not load the live feed"
+PAGE=$(curl -sN -m 1 "${URL}api/feed" || true)
+for r in repo1 repo2; do grep -q "$WORK/$r" <<<"$PAGE" || fail "$r is not in the UI feed"; done
+[ "$(grep -o '"ended_at":null' <<<"$PAGE" | wc -l | tr -d ' ')" = 2 ] || fail "UI feed does not show 2 open sessions"
 echo "UI at $URL shows repo1 and repo2 as open"
 wait
 [ "$(sessions "$AWB_HOME" | grep -o '"ended_at":null' | wc -l | tr -d ' ')" = 0 ] || fail "sessions did not end"

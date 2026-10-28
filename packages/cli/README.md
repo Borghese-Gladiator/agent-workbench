@@ -22,10 +22,13 @@ awb ui                           # opens the session list in the browser
 
 A repo can replace the default playbook with `.awb/playbook.md`.
 
+`awb` passes hooks to `claude` with `--settings`. Each hook runs `bin/awb-hook`, which sends the hook JSON to the daemon of `AWB_HOME` for the session in `AWB_SESSION_ID`. The sender prints nothing, waits at most 1 s, and always exits 0. If the daemon is down, the event is dropped and the chat continues. On `Stop` and `SessionEnd`, the daemon reads the token totals from the transcript file that the hook names. The UI page gets live updates from `/api/feed` (server-sent events).
+
 To test:
 
 ```sh
 npm test
 npm run typecheck
 bash spikes/phase1/check.sh      # manual check with a stub claude, no tokens
+bash spikes/phase2/check.sh      # live feed check with the real claude (haiku)
 ```
