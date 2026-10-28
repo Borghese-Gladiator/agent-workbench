@@ -1,6 +1,6 @@
 # Agent Workbench v5: feature inventory
 
-This document lists every feature of the current workbench (v5). It is the input for `docs/v6-proposal.md`.
+This document lists every feature of the current workbench (v5). It is the input for [`PROPOSAL.md`](../../PROPOSAL.md).
 
 Sources: `AGENTS.md`, `docs/*.md`, package READMEs, the CLI command files, the daemon routes, and the worker `AGENTS.md`. Date: 2026-10-21.
 
@@ -208,3 +208,53 @@ Pages: Overview, Repositories, Repository detail, Tasks, Task board, Task detail
 | TASK-129 | Add `knip` for dead-code checks. | #50 |
 | TASK-130 | Delete `packages/repository-map`. | #51 |
 | TASK-131 | A real QA agent session. | #52 |
+
+## v6 disposition of each feature
+
+The v6 proposal decides what happens to each feature. The table uses the IDs above.
+
+Status words: **Keep** (same behavior), **Simplify** (same goal, less code), **Replace** (an existing tool does it), **Drop** (not in v6).
+
+| v5 IDs | v6 decision |
+| --- | --- |
+| R1, R2 | **Keep.** A `repos` table and a trust flag. |
+| R3 | **Keep.** Use `git` CLI helpers. |
+| R4, R8 | **Simplify.** The start recipe (section 3.8) and a saved `commands.json` in `.ag/`. |
+| R5, R6, R7, R9 | **Drop.** The agent reads the repo. |
+| M1 to M7 | **Simplify.** One file, `.ag/memory.md`, per repo. The agent reads it at start. No FTS5 until the file is too large. |
+| T1, T2, T3 | **Keep.** The chat runs `ag stack set`, `ag tasks`, `ag show`, `ag retry` and `ag task rm` for you (section 2.4). |
+| T4 | **Simplify.** A stack, not a DAG. Tasks run in order and the PRs stack (section 3.6). |
+| T5 | **Drop.** The agent judges the size. |
+| T6, T7 | **Keep.** SQLite is the only store. |
+| L1 to L3 | **Replace.** The agent writes claims in the chat. A plan is optional. |
+| L4, L5 | **Keep.** Build and check, as advice in the playbook. |
+| L6, Q1 to Q6, Q9 | **Replace.** `ag prove` with Playwright Test Agents. API tests cover repos with no browser UI. |
+| L7 | **Keep (optional).** An advice line in the playbook: review the diff in a fresh read-only session before `ag ship`. |
+| L8, E5, E6 | **Keep.** `ag ship` and the PR body table. |
+| L9, E7 | **Simplify.** PR sync reads the PR state. Read PR comments in the chat when you ask. |
+| Q7, Q8, C1, C5, C6 | **Simplify.** The gate. |
+| Q10 | **Keep.** Upload video as a prerelease asset. About 100 lines. |
+| Q11 | **Replace.** The chat is the QA agent. |
+| C2, C3, C4, C7, C10 | **Drop.** One task has no loop routing. `ag retry` starts a fresh attempt. `/compact` and a budget flag in `claude` cover the rest. |
+| C8 | **Drop.** The agent reports risk in the PR summary. |
+| C9 | **Keep.** Draft PR is the only end state. |
+| A1 to A2, A6 to A7 | **Drop.** `ag` uses `claude`. |
+| A3 to A5 | **Defer.** Codex through a second wrapper only if needed. The CLI interface makes this easier. |
+| A8 | **Simplify.** Claude Code permission rules in `--settings`. |
+| A9 to A11 | **Drop.** Claude Code provides model choice, resume and skills. |
+| W1, W3, W4 | **Keep.** The runner makes a `git worktree` for each stack task. About 300 lines. |
+| W2 | **Simplify.** The agent picks a free port. |
+| W5, W6 | **Drop** the digest. **Keep** the `native-trusted` rule. |
+| E1 to E3 | **Drop.** Plain files in `$AG_HOME/tasks/<task id>/proof/`. The gate ties evidence to the commit. No waivers. |
+| E4 | **Keep (small).** A secret scan before upload. |
+| E8, E9 | **Drop.** |
+| O1, O2, O5 | **Keep.** Events from hooks (section 3.9). |
+| O3, O6 to O8 | **Drop.** |
+| O4 | **Defer.** OpenTelemetry only if you use a collector. |
+| P1 | **Simplify.** `ag doctor`. |
+| P2, P3 | **Drop.** The problem does not exist without Temporal and a worker. |
+| P4 | **Keep.** The Live view in the UI and `ag tasks`. |
+| P5, P6 | **Simplify.** One config file. |
+| U1 | **Keep, smaller.** Four views (section 3.9). |
+| S1 to S4 | **Simplify.** Rewrite `run-workbench-task` as the playbook. Keep the worktree skills. |
+| S5 | **Simplify.** Keep a few decision records. |
