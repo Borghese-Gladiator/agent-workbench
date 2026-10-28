@@ -1,219 +1,318 @@
 # Agent Workbench v6: proposal
+Status: draft for review. Date: 2026-10-28.
 
-Status: draft for review. Date: 2026-10-27.
+v5 is the old workbench. It is frozen in `archive/agentic-development-task-system-v5__ai/`. Its features, and the v6 decision for each one, are in that folder's `FEATURES.md`. Why v5 was archived is in `archive/README.md`. The proof spike is in the appendix of this file.
 
-v5 is the old workbench. It is frozen in `archive/agentic-development-task-system-v5__ai/`. This document proposes v6, the rebuild. The list of v5 features is in `archive/agentic-development-task-system-v5__ai/FEATURES.md`. The proof spike is in the appendix of this file.
+## 1. Idea
 
-All size and time numbers are my estimates. I did not measure them.
+Type `ag` in any repo and ask for a feature. You get a normal Claude Code chat. The agent splits the work into a stack of tasks. A normal task is a stack of one. Each task writes claims, builds the code, proves each claim with a Playwright video, and opens a draft PR only if the proof gate passes. Later, the chat reads the task history and manages it for you.
 
-## 1. Goal
+There are no stages and no human gates. One rule in code decides if work is done: the proof gate. The agent's own message is never proof.
 
-v6 is a wrapper around Claude Code. You type `ag` in any repo. You get a normal Claude Code chat. The wrapper adds three things: a task list with order, live observability in a web UI, and a draft PR that carries video proof of every feature.
+v6 has three use cases. All three use one data model.
 
-There are no stages. There is one chat. One rule in code decides if work is done: the proof gate.
+| Use case | What you do | What happens |
+| --- | --- | --- |
+| 1. Normal task | In `ag`, ask for a feature. | The chat makes a stack of one task on the current branch. It builds, proves and ships the feature in the same chat. |
+| 2. Big feature | In `ag`, ask for a feature too large for one session. | The chat makes a stack of many tasks and starts the run. The daemon runs each task in a fresh session. Each task proves itself and opens its own draft PR. The PRs stack. |
+| 3. Manage tasks | In `ag`, ask: "What failed this week? Retry the leaderboard task. Drop the old stack." | The chat reads the task history, explains it, and runs the changes. You do not type `ag` commands yourself. |
 
-## 2. Requirements
+### 1.1 Requirements
 
-### 2.1 Kept from v5
+These are the things v6 must do. Sections 3 and 4 give the design for each.
 
-| ID | Requirement | v5 source | v6 form |
-| --- | --- | --- | --- |
-| K1 | Web UI | `apps/web` | Smaller UI with three pages: Tasks, Session, PR proof. |
-| K2 | Task ordering | task DAG, queue | A task list with `depends_on`. The chat, or you, add tasks. `ag` runs them in order. |
-| K3 | Observability of what runs now | three channels, traces | Live feed of sessions, tool calls, cost, and state. Fed by Claude Code hooks. |
-| K4 | Draft PR as the end state | deliver phase | Same. A PR is always a draft. |
-| K5 | History | SQLite, FTS5 | SQLite for tasks, sessions, events, proof. Search stays optional. |
+**All use cases**
 
-### 2.2 New
+- `ag` starts in any git repo and behaves like `claude`. All Claude Code features work.
+- You describe the work in plain words. There is no form, no task file and no stage name.
+- The first use in a repo sets itself up. The agent finds the lint, typecheck, test and start commands and saves them in `.ag/`. It asks you only when it cannot find them.
+- Several sessions can run at the same time, in different repos or on different branches.
+- You can see every session live in the web UI: repo, branch, task, last tool call, cost.
 
-| ID | Requirement |
+**Normal task**
+
+- The agent writes the claims before the code. A claim is one sentence that a browser test can prove false. You can edit the claims.
+- The agent works on its own branch and runs the repo lint, typecheck and unit tests before it asks for proof.
+- Each claim has a Playwright test with a video and a trace. One more video shows the full feature from start to end. A repo with no browser UI uses an API test, and the PR says "API proof".
+- The proof tests and the evidence never enter the target repo.
+- The gate is code. If it fails, the agent fixes the code and runs the gate again. You do not step in.
+- The PR is always a draft, and it opens only when the gate passes. A claim with no proof is listed under "Not proven", never as passed.
+
+**Big feature**
+
+- The chat decides if the work needs a stack of many tasks. No rule in code forces it.
+- Tasks run one at a time, in stack order. Each task is a fresh session that starts from the branch of the task below it.
+- A task starts only when the task below it opened its PR. If a task fails, the stack stops there.
+- The last task proves the whole feature from start to end.
+- The run lives in the daemon, so it continues when you close the chat.
+
+**Manage tasks**
+
+- The chat can list stacks and tasks across all repos, by repo, status and age.
+- The chat can audit one task: its claims, each attempt with its gate result, the reason for a failure, the cost, and the PR state.
+- The chat can retry a failed task. A retry is a fresh session with the claims and the last gate result, not the old chat history.
+- The chat can change or remove tasks that have not started.
+- Only code sets a task status. The PR state (merged, closed) comes from GitHub.
+
+**Operation**
+
+- One small daemon. No Temporal and no worker.
+- A crash loses no chat work. `ag --resume` restores the chat.
+- `ag` is prod and `ag-dev` is dev. They share nothing, so the workbench can build and prove changes to itself.
+- `ag` is native and trusted. It is not a sandbox.
+
+**Not in v6**
+
+- A phase machine or stage names.
+- A human approval gate. The gate is code.
+- A task DAG, or parallel tasks inside one stack.
+- An MCP tool server for the workbench.
+- Merging a PR. You do that on GitHub.
+- A sandbox.
+
+## 2. Usage
+
+The text that `ag` and the agent print is an example. The commands and the order are the design. In every case, the agent runs the `ag` commands. You only type in the chat.
+
+### 2.1 One-time setup
+
+```
+npm i -g ag            # or: add the ag binary to PATH
+ag doctor              # checks claude, Chromium, daemon
+```
+
+If `ag doctor` finds a problem, it prints the command that fixes it. Example: `npx playwright install chromium`.
+
+### 2.2 Use case 1: normal task
+
+| Step | You do | The system does |
+| --- | --- | --- |
+| 1 | `cd ~/games && ag` | Starts the daemon if it is not up. Starts `claude` with the playbook and the hooks. You see the normal Claude Code screen. |
+| 2 | Type: `Add a scoreboard to Tic-Tac-Toe. It counts X wins, O wins and draws.` | The agent reads the repo. On the first use, it finds the lint, test and start commands and saves them in `.ag/run.md`. |
+| 3 | Nothing. | The agent creates the branch `ag/tictactoe-scoreboard`. It runs `ag stack set` with one task: the title and claims C1 to C6. The daemon binds the task to the branch. |
+| 4 | Nothing. (Optional: open `ag ui` to edit the claims.) | The agent writes the code. It runs lint, typecheck and unit tests, and fixes any failure. |
+| 5 | Nothing. | The agent starts the app with the command in `.ag/run.md`, so that it can see the real page. |
+| 6 | Nothing. | A fresh test session reads only the claims and the running app. It writes one Playwright test for each claim, and one full-flow test. |
+| 7 | Nothing. | The agent runs `ag prove`. The daemon starts a clean app at the commit, runs the tests and runs the gate. The command prints the claim table. |
+| 8 | Nothing. | If a claim fails, the agent fixes the code and runs `ag prove` again. This repeats until all claims pass, or the agent stops and reports the failed claims. |
+| 9 | Nothing. | The agent runs `ag ship`. The gate runs again. Videos upload. A draft PR opens. The task becomes `done`. |
+| 10 | Read the PR. Merge it on GitHub if it is good. | Nothing. The workbench never merges and never undrafts. PR sync marks the task `merged` later. |
+
+What you see at the end:
+
+```
+$ ag ship
+Gate: 6/6 claims PASS at 3f9c2a1 (clean)
+Uploaded 7 videos to release ag-proof-51
+Draft PR: https://github.com/<owner>/games/pull/51
+```
+
+The PR body for this example:
+
+| Section | Example content |
 | --- | --- |
-| N1 | The `ag` command opens in any repo and behaves like `claude`. |
-| N2 | Every PR has full videos and a feature list. |
-| N3 | One chat. No stages. No phase names. |
+| Summary | "Adds a session scoreboard to Tic-Tac-Toe." |
+| Features | C1 to C6, each with PASS, a video link and a trace link. One extra row: the full-flow video. |
+| How it was run | `npm run dev`, commit `3f9c2a1`, `npx playwright test`. |
+| Not proven | "None." |
+| Test code | The seven spec files, collapsed. The diff has only the feature code. |
 
-## 3. What v5 got wrong
+If a claim still fails after the retries, `ag ship` refuses to open a PR. The chat prints the claim table and the reason for each failure. The branch stays on disk. You can reply in the chat to give a hint. The agent then fixes the code and runs `ag prove` again.
 
-| Problem in v5 | Cause |
-| --- | --- |
-| Slow and rigid | Nine fixed phases. Each phase has its own completion rule, routing rule and cache rule. |
-| Hard to change | A new step touches the workflow, the phase table, the completion function and the hub file. |
-| Many parts | Temporal, a daemon, a worker, 19 packages, a web server. |
-| Weak QA | Four fixed executors guess how to test. One of them always passes. |
-| Large hub file | `run-phase.ts` has 2,172 lines of special cases. |
-| High token cost | Each phase starts a new session and rebuilds context. A retry replays the full context. |
+### 2.3 Use case 2: big feature
 
-## 4. The `ag` command
+For a request such as "Add accounts and a leaderboard", the chat decides that one session is not enough. It runs `ag stack set` with four tasks:
 
-### 4.1 What you do
+1. Accounts: sign up and log in.
+2. Save each game result to the account.
+3. Leaderboard page.
+4. Full flow: sign up, play, see the score on the leaderboard.
 
-1. Add `ag` to your `PATH`.
-2. Open a terminal in any git repo.
-3. Type `ag`.
+You can edit the stack in `ag ui`, or ask the chat to change it. Then the chat runs `ag run`, and you can close the chat. For each task, the runner:
 
-You see the same screen as `claude`. All Claude Code features work, because `ag` starts the real `claude` program.
+1. Makes a worktree on a new branch from the branch of the task below.
+2. Starts `claude -p` with the playbook, the task claims, and the titles of the tasks below.
+3. Waits for the session to end. The session follows the steps of use case 1, from step 4 to step 9.
+4. Checks the task. If it is `done`, the runner starts the next task. If not, it marks the task `failed` and stops the stack.
 
-### 4.2 What `ag` does at start
+You get four stacked draft PRs. If task 2 fails, tasks 3 and 4 do not start. You watch the run in the Live view.
+
+### 2.4 Use case 3: manage tasks
+
+| You type | The agent runs | You get |
+| --- | --- | --- |
+| "What failed this week?" | `ag tasks --status failed --since 7d --json`, then `ag show` on each failed task. | A short list. Each failed task has the claims that failed, the reason, and the cost. |
+| "Why did the leaderboard task fail?" | `ag show <task>` | The gate table of each attempt, and the path to the transcript. |
+| "Retry it." | `ag retry <task>` | A new attempt in a fresh session. The stack continues if it passes. |
+| "Drop the old accounts stack." | `ag task rm <ids>` on the waiting tasks. | The removed ids. Started tasks stay in the history. |
+| "Which PRs are still open?" | `ag tasks --status done --json` | The tasks whose PR is still open. Merged PRs show as `merged`. |
+
+You can type any `ag` command yourself. The design does not need you to.
+
+## 3. Architecture
+
+### 3.1 Layers
+
+```
+Layer 1  daemon    owns all state and every hard rule
+                   SQLite, the gate, the runner, the shipper, PR sync
+                        ^  HTTP
+Layer 2  clients   ag CLI   (you and the agent)
+                   web UI   (you)
+                   hooks    (a passive event feed)
+                        ^  Bash
+Layer 3  agent     Claude Code and the playbook. It runs the ag CLI.
+```
+
+The hard rules live in layer 1. It does not matter who calls. The daemon refuses a PR without a passing gate, from you, the agent or the UI.
+
+The agent uses the CLI, not MCP tools:
+
+- You and the agent use one interface. There is one thing to build and test.
+- The CLI works in the chat, in headless `claude -p`, and in any other runtime. In v5, tools tied to one runtime caused bugs.
+- Every command prints JSON with `--json`, so the agent gets structured results.
+
+### 3.2 Data flow
+
+```
+ YOU
+  |                                   |
+  | type in terminal                  | browser
+  v                                   v
++--------------------------+    +-------------+
+| ag  (chat)               |    | web UI      |
+|  claude + playbook       |    | Live        |
+|  agent runs ag CLI ------+-+  | Session     |
+|  hooks ------------------+ |  | Stacks      |
++--------------------------+ |  | PR proof    |
+                             |  +------+------+
+ ag CLI (you or the agent)   |         |
+  stack set, task rm, run,   |         |
+  retry, prove, ship,        |         |
+  tasks, show                |         |
+            |                |         |
+            v  HTTP          v events  v HTTP and live updates
++---------------------------------------------------------+
+| daemon (one for each AG_HOME)                           |
+|                                                         |
+|  API ----> store (SQLite)                               |
+|             stacks, tasks, attempts, sessions,          |
+|             events, gate results, PRs                   |
+|                                                         |
+|  runner -> starts `claude -p` for each task in a        |
+|            worktree, then checks the task at the end    |
+|  gate ---> starts the app, runs the tests, reads the    |
+|            proof files, writes the gate result          |
+|  shipper > runs the gate, pushes, uploads the videos,   |
+|            opens the draft PR                           |
+|  PR sync > reads the PR state from GitHub               |
++---------+--------------------------+--------------------+
+          |                          |
+          v                          v
+  $AG_HOME/tasks/<id>/        GitHub
+   claims.md                   branches
+   proof-tests/                draft PRs
+   proof/ (videos, traces,     prerelease video assets
+           report, hashes)
+```
+
+### 3.3 Commands
+
+| Command | Use | Returns |
+| --- | --- | --- |
+| `ag` | Open the chat in the current repo. | The Claude Code screen. |
+| `ag stack set` | Create a stack, or replace the waiting tasks of a stack. It takes JSON on stdin (section 3.5). | The changes and the new stack version. |
+| `ag task rm <id...>` | Remove one or many waiting tasks. | The removed ids. |
+| `ag run [stack]` | Start the runner on a stack. | A run id, at once. The run continues if the chat closes. |
+| `ag retry <task>` | Start a new attempt on a failed task. | The new attempt id. |
+| `ag prove` | Run the gate for the task on the current branch. | The claim table. Each failed claim has the reason and the video and trace paths. |
+| `ag ship` | Run the gate again. If it passes, open the draft PR. | The PR URL, or the refusal and the claim table. |
+| `ag tasks` | List stacks and tasks across all repos. Filters: `--repo`, `--status`, `--since`. | One line for each task. |
+| `ag show <task>` | Audit one task. | The claims, every attempt with its gate table, the failure reason, the cost, the transcript path and the PR state. |
+| `ag ui` | Open the web UI. | The browser page. |
+| `ag doctor` | Check the setup: `claude`, Chromium, daemon. | What to fix. |
+
+A task has one branch. `ag prove` and `ag ship` find the task from the current branch, so the agent never passes a task id to them.
+
+### 3.4 Data model and status
+
+```
+Stack     one for each request. A normal task is a stack of one.
+  Task      title, claims, position, status, branch, PR
+    Attempt   one for each try: the first run and each retry
+      Session   the claude session id, cost, tokens
+        Event     from hooks: prompts, tool calls, stop
+      Gate result   the claim table at a commit
+```
+
+Code sets every status. The agent has no command to set one.
+
+| Status | Set by | When |
+| --- | --- | --- |
+| `waiting` | `ag stack set` | The task is created. |
+| `doing` | The runner, or the chat for a stack of one | A session starts the task. |
+| `done` | The shipper | `ag ship` opens the PR. |
+| `failed` | The runner | The session ends without a PR. The last gate result gives the reason. |
+| `merged`, `closed` | PR sync | GitHub reports the PR state. |
+
+### 3.5 Replace a stack
+
+The agent changes a stack with `ag stack set`. It sends the full stack that it wants. The daemon compares it with the current stack and makes the changes in one transaction. An agent writes a whole list well, and it keeps track of ids and positions badly.
+
+- **Waiting tasks only.** The new stack can add, change, move or remove waiting tasks. If it changes or removes a task that has started, the daemon refuses the whole command.
+- **The result shows the changes.** The command returns the tasks that it added, removed, changed and moved. The agent sees a task that it removed by mistake.
+- **Version check.** Each stack has a version number. The command sends the version that the agent read. If you edited the stack in the UI after that, the daemon refuses the command, and the agent must read the stack again.
+
+`ag task rm` stays for the simple case: remove these tasks, by id.
+
+### 3.6 The stack
+
+One session has a limit. Its context fills up and its quality drops. The stack lets v6 build a feature larger than one session can hold. It cuts the feature into tasks that each fit in one fresh session.
+
+- **Who makes it.** The chat decides. The playbook gives advice on when to split. A normal task is a stack of one.
+- **A task.** It has a `title` and `claims`. Nothing more. The position in the stack is the order.
+- **Order.** Tasks run one at a time, from the bottom of the stack up.
+- **Branches.** Each task branches from the branch of the task below it, so the PRs stack. The first task branches from the default branch.
+- **Context.** Each task gets the playbook, its own claims, and the titles of the tasks below it. It reads their code from its branch. It does not get their chat history.
+- **Failure.** If a session ends without a PR, the runner marks the task `failed` and the stack stops. When a retry opens its PR, the stack continues.
+
+A stack is simpler than a DAG and avoids two v5 problems: the host load from many tasks at once, and conflicts between parallel tasks that edit the same files. The cost is speed. A stack of ten tasks takes ten times as long as one task.
+
+### 3.7 How `ag` starts `claude`
 
 1. Find the repo root and the current branch.
-2. Start the workbench daemon if it is not up. One daemon runs for each machine.
+2. Start the daemon if it is not up. One daemon runs for each `AG_HOME` (section 5).
 3. Register a session with the daemon.
 4. Start `claude` with extra options:
-   - `--append-system-prompt` with the playbook text (section 6).
-   - `--mcp-config` for the `ag` tool server (section 7).
-   - `--settings` with hooks that send events to the daemon (section 8).
+   - `--append-system-prompt` with the playbook text.
+   - `--settings` with the hooks and the permission rules (section 3.10).
+   - `AG_HOME` in the environment, so that the `ag` commands that the agent runs reach the same daemon.
 5. Pass through every other argument. Example: `ag --resume` works like `claude --resume`.
 6. On exit, tell the daemon that the session ended.
 
-### 4.3 Other commands
+The runner starts each stack task the same way, with `claude -p` in place of the chat.
 
-| Command | Action |
-| --- | --- |
-| `ag` | Open the chat in the current repo. |
-| `ag ui` | Open the web UI in the browser. |
-| `ag tasks` | Print the task list and the order. |
-| `ag run` | Run the next ready task without a chat (headless, `claude -p`). |
-| `ag proof` | Run the proof gate on the current branch and print the table. |
-| `ag doctor` | Check the setup: `claude`, Chromium, daemon. |
-
-### 4.4 Rules
+Rules for the target repo:
 
 - `ag` never replaces `claude` settings. It adds to them.
-- `ag` works with no setup in a repo. First use creates a `.ag/` folder. It holds the playbook and the start recipe.
-- `ag` does not write to `.mcp.json` of the repo. It passes its own config on the command line.
+- `ag` does not write to the `.mcp.json` of the repo.
+- `ag` adds only two files to the repo: `.ag/playbook.md` and `.ag/run.md`. It adds no proof tests, no evidence, no Playwright install and no Playwright agent files.
 
-## 5. One chat, no stages
+### 3.8 Playbook and start recipe
 
-v5 had nine named phases. v6 has none. The chat has one flow in plain words:
+**The playbook** is one markdown file: `.ag/playbook.md`. A default file ships with `ag`. A repo can override it. `ag` passes it as the appended system prompt. To change how the agent works, edit the file. No code change. It holds:
 
-1. You say what you want.
-2. The agent asks the `ag` server for the task list. It adds tasks if the work is big.
-3. For each task, the agent writes the claims, builds the feature, and checks it with the repo lint, typecheck and test commands.
-4. The agent calls `ag_prove`. This runs the gate.
-5. If the gate fails, the agent fixes the code and calls `ag_prove` again.
-6. The agent calls `ag_ship`. This opens the draft PR.
-
-These steps are advice. The agent can reorder them. Only two rules are hard, and code enforces both:
-
-- `ag_ship` fails if the gate did not pass at the current commit.
-- The gate rejects tests that were weakened, skipped, or changed after it saved the commit (section 9.3).
-
-## 6. The playbook
-
-The playbook is one markdown file: `.ag/playbook.md`. A default file ships with `ag`. A repo can override it.
-
-It holds:
-
-- The six steps in section 5, written as instructions.
+- The steps of use case 1, written as instructions. They are advice. The agent can reorder them.
+- When to split work into a stack of many tasks.
+- The `ag` commands and when to use each one.
 - The folder rules for proof tests (spike finding 7).
 - The rule "do not change the test to match the app" (spike finding 3).
-- The start recipe (section 10).
 
-`ag` reads the file at start and passes it as the appended system prompt. To change how the agent works, edit the file. No code change.
+**The start recipe** is `.ag/run.md`. The spike showed that an agent cannot guess how to start a large app. The recipe holds the start command, the URL, the login steps and the stop command.
 
-The v5 proposal had a playbook with step fields (`session`, `tools`, `check`, `on_fail`). v6 drops them. The chat is one session. A fresh session is used in one place only: the test writer for the independence rule (section 9.3).
-
-## 7. The `ag` tool server
-
-A small MCP server that `ag` starts. It gives the chat these tools:
-
-| Tool | Action |
-| --- | --- |
-| `ag_tasks` | List tasks, their status, and which are ready. |
-| `ag_task_add` | Add a task with `title`, `claims`, and `depends_on`. |
-| `ag_task_update` | Set the status: `todo`, `doing`, `done`, `blocked`. |
-| `ag_start_app` | Run the start recipe. Return the URL, or "cannot start" with the reason. |
-| `ag_prove` | Run the proof tests and the gate. Return the claim table. |
-| `ag_ship` | Check the gate, upload videos, and open the draft PR. |
-
-The chat uses Playwright Test Agents and the Playwright MCP for the proof tests. The `ag` server does not replace them.
-
-## 8. Observability
-
-### 8.1 Source of events
-
-Claude Code hooks send each event to the daemon over a local HTTP call. The hooks used:
-
-- `SessionStart`, `SessionEnd`
-- `UserPromptSubmit`
-- `PreToolUse`, `PostToolUse`
-- `Stop`
-
-The hook also sends the session id, the repo, the branch, and the task id if one is set.
-
-### 8.2 What the UI shows
-
-| View | Content |
-| --- | --- |
-| Live | Every open session: repo, branch, current task, last tool call, idle or busy. |
-| Session | The event feed. Token and cost totals. Files changed. |
-| Tasks | The ordered list. The ready, doing, blocked, and done groups. |
-| PR proof | The claim table. A video player for each claim. Links to traces. |
-
-### 8.3 Limit to check in phase 0
-
-I did not test if a hook sees token counts. If it does not, read the usage from the session transcript file. Test this first.
-
-## 9. Proof and PR
-
-### 9.1 Claims
-
-Each task has claims. A claim is one sentence that is true or false. Example: "A draw adds 1 to Draws." The agent writes the claims before it writes the code. You can edit them in the UI.
-
-### 9.2 Tests and videos
-
-For each claim, a Playwright test has the claim id at the start of its title. The proof config turns on video and trace for every test. The spike proved this design on the games repo.
-
-For a repo that has no browser UI, the proof test is an API test. It records the request and the response as the trace. No video is possible. The PR says "API proof" for these claims.
-
-Verified facts about Playwright (details in the spike appendix):
-
-- `npx playwright init-agents --loop=claude` writes the planner, generator and healer agents, a `.mcp.json` and a seed file.
-- The agents use the `playwright-test` MCP server. It is not the same as `@playwright/mcp`.
-- The JSON report gives a `video` and a `trace` path for each result.
-- The healer may skip a test. The gate must reject skipped tests.
-
-### 9.3 The gate
-
-The gate is code, about 80 lines. It passes only when all of these are true for every claim:
-
-1. At least one test has the claim id.
-2. Every test with the id passed. None is skipped or marked `fixme`.
-3. A video and a trace file exist for every result.
-4. The saved commit equals `HEAD`, and the source is clean.
-5. No test file changed after the gate saved the commit.
-6. The test was not written by the session that wrote the code, or it passed on its first run. (Open question 3.)
-
-The agent's own message is never proof.
-
-### 9.4 The PR
-
-`ag_ship` does these steps:
-
-1. Run the gate. Stop if it fails.
-2. Push the branch.
-3. Upload every video to a prerelease asset (tag `ag-proof-<PR number>`). This is the v5 convention for large media.
-4. Open a draft PR. Never undraft it.
-5. Write the PR body with the sections below.
-
-| Section | Content |
-| --- | --- |
-| Summary | What changed and why. |
-| Features | One row for each claim: the sentence, PASS, a link to the video, a link to the trace. |
-| How it was run | The start command, the commit, and the test command. |
-| Not proven | Any claim with no video, and the reason. |
-
-"Full videos" means one video for each claim, and one video for the full run of the feature, start to end. The second one is a single test that walks the whole flow.
-
-## 10. Start recipe
-
-The spike showed that the agent cannot guess how to start a large app. The recipe fixes this.
-
-- The file is `.ag/run.md`. It holds the start command, the URL, the login steps, and the stop command.
-- On the first run in a repo, the agent finds the recipe and saves it. It asks you only if it cannot find one. This also closes the v5 gap where an inferred start command was not saved.
-- If the app cannot start, `ag_start_app` says so. The gate then reports "no proof". The PR does not claim video proof.
-
-Known cases:
+- On the first use in a repo, the agent finds the recipe and saves it. It asks you only if it cannot find one. This closes the v5 gap where an inferred start command was not saved.
+- The agent uses the recipe from Bash to look at the app while it writes tests. `ag prove` uses it to start a clean app for the proof run.
+- If the app cannot start, `ag prove` says so. The PR does not claim video proof.
 
 | Repo | Start | Note |
 | --- | --- | --- |
@@ -222,277 +321,222 @@ Known cases:
 | `app` | `make up` through Tilt. | Run it in the background. The repo rules forbid foreground runs. |
 | k-repo | One service with `pants run` or `docker compose`. | API proof only. |
 
-## 11. Architecture
+### 3.9 Observability
 
-```
-terminal: ag
-   |
-   +-- claude (the real program)
-   |      +-- playbook (system prompt)
-   |      +-- ag MCP server  --+
-   |      +-- hooks -----------+--> daemon (one per machine)
-   |                                  +-- SQLite
-   |                                  +-- web UI (Vite build, served by daemon)
-   +-- Playwright MCP / Test Agents
-```
+Claude Code hooks send each event to the daemon over a local HTTP call: `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse` and `Stop`. Each event carries the session id, the repo, the branch, and the task id if one is set.
+
+| View | Content |
+| --- | --- |
+| Live | Every open session: repo, branch, current task, last tool call, idle or busy. |
+| Session | The event feed. Token and cost totals. Files changed. |
+| Stacks | Each stack in order. Each task shows its status, its attempts and its PR. You can edit waiting tasks. |
+| PR proof | The claim table. A video player for each claim. Links to traces. |
+
+I did not test if a hook sees token counts. If it does not, the daemon reads the usage from the session transcript file. Phase 0 checks this.
+
+### 3.10 What the agent can bypass
+
+The agent has a shell, and the SQLite file is a normal file in `$AG_HOME`. An MCP tool server would not change this, because the agent would still have Bash. Three facts limit the damage:
+
+- **`ag ship` does not trust stored results.** It runs the gate again from the files on disk: `report.json`, the video and trace files, the commit and the test hash. A fake row in the database does not open a PR.
+- **Deny rules block the direct paths.** The `ag` settings deny `gh pr create` and deny writes to `$AG_HOME` from the agent's file tools.
+- **A determined agent can still cheat.** It can forge the proof files from Bash. This is the "not a sandbox" risk. v6 states it and does not solve it.
+
+### 3.11 Technology choices
 
 | Part | Choice |
 | --- | --- |
-| Language | TypeScript, one Node process for the daemon. |
-| Store | SQLite. Tables: tasks, sessions, events, claims, proofs. |
-| UI | React and Vite. Three pages. Reuse the v5 shadcn kit and tokens. |
-| Workflow engine | None. v5 used Temporal. v6 removes it. |
-| Sandbox | None. `ag` is native and trusted, the same as v5. It is not a sandbox. |
+| Language | TypeScript. One Node process for the daemon. |
+| Store | SQLite in `$AG_HOME`. Tables: stacks, tasks, attempts, sessions, events, gate results, PRs. |
+| Agent interface | The `ag` CLI with `--json`. No MCP tool server. |
+| Proof | `@playwright/test`, shipped as a dependency of `ag`. Playwright Test Agents write the tests. |
+| UI | React and Vite. Four views. Reuse the v5 shadcn kit and tokens. |
+| Workflow engine | None. v5 used Temporal. The runner is a loop in the daemon. |
+| Sandbox | None. `ag` is native and trusted, the same as v5. |
 | Location | The repo root. v5 is in `archive/`. |
 
-The daemon is back, but it is small. It exists only for the UI and the event feed. A crash loses no work, because the chat is a normal Claude Code session. `ag --resume` restores it.
+A daemon crash loses no chat work, because the chat is a normal Claude Code session, and `ag --resume` restores it. A running stack stops when the daemon stops. On start, the daemon marks a task that was `doing` as `failed`, and the chat can retry it.
 
-## 12. Feature disposition
+Size target: about 5,000 lines (CLI 600, daemon and store 900, runner and PR sync 400, hooks 300, gate and ship 500, UI 2,000, plus 300 lines of playbook text). Real code usually grows, so plan for 6,000 to 8,000. v5 has about 32,500 lines of non-test TypeScript. Tests: one focused test file for each part. The gate tests run against saved Playwright reports.
 
-Status words: **Keep** (same behavior), **Simplify** (same goal, less code), **Replace** (an existing tool does it), **Drop** (not in v6).
+## 4. Proof
 
-| v5 IDs | v6 decision |
+### 4.1 Claims
+
+Each task has claims. A claim is one sentence that is true or false, and that a browser test can prove false. Example: "A draw adds 1 to Draws." The agent writes the claims before it writes the code. Claims should name the labels that a user sees, such as "X wins" or "Reset scores", so that a test can find them. You can edit claims in the UI.
+
+### 4.2 Tests and videos
+
+For each claim, a Playwright test has the claim id at the start of its title. The proof config turns on video and trace for every test. The spike proved this design on the games repo.
+
+The proof tests and the evidence never go into the target repo. The PR has only the feature code. They live in the task folder:
+
+```
+$AG_HOME/tasks/<task id>/
+  claims.md
+  proof-tests/        the Playwright spec files
+  proof/              report.json, videos, traces, sha.txt, test-hash.txt
+  playwright.config.ts
+```
+
+- `ag` ships `@playwright/test` as its own dependency. The proof config sits in the task folder. Its `testDir` is `proof-tests/` and its `baseURL` comes from the start recipe.
+- The target repo needs no Playwright install, no config and no `.mcp.json` edit. `ag` passes the Playwright agents and the `playwright-test` MCP server on the `claude` command line. Phase 0 checks that `claude` accepts the agent files this way.
+- The spike committed `proof-tests/` and `playwright.proof.config.js` to the games repo (PR #50). v6 does not. If a repo wants lasting browser tests, the agent adds them to that repo's own e2e suite, as normal feature work.
+- For a repo with no browser UI, the proof test is an API test. It records the request and the response as the trace. No video is possible. The PR says "API proof" for these claims.
+- "Full videos" means one video for each claim, and one video for the full feature from start to end. The second one is a single test that walks the whole flow.
+
+The test writer is a fresh session that did not write the code. It reads only the claims and the running app. A deny rule blocks it from reading the source. Spike experiment 3 shows why: a session that knows the code tends to write tests that agree with the code. Open question 3 asks if a cheaper rule is enough.
+
+Verified facts about Playwright (details in the appendix):
+
+- `npx playwright init-agents --loop=claude` writes the planner, generator and healer agents, a `.mcp.json` and a seed file.
+- The agents use the `playwright-test` MCP server. It is not the same as `@playwright/mcp`.
+- The JSON report gives a `video` and a `trace` path for each result.
+- The healer may skip a test. The gate must reject skipped tests.
+
+### 4.3 The gate
+
+The gate is code, about 80 lines. It starts from the spike script in the appendix. `ag prove` first starts a clean app at the saved commit, from the start recipe. Then it runs the tests and checks the results. The gate passes only when all of these are true for every claim:
+
+1. At least one test has the claim id.
+2. Every test with the id passed. None is skipped or marked `fixme`.
+3. A video and a trace file exist for every result.
+4. The saved commit equals `HEAD`, and the source is clean.
+5. No test file changed after the run started. At the start of the run, the gate saves a hash of every file in `proof-tests/` to `proof/test-hash.txt`. The tests are not in git, so the gate checks the hash, not `git diff`.
+6. The test was not written by the session that wrote the code, or it passed on its first run. (Open question 3.)
+
+The agent's own message is never proof. In the spike, the final message of a session was wrong twice. The gate and a real test run were right.
+
+### 4.4 The PR
+
+`ag ship` is the only way to open a PR. It does these steps:
+
+1. Run the gate. Stop if it fails.
+2. Run a secret scan on everything that it will upload.
+3. Push the branch.
+4. Upload every video to a prerelease asset (tag `ag-proof-<PR number>`). This is the v5 convention for large media.
+5. Open a draft PR. Never undraft it.
+6. Write the PR body with the sections below.
+7. Set the task to `done`.
+
+| Section | Content |
 | --- | --- |
-| R1, R2 | **Keep.** A `repos` table and a trust flag. |
-| R3 | **Keep.** Use `git` CLI helpers. |
-| R4, R8 | **Simplify.** The start recipe (section 10) and a saved `commands.json` in `.ag/`. |
-| R5, R6, R7, R9 | **Drop.** The agent reads the repo. |
-| M1 to M7 | **Simplify.** One file, `.ag/memory.md`, per repo. The agent reads it at start. No FTS5 until the file is too large. |
-| T1, T2, T3 | **Keep.** The chat plus `ag tasks`. |
-| T4 | **Keep.** `depends_on` in the task list (K2). |
-| T5 | **Drop.** The agent judges the size. |
-| T6, T7 | **Keep.** SQLite is the only store. |
-| L1 to L3 | **Replace.** The agent writes claims in the chat. A plan is optional. |
-| L4, L5 | **Keep.** Build and check, as advice in the playbook. |
-| L6, Q1 to Q6, Q9 | **Replace.** `ag_prove` with Playwright Test Agents. API tests cover repos with no browser UI. |
-| L7 | **Keep (optional).** An advice line in the playbook: review the diff in a fresh read-only session before `ag_ship`. |
-| L8, E5, E6 | **Keep.** `ag_ship` and the PR body table. |
-| L9, E7 | **Drop.** Read PR comments in the chat when you ask. |
-| Q7, Q8, C1, C5, C6 | **Simplify.** The gate. |
-| Q10 | **Keep.** Upload video as a prerelease asset. About 100 lines. |
-| Q11 | **Replace.** The chat is the QA agent. |
-| C2, C3, C4, C7, C10 | **Drop.** One chat has no loop routing. `/compact` and a budget flag in `claude` cover the rest. |
-| C8 | **Drop.** The agent reports risk in the PR summary. |
-| C9 | **Keep.** Draft PR is the only end state. |
-| A1 to A2, A6 to A7 | **Drop.** `ag` uses `claude`. |
-| A3 to A5 | **Defer.** Codex through a second wrapper only if needed. |
-| A8 | **Simplify.** Claude Code permission rules in `--settings`. |
-| A9 to A11 | **Drop.** Claude Code provides model choice, resume and skills. |
-| W1, W3, W4 | **Keep.** The chat uses `git worktree` for parallel tasks. About 300 lines. |
-| W2 | **Simplify.** The agent picks a free port. |
-| W5, W6 | **Drop** the digest. **Keep** the `native-trusted` rule. |
-| E1 to E3 | **Drop.** Plain files in `.ag/proof/`. The gate ties evidence to the commit. No waivers. |
-| E4 | **Keep (small).** A secret scan before upload. |
-| E8, E9 | **Drop.** |
-| O1, O2, O5 | **Keep.** Events from hooks (section 8). |
-| O3, O6 to O8 | **Drop.** |
-| O4 | **Defer.** OpenTelemetry only if you use a collector. |
-| P1 | **Simplify.** `ag doctor`. |
-| P2, P3 | **Drop.** The problem does not exist without Temporal and a worker. |
-| P4 | **Keep.** The Live view in the UI and `ag tasks`. |
-| P5, P6 | **Simplify.** One config file. |
-| U1 | **Keep, smaller.** Three pages (section 8.2). |
-| S1 to S4 | **Simplify.** Rewrite `run-workbench-task` as the playbook. Keep the worktree skills. |
-| S5 | **Simplify.** Keep a few decision records. |
+| Summary | What changed and why. |
+| Features | One row for each claim: the sentence, PASS, a link to the video, a link to the trace. |
+| How it was run | The start command, the commit, and the test command. |
+| Not proven | Any claim with no video, and the reason. |
+| Test code | The proof spec files, in a collapsed block. They are not in the diff. |
 
-## 13. Size budget
+## 5. Prod and dev
 
-| Part | Lines (estimate) |
-| --- | --- |
-| `ag` CLI and launcher | 400 |
-| Daemon, routes, SQLite | 900 |
-| `ag` MCP server | 500 |
-| Hooks receiver and event store | 300 |
-| Gate and ship | 500 |
-| Web UI | 2,000 |
-| Playbook and recipes | 300 (text) |
-| **Total** | **about 5,000** |
+`ag` is prod. `ag-dev` is dev. Both run the same code. They differ only in `AG_HOME`.
 
-v5 has about 32,500 lines of non-test TypeScript. About 5,000 is far below half. Real code usually grows. Plan for 6,000 to 8,000.
+| | Prod | Dev |
+| --- | --- | --- |
+| Command | `ag` | `ag-dev` |
+| `AG_HOME` | `~/.ag` (default) | `~/.ag-dev` |
+| Code | A pinned, tested install on `PATH`. | The build in a worktree that you are changing. |
+| Data | The real history: stacks, tasks, proofs, PRs. | Test data. You can delete it. |
 
-Tests: one focused test file for each part. Run the gate against saved Playwright reports.
+Define the dev command as a shell alias:
 
-## 14. Build order
+```
+alias ag-dev='AG_HOME=~/.ag-dev node ~/GitHub/agent-workbench-wt/<change>/packages/cli/dist/ag.js'
+```
+
+Rules:
+
+1. Each `AG_HOME` has one daemon. The daemon picks a free port and writes it to `$AG_HOME/daemon.json`. The CLI reads that file. No port is hard-coded.
+2. `ag` passes `AG_HOME` to its hooks and to the shell of the agent. A session always reports to the instance that started it.
+3. The first line of `ag` output names the active `AG_HOME`.
+4. State lives in `$AG_HOME`: the database, the proof tests and the evidence. Files that git should version live in the repo (`.ag/playbook.md`, `.ag/run.md`). The database is never inside a worktree. All worktrees of a repo share one database. Each row has `repo`, `worktree` and `branch` columns.
+
+To fix the workbench with the workbench, prod builds the change in a worktree. The start recipe for the workbench repo starts a dev instance with a throwaway `AG_HOME=$(mktemp -d)`. The Playwright tests drive that instance. The proof lands in the prod database.
+
+v5 had no such isolation. Fixed ports and a port-only health check broke any second stack.
+
+## 6. Build order and acceptance test
+
+### 6.1 Build order
 
 | Phase | Output | Test that proves it |
 | --- | --- | --- |
-| 0 | Check hooks, token data, and `--append-system-prompt` with `claude`. | A script prints events from one session. |
+| 0 | Check hooks, token data, `--append-system-prompt`, and Playwright agent files passed on the command line, with `claude`. | A script prints events from one session. |
 | 1 | `ag` launcher. Daemon with session registry. | `ag` opens in two repos. Both show in `ag ui`. |
 | 2 | Hooks and live feed. | A tool call in the chat shows in the UI in under 2 seconds. |
-| 3 | Task list, order, and `ag_*` task tools. | Three tasks with `depends_on` run in the right order. |
-| 4 | `ag_prove` and the gate. | The spike cases: pass, planted bug, and independence. |
-| 5 | `ag_ship` and the PR body. | A draft PR with a video link for every claim. |
-| 6 | UI polish and the PR proof page. | You review a PR from the UI only. |
+| 3 | `ag stack set` for a stack of one, `ag prove` and the gate. | The spike cases: pass, planted bug, and independence. |
+| 4 | `ag ship`, the PR body and PR sync. | A draft PR with a video link for every claim. Merging it on GitHub sets the task to `merged`. |
+| 5 | Stacks of many, the runner, `ag run` and `ag retry`. | A stack of three tasks gives three stacked draft PRs in order. A planted bug in task 2 stops task 3. A retry after the fix continues the stack. |
+| 6 | `ag tasks`, `ag show`, `ag task rm`, and stack replace with the version check. | In the chat, "what failed?" lists the planted failure from phase 5 with its reason. No `ag` command is typed by hand. |
+| 7 | UI polish and the PR proof page. | You review a PR from the UI only. |
 
-Each phase ends with a demo. Stop after any phase if the result is not good.
+Each phase ends with a demo. Stop after any phase if the result is not good. Run the second spike on fender before phase 3.
 
-The proof spike is done. Phase 4 starts from the gate script in the spike appendix.
-
-## 15. Acceptance test for the whole version
+### 6.2 Acceptance test for the whole version
 
 1. In a clean clone of the games repo, type `ag`.
 2. Ask: "Add a scoreboard to Tic-Tac-Toe."
 3. Do nothing else.
 4. Result: a draft PR with a feature list, a video for each claim, and one full-run video.
-5. The UI showed the task list and the live feed during the run.
+5. The UI showed the task and the live feed during the run.
 6. A planted bug makes the PR fail to open.
+7. Ask for a feature of three parts. Result: three stacked draft PRs, each with its own proof.
+8. Ask: "What did you do today, and what failed?" Result: the chat lists every task, its status and its PR, from the daemon.
 
-## 16. Risks
+## 7. Risks and open questions
+
+### 7.1 Risks
 
 | Risk | Effect | Reduction |
 | --- | --- | --- |
 | A Claude Code update changes flags or hooks. | `ag` breaks. | Pin a tested version. `ag doctor` checks it. |
-| The agent ignores the playbook. | No claims, no proof. | `ag_ship` is the only way to open a PR. The gate blocks it. |
+| The agent ignores the playbook. | No claims, no proof. | `ag ship` is the only way to open a PR. The gate blocks it. |
 | The healer weakens a test. | False pass. | Gate rules 2 and 5. |
-| Large apps do not start. | No video. | Section 10. The PR states "Not proven". |
+| Large apps do not start. | No video. | The start recipe. The PR states "Not proven". |
+| The proof design is tested on one small app only. Fender, login and database state are untested. | The gate may pass on small apps and give weak tests on large ones. | Run a second spike on fender before phase 3. |
 | Video files are large. | Slow upload. | Compress on upload. Keep short clips for each claim. |
-| One chat grows too long. | Quality drops. | Use `/compact`. Use one chat for each task when the list is long. |
-| The agent can run `gh pr create` by hand. | A PR with no gate. | Deny `gh pr create` in `--settings`. A pre-push hook in the repo checks for the gate file. |
+| One task grows too large for its session. | Quality drops. | Use `/compact`. Split the work into a stack of many. |
+| The agent runs `gh pr create` by hand. | A PR with no gate. | Deny `gh pr create` in `--settings`. A pre-push hook in the repo checks for the gate file. |
+| The agent writes to the SQLite file or forges proof files from Bash. | A false status or a false proof. | `ag ship` runs the gate again from disk. Deny rules on `$AG_HOME`. Section 3.10. |
+| The agent replaces a stack and leaves out a task by mistake. | A waiting task is lost. | The command returns the removed tasks. The version check stops a replace over your UI edits. |
 | `native-trusted` is not a sandbox. | Hostile code has full access. | Same as v5. State it in the README. |
 
-## 17. Open questions
+### 7.2 Open questions
 
 1. Does the hook payload contain token counts? (Phase 0.)
-2. Should `ag run` (headless) ship in the first version, or only the chat?
-3. Gate rule 6: how strict? A strict rule needs a second session to write the tests, which costs more.
-4. Where does the daemon keep data: one folder in the home directory, or one for each repo?
-5. Do you want the name `ag`? It clashes with The Silver Searcher, a common search program. If you have it installed, the new command hides it.
+2. Gate rule 6: how strict? A strict rule needs a second session to write the tests, which costs more. A cheaper option: the same session writes the tests first, before the code, and the gate checks that they fail on the base commit. The spike did not test this.
+3. Do you want the name `ag`? It clashes with The Silver Searcher, a common search program. If you have it installed, the new command hides it.
+
+Resolved in this draft: `ag run` ships in the first version. Data lives in `$AG_HOME`. The agent uses the `ag` CLI, not an MCP tool server.
 
 ---
 
 # Appendix: proof spike
 
-The spike tested the proof design before any v6 code existed. Plan, results, claims and the gate script follow.
+The spike tested the riskiest idea, that Playwright can prove a feature works, before any v6 code existed.
 
-## V2 spike plan: can Playwright prove that a feature works?
-
-This plan tests the riskiest idea in this proposal before any v6 code exists. Time budget: 1 to 2 days.
-
-### What I verified on 2026-10-22
-
-| Question | Answer | Evidence |
-| --- | --- | --- |
-| Does Playwright ship planner, generator and healer agents? | Yes. Added in v1.56. | Official docs, `playwright.dev/docs/test-agents` |
-| Does the setup command exist? | Yes: `npx playwright init-agents --loop=claude`. Other loops: `codex`, `copilot`, `opencode`, `vscode`. | I ran it with `@playwright/test` 1.64.1 |
-| What does it write? | `.claude/agents/playwright-test-{planner,generator,healer}.md`, `.mcp.json`, `seed.spec.ts`, `specs/README.md`. | I ran it. |
-| Which MCP server do the agents use? | `playwright-test`, started with `npx playwright run-test-mcp-server`. | The generated `.mcp.json` |
-| Does Playwright give video, trace and a JSON report? | Yes. With `video: 'on'`, `trace: 'on'` and the `json` reporter, each result lists a `video` and a `trace` path. | I ran two tests. One passed. One failed on purpose. |
-| Does the report link a test to a claim? | Yes, through the test title (for example `C1: ...`). Tags such as `@C1` also exist. | The report has `title` and `tags` fields. |
-| Does the planted failure show in the report? | Yes. Status `failed`. Video and trace exist for the failing test too. | I ran it. |
-
-What I did not verify: the quality of tests that the agents write on a real repo. The spike tests this.
-
-### Facts that change the design
-
-1. **The healer can hide a bug.** The docs say it may skip a test if it believes the feature is broken. A skipped test must never count as proof. The gate must fail a claim whose test is skipped or marked `fixme`.
-2. **The healer edits test code.** It can weaken an assertion until the test passes. The spike must check for this (experiment 2).
-3. **Browsers are not installed by default.** Run `npx playwright install chromium` once. Without it, every test fails with "Executable doesn't exist".
-4. **`init-agents` overwrites files.** It replaced `.mcp.json` in other people's repos. Run it in a clean branch. Re-run it after each Playwright upgrade.
-5. **The seed file is empty.** It must start the app, or the config needs a `webServer` entry. The planner runs the seed first.
-6. **The agents default to the Sonnet model** (`model: sonnet` in the agent files). Change it in the file if you want another model.
-
-### Target
-
-Use a small repo with a real browser UI and a past feature that the workbench built. My notes list `browser-games__ai` (PRs #7, #8, #11). It is small and its dev server starts fast. Do not use fender for the first spike. It is too heavy.
-
-I need from you: the local path of the target repo, and one past PR to use.
-
-### Setup (30 minutes)
-
-1. Create a spike branch from the commit before the PR.
-2. Cherry-pick the PR code onto a second branch, `spike-feature`. Keep the branch before the PR as `spike-base`.
-3. In the repo, run `npm i -D @playwright/test@1.64.1`.
-4. Run `npx playwright install chromium`.
-5. Run `npx playwright init-agents --loop=claude`.
-6. Edit `playwright.config.ts`:
-   - `use: { video: 'on', trace: 'on' }`
-   - `reporter: [['json', { outputFile: 'proof/report.json' }]]`
-   - `webServer: { command: '<repo start command>', url: '<app url>', reuseExistingServer: true }`
-7. Edit `seed.spec.ts` so that it opens the app home page.
-8. Write `claims.md` by hand: 3 to 5 claims with ids `C1`, `C2`, and so on. Each claim is one sentence that a browser test can prove false.
-
-### Gate script (about 60 lines)
-
-File: the gate script in the spike appendix. It reads `proof/report.json` and `claims.md`. It prints a table and exits non-zero if any claim fails.
-
-A claim passes only if all of these are true:
-
-1. At least one test title contains the claim id.
-2. Every such test has status `passed`.
-3. No such test is `skipped`, and no test file has `test.fixme` or `test.skip` for that id.
-4. The `video` and `trace` files exist on disk.
-5. The `git rev-parse HEAD` value equals the SHA saved in `proof/sha.txt` when the tests ran.
-
-Do not add more checks in the spike. Add them in v6 only if the spike shows a need.
-
-### Experiments
-
-#### Experiment 1: happy path
-
-1. Check out `spike-feature`.
-2. Start a fresh Claude Code session in the repo. Do not reuse the session that wrote any code.
-3. Prompt: "Use the playwright-test planner on claims.md. Then use the generator. Put the claim id at the start of each test title. Then use the healer until all tests pass. You must not edit files outside `specs/` and `tests/`."
-4. Save the SHA: `git rev-parse HEAD > proof/sha.txt`.
-5. Run `npx playwright test`.
-6. Run `node gate.mjs`.
-
-Pass: the gate passes every claim, and you can watch each video and see that it shows the claim.
-
-#### Experiment 2: planted bug (the important one)
-
-1. Check out `spike-feature`. Break the behavior of claim C2 in the source code. Commit the break.
-2. Run `npx playwright test` with the tests from experiment 1. Run `node gate.mjs`.
-3. Pass: the gate fails C2.
-4. Now run the healer on the failing test. Use the same session prompt as before, with the healer only.
-5. Run the gate again. Run `git diff` on `tests/`.
-6. Pass: the gate still fails C2. The healer did not skip the test. It did not weaken the assertion.
-7. If the healer hides the bug, record exactly how. This tells us which gate check to add.
-
-#### Experiment 3: independence
-
-1. Break claim C3 in a different way (change a value, not remove a feature).
-2. Generate tests from scratch on the broken branch. Use a fresh session and the same `claims.md`.
-3. Pass: the generated test for C3 fails. The agent did not write a test that matches the broken code.
-
-#### Experiment 4: comparison with v5
-
-1. Run the same task through the v5 workbench `exercise` phase on `spike-base`. Use `awb task create`.
-2. Compare: claims covered, whether it caught the planted bug, total tokens, total minutes.
-3. Record the numbers in a table.
-
-### Decision rule
-
-| Result | Decision |
-| --- | --- |
-| Experiments 1, 2 and 3 pass | Go. the gate script in the spike appendix becomes `proof/` in v6. Start phase 1. |
-| 1 passes, 2 fails (healer hides the bug) | Go, with a stricter gate. Block the healer from editing assertions, or remove the healer and use a human-free retry limit. Run experiment 2 again. |
-| 1 fails (poor tests or no video link) | Try `@playwright/mcp` with the Claude Code agent and a hand-written prompt. Run experiments 1 and 2 again. If this also fails, stop. Re-think the proof design. |
-| 3 fails (tests copy the bug) | Add a rule: the test session reads only `claims.md` and the running app, never the diff. Run again. |
-
-### Deliverables
-
-1. the gate script in the spike appendix.
-2. The results section: the table of experiments, the comparison table and the decision.
-3. The three test files from experiments 1 to 3, as examples for the v6 playbook.
-
-### Cost
-
-I expect 3 to 6 Claude sessions of moderate size, plus one v5 task run for the comparison. I did not measure this. Watch the token count in experiment 1 and stop if it passes a budget that you set.
-
-
-## V2 spike results
-
-Date: 2026-10-22. Target: `browser-games__ai`, Tic-Tac-Toe scoreboard. Draft PR: https://github.com/Borghese-Gladiator/browser-games__ai/pull/50
+Date: 2026-10-22. Target: `browser-games__ai`, a Tic-Tac-Toe scoreboard. Draft PR: https://github.com/Borghese-Gladiator/browser-games__ai/pull/50
 
 Tools: `@playwright/test` 1.61.1 in the target repo, Playwright Test Agents from `init-agents --loop=claude`, Claude Code 2.1.308 in headless mode (`claude -p`).
 
-### Setup differences from the plan
+The full spike plan, with the setup steps and the decision rule, is in git history at commit `0f52576` (`docs/v6-spike-plan.md`).
+
+## A.1 Facts found before the spike
+
+1. **The healer can hide a bug.** The docs say that it may skip a test if it believes the feature is broken. A skipped test must never count as proof.
+2. **The healer edits test code.** It can weaken an assertion until the test passes.
+3. **Browsers are not installed by default.** Run `npx playwright install chromium` once. Without it, every test fails with "Executable doesn't exist".
+4. **`init-agents` overwrites files.** It replaced `.mcp.json` in other people's repos. v6 passes the agent files on the command line instead.
+5. **The seed file is empty.** It must start the app, or the config needs a `webServer` entry. The planner runs the seed first.
+6. **The agents default to the Sonnet model** (`model: sonnet` in the agent files). Change it in the file to use another model.
+
+## A.2 How the spike ran
 
 - I built a new feature (a scoreboard) instead of reusing a past PR. It was cheaper and kept the test honest. The claims were written before the code.
-- The repo has its own heavy Playwright config (gateway plus four players). I added `playwright.proof.config.js` (Vite only) and pointed the MCP server at it with `-c` in `.mcp.json`.
+- The repo has its own heavy Playwright config (a gateway plus four players). I added `playwright.proof.config.js` (Vite only) and pointed the MCP server at it with `-c` in `.mcp.json`.
 - I ran the agents in separate headless sessions that started without the code context. The feature code came from a different session.
 
-### Results
+## A.3 Results
 
 | Experiment | Result | Evidence |
 | --- | --- | --- |
@@ -501,34 +545,33 @@ Tools: `@playwright/test` 1.61.1 in the target repo, Playwright Test Agents from
 | 3. Independence (a draw counts twice) | **Pass** | A fresh session wrote tests from scratch. It had a deny rule for reading `games/`, `packages/` and `portal/`. Only the C3 test failed. It asserts "Draws shows 1". The source was not edited. No test was skipped. Cost about 1.15 USD. |
 | 4. Comparison with v5 `exercise` | **Not run** | It needs a live v5 run with real tokens. Run it only if you want the numbers. |
 
-### Findings
+## A.4 Findings
 
 1. **The proof design works on this case.** Playwright Test Agents plus a 60-line gate give claim-linked video and trace. The gate caught both planted bugs.
 2. **The healer did not hide the bug in one run.** I limited it to `proof-tests/` and gave it no instruction to make tests pass at any cost. The docs say it may skip tests. A single sample does not show that this never happens. Keep the gate rule that rejects `skipped` and `fixme`.
-3. **Prompt limits matter.** The prompts said "edit only these folders" and "do not change the test to match the app". Put both rules in the v6 `prove` step. I did not test what happens without them.
+3. **Prompt limits matter.** The prompts said "edit only these folders" and "do not change the test to match the app". Put both rules in the v6 playbook. I did not test what happens without them.
 4. **Scope of the read ban was not audited.** I set deny rules for `Read(games/**)` and so on. I did not check the session log to prove that it never read the source by another tool.
-5. **Extra tests under one claim id can fail the claim.** In experiment 2 a negative reload test was titled with `C1`. It made C1 fail even though the "starts at zero" test passed. This is the safe direction. Decide in v6 if it is wanted.
-6. **The agent's final message is not proof.** In experiment 3 the final message talked about an old Vite server and did not list the tests. In experiment 1 the agent said it did not re-run the tests. The gate and my own run of the tests were the proof. This supports the v6 rule that only code decides.
+5. **Extra tests under one claim id can fail the claim.** In experiment 2, a negative reload test was titled with `C1`. It made C1 fail even though the "starts at zero" test passed. This is the safe direction. Decide in v6 if it is wanted.
+6. **The agent's final message is not proof.** In experiment 3, the final message talked about an old Vite server and did not list the tests. In experiment 1, the agent said that it did not re-run the tests. The gate and my own run of the tests were the proof.
 7. **The plan file has stale paths.** The planner wrote test paths under `tests/`, but the config uses `proof-tests/`. The generator followed the prompt. The v6 playbook must state the folder.
 8. **Setup cost is real.** Steps that were needed: install Chromium, add a config, edit `.mcp.json`, edit the seed file. The full repo `npm run lint` fails on an old nested worktree folder in the target repo.
 
-### Limits of this spike
+## A.5 Limits
 
-- One small feature, one repo, simple UI, three runs.
+- One small feature, one repo, a simple UI, three runs.
 - No test on a large app such as fender. No test of state that needs login or a database.
-- No test of the rest of v6: the `ag` launcher, hooks, task list, delivery.
+- No test of the rest of v6: the `ag` launcher, hooks, the stack, delivery.
 
-### Decision
+## A.6 Decision
 
-Go for phase 1, with these changes to the plan:
+Go, with these changes. All four are in the proposal above.
 
-1. Keep the gate as written. Add one check: reject a test file that changed after the gate saved the commit.
-2. Put the folder rules and "do not change the test to match the app" into the `prove` step text.
-3. Run a second spike on fender before phase 4 (task DAG), to check app complexity and start-up cost.
+1. Keep the gate as written. Add one check: reject a test file that changed after the run started (gate rule 5).
+2. Put the folder rules and "do not change the test to match the app" into the playbook.
+3. Run a second spike on fender before the gate phase, to check app complexity and start-up cost.
 4. Run experiment 4 only if you want a cost and time comparison with v5.
 
-
-## Spike claims (Tic-Tac-Toe scoreboard)
+## A.7 Spike claims (Tic-Tac-Toe scoreboard)
 
 Page: `/games/tic-tac-toe/` (served by Vite). The scoreboard shows the result of each game in this browser tab. Scores are not saved after a page reload.
 
@@ -539,10 +582,9 @@ Page: `/games/tic-tac-toe/` (served by Vite). The scoreboard shows the result of
 - C5: A "Reset scores" button sets all three counters to 0. It does not clear the board.
 - C6: A finished game is counted once. Clicking a filled cell after the game ends does not change any counter.
 
+## A.8 Gate script (`gate.mjs`)
 
-## Gate script (`gate.mjs`)
-
-Phase 4 starts from this script.
+The v6 gate starts from this script. v6 changes three things: the tests and claims move to the task folder, gate rule 5 adds the test hash, and the source paths come from the repo instead of the fixed `games`, `packages` and `portal` folders.
 
 ```js
 import { existsSync, readFileSync, readdirSync } from "node:fs";
