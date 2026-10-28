@@ -1,0 +1,6 @@
+{
+  "name": "@awb/cli",
+  "private": true,
+  "type": "module",
+  "bin": { "awb": "bin/awb" }
+}

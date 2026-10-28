@@ -1,0 +1,3 @@
+#!/bin/sh
+dir=$(cd "$(dirname "$(realpath "$0")")" && pwd)
+exec node --disable-warning=ExperimentalWarning "$dir/../src/main.ts" "$@"
