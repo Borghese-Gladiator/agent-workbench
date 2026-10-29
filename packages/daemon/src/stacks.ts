@@ -18,7 +18,7 @@ export type Task = {
   pr_url: string | null;
 };
 
-export type Stack = { id: string; repo: string; version: number; created_at: string; tasks: Task[] };
+export type Stack = { id: string; repo: string; base: string | null; version: number; created_at: string; tasks: Task[] };
 
 export type TaskInput = { id?: string; title: string; claims: Claim[] };
 
@@ -72,6 +72,13 @@ export function migrateStacks(db: DatabaseSync) {
   `);
   const cols = (db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);
   if (!cols.includes("pr_number")) db.exec("ALTER TABLE tasks ADD COLUMN pr_number INTEGER; ALTER TABLE tasks ADD COLUMN pr_url TEXT;");
+  const stackCols = (db.prepare("PRAGMA table_info(stacks)").all() as { name: string }[]).map((c) => c.name);
+  if (!stackCols.includes("base")) db.exec("ALTER TABLE stacks ADD COLUMN base TEXT;");
+}
+
+export function taskBranch(title: string, id: string): string {
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30).replace(/-$/, "");
+  return `awb/${slug || "task"}-${id.slice(0, 6)}`;
 }
 
 export function validateTasks(tasks: unknown): TaskInput[] {
@@ -99,7 +106,9 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     byBranch: db.prepare(
       "SELECT t.* FROM tasks t JOIN stacks s ON s.id = t.stack_id WHERE s.repo = ? AND t.branch = ? ORDER BY t.status IN ('merged', 'closed'), t.created_at DESC LIMIT 1",
     ),
-    addStack: db.prepare("INSERT INTO stacks (id, repo, version, created_at) VALUES (?, ?, 1, ?)"),
+    addStack: db.prepare("INSERT INTO stacks (id, repo, base, version, created_at) VALUES (?, ?, ?, 1, ?)"),
+    newest: db.prepare("SELECT id FROM stacks WHERE repo = ? ORDER BY created_at DESC, rowid DESC LIMIT 1"),
+    updBase: db.prepare("UPDATE tasks SET base = ? WHERE id = ?"),
     bump: db.prepare("UPDATE stacks SET version = version + 1 WHERE id = ?"),
     addTask: db.prepare(
       "INSERT INTO tasks (id, stack_id, position, title, claims, status, branch, base, folder, created_at) VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?)",
@@ -150,17 +159,22 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
         const changes: StackChanges = { added: [], removed: [], changed: [], moved: [] };
 
         if (!input.stackId) {
-          if (input.tasks.length !== 1) throw new StackError("phase 3 supports a stack of one task only", 400);
-          const bound = this.taskForBranch(input.repo, input.branch);
-          if (bound && !["done", "merged", "closed"].includes(bound.status)) {
-            throw new StackError(`branch ${input.branch} already has task ${bound.id} (${bound.status})`);
-          }
           const id = randomUUID();
-          q.addStack.run(id, input.repo, now);
-          const [t] = input.tasks;
-          const taskId = randomUUID();
-          q.addTask.run(taskId, id, 0, t.title, JSON.stringify(t.claims), input.branch, input.base, taskFolder(taskId), now);
-          changes.added.push(taskId);
+          q.addStack.run(id, input.repo, input.base, now);
+          if (input.tasks.length === 1) {
+            const bound = this.taskForBranch(input.repo, input.branch);
+            if (bound && !["done", "merged", "closed"].includes(bound.status)) {
+              throw new StackError(`branch ${input.branch} already has task ${bound.id} (${bound.status})`);
+            }
+          }
+          let base = input.base;
+          input.tasks.forEach((t, position) => {
+            const taskId = randomUUID();
+            const branch = input.tasks.length === 1 ? input.branch : taskBranch(t.title, taskId);
+            q.addTask.run(taskId, id, position, t.title, JSON.stringify(t.claims), branch, base, taskFolder(taskId), now);
+            changes.added.push(taskId);
+            base = branch;
+          });
           return { stack: get(id)!, changes };
         }
 
@@ -169,8 +183,6 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
         if (input.version !== current.version) {
           throw new StackError(`stale stack version: you sent ${input.version}, the stack is at ${current.version}; read it again`);
         }
-        if (input.tasks.length !== 1) throw new StackError("phase 3 supports a stack of one task only", 400);
-
         const keep = new Set(input.tasks.map((t) => t.id).filter(Boolean));
         for (const t of current.tasks) {
           if (keep.has(t.id)) continue;
@@ -183,7 +195,7 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
           if (t.id && !old) throw new StackError(`task ${t.id} is not in stack ${current.id}`, 404);
           if (!old) {
             const taskId = randomUUID();
-            q.addTask.run(taskId, current.id, position, t.title, JSON.stringify(t.claims), input.branch, input.base, taskFolder(taskId), now);
+            q.addTask.run(taskId, current.id, position, t.title, JSON.stringify(t.claims), taskBranch(t.title, taskId), null, taskFolder(taskId), now);
             changes.added.push(taskId);
             return;
           }
@@ -196,6 +208,12 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
           if (moved) changes.moved.push(old.id);
           if (edited || moved) q.updTask.run(position, t.title, JSON.stringify(t.claims), old.id);
         });
+        const after = get(current.id)!;
+        let base = current.base ?? input.base;
+        for (const t of after.tasks) {
+          if (t.status === "waiting" && t.base !== base) q.updBase.run(base, t.id);
+          base = t.branch!;
+        }
         const any = changes.added.length + changes.removed.length + changes.changed.length + changes.moved.length;
         if (any) q.bump.run(current.id);
         return { stack: get(current.id)!, changes };
@@ -204,6 +222,10 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
 
     setStatus(taskId: string, status: TaskStatus) {
       q.setStatus.run(status, taskId);
+    },
+    newestStack(repo: string): Stack | undefined {
+      const r = q.newest.get(repo) as { id: string } | undefined;
+      return r && get(r.id);
     },
     setPr(taskId: string, number: number, url: string) {
       q.setPr.run(number, url, taskId);

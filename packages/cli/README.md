@@ -17,10 +17,14 @@ awb ui                           # opens the session list in the browser
 | `awb sessions [--json]` | Lists the sessions. |
 | `awb doctor` | Checks the setup and prints a fix for each problem. |
 | `awb daemon start\|stop\|status` | Controls the daemon of the active `AWB_HOME`. |
-| `awb stack set [--json]` | Reads a stack as JSON on stdin and creates or replaces it. A stack of one binds to the current branch. |
+| `awb stack set [--json]` | Reads a stack as JSON on stdin and creates or replaces it. A stack of one binds to the current branch. In a stack of many, each task gets its own branch: task 1 starts from the current branch, and each later task starts from the task below. |
+| `awb run [stack] [--json]` | Starts the runner on the stack (default: the newest stack of the repo) and returns at once. The runner makes a worktree in `AWB_HOME/worktrees/` for each task, runs the `## setup` block of `.awb/run.md` in it, and starts `awb -p` with the task prompt. If a task ends without a PR, the task is `failed` and the stack stops. |
+| `awb retry <task> [--json]` | Sets a `failed` task back to `waiting` and starts the runner. The new session uses the same worktree and branch. |
 | `awb prove [--json]` | Starts the app from `.awb/run.md`, writes the missing proof tests with a fresh test-writer session, runs them, and runs the gate. Prints the claim table. Exits 1 if the gate fails. |
 | `awb ship [--json]` | Runs the gate again from the files on disk. If it passes, scans the specs for secrets, pushes the branch, opens a draft PR, uploads each video to the prerelease `awb-proof-<PR>`, and writes the PR body. Sets the task to `done`. Refuses when the gate fails. |
 | `awb show [--json]` | Shows the task on the current branch, its claims and every gate result. |
+
+Limits for a task session: `AWB_TASK_BUDGET_USD` (default 5) and `AWB_TASK_TIMEOUT_MIN` (default 45). `AWB_CLAUDE` replaces `claude` in the launcher and the task sessions, and `AWB_WRITER_CLAUDE` replaces it in the test writer.
 
 `AWB_HOME` defaults to `~/.awb`. Each `AWB_HOME` has its own daemon, database and `daemon.json`. For a dev instance, use `AWB_HOME=~/.awb-dev`.
 
@@ -39,4 +43,5 @@ bash spikes/phase1/check.sh      # manual check with a stub claude, no tokens
 bash spikes/phase2/check.sh      # live feed check with the real claude (haiku)
 bash spikes/phase3/check.sh      # awb prove on the games repo (real claude, about 1.20 USD)
 SPECS=<phase 3 task>/proof-tests bash spikes/phase4/check.sh   # awb ship to GitHub, then close the PR
+bash spikes/phase5/check.sh      # a stack of three with a stub claude: stacked PRs, a planted bug, a retry
 ```

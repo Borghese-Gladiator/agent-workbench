@@ -22,11 +22,27 @@ You work inside Agent Workbench (`awb`). The workbench tracks this session and p
    ready: <a path that answers when the app is up>
    ````
    If the app is already running at a fixed URL, leave out the code block and write only `url:` and `ready:`.
+   If a fresh clone needs an install before the app can start, add a `## setup` section with a ```sh block, for example `npm ci`. The runner runs it in each new worktree.
 5. Write the code. Run the repo lint, typecheck and unit tests, and fix every failure.
 6. Commit. `awb prove` refuses uncommitted changes.
 7. Run `awb prove`. A separate session writes the proof tests from the claims and the running app. Then the gate runs them. The command prints a claim table.
 8. If a claim fails, fix the code, commit, and run `awb prove` again. Do not edit the proof tests. They are not yours, and the gate refuses a test that changed during a run.
 9. When every claim passes, run `awb ship`. It runs the gate again, pushes the branch, uploads the videos and opens a draft PR. Report the PR URL and the claim table.
+
+## For a big feature
+
+One session has a limit. If the feature needs more than about one session of work, or more than about 6 claims, split it into a stack of tasks. Each task must stand alone: it has its own claims, and its PR makes sense on top of the tasks below it.
+
+1. Write the tasks in order, from the bottom up. Do not make a branch for each task. The daemon makes them.
+2. Send the whole stack:
+   ```sh
+   awb stack set <<'EOF'
+   {"tasks":[{"title":"<task 1>","claims":[...]},{"title":"<task 2>","claims":[...]}]}
+   EOF
+   ```
+3. Make sure that `.awb/run.md` exists and is committed, and push the current branch. The first task starts from the current branch, and the PR of the first task targets it.
+4. Run `awb run`. It returns at once. A fresh session does each task in its own worktree. Each task branches from the task below, so the PRs stack.
+5. If a task fails, the stack stops. Run `awb show` in that task's worktree, or read the reason from `awb run`. To try again, run `awb retry <task id>`.
 
 ## Rules
 

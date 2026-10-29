@@ -174,6 +174,41 @@ Manual test (`spikes/phase4/check.sh`, games repo, real `claude` and GitHub):
 2. Change a file after `awb prove`, then `awb ship`. It refuses and prints the claim table.
 3. Close the PR on GitHub (a merge would change `main` of the games repo). After a sync, `awb show` shows `closed`. The `MERGED` case has a unit test.
 
+## Phase 5: stacks of many, the runner, `awb run` and `awb retry`
+
+### Brief
+
+The chat can make a stack of many tasks. `awb run` starts the runner in the daemon and returns at once. The runner does the tasks one at a time, from the bottom up. Each task gets a worktree on its own branch, which starts from the branch of the task below. A fresh `claude -p` session does the task. If the task is not `done` when the session ends, the runner marks it `failed`, and the stack stops. `awb retry` starts a new session on the failed task, and the stack continues.
+
+### Changes
+
+- **`awb stack set` with many tasks:** each task gets the branch `awb/<title slug>-<id>`. Task 1 branches from the base of the stack. Each later task branches from the task below. A replace computes the bases again for the waiting tasks. A stack of one still binds to the current branch.
+- **Runner (`runner.ts`):** a loop over the tasks of a stack. It skips `done`, `merged` and `closed` tasks. It runs the first `waiting` task. It stops at a `failed` or `doing` task. The loop gets the task session as a function, so a unit test can replace it.
+- **Task session:** `git worktree add -b <branch> $AWB_HOME/worktrees/<task> <base>`, then `awb -p` in the worktree. This is the same launcher as the chat, so the session gets the playbook, the hooks, the deny rules and a session row. The prompt has the title, the claims and the titles of the tasks below. Limits: `--max-budget-usd` (`AWB_TASK_BUDGET_USD`, default 5) and a wall-clock timeout (`AWB_TASK_TIMEOUT_MIN`, default 45), from fender fact 3. The output goes to `<task folder>/session-<n>.jsonl`.
+- **`awb run [stack]`:** starts the runner on the stack, or on the newest stack of the repo. It returns the run id at once. `GET /api/runs/<id>` gives the state: `running`, `done` or `stopped`.
+- **`awb retry <task>`:** only for a `failed` task. It sets the task to `waiting` and starts the runner. The session uses the same worktree and branch, so it sees the earlier commits.
+- **Playbook:** when to split a request into a stack, and how to use `awb run`.
+
+Not in phase 5: a run that survives a daemon restart. If the daemon stops, the task stays `doing`.
+
+### Tests
+
+Unit tests:
+
+- A stack of three: three branches, and the bases form a chain.
+- A replace that moves a waiting task computes the bases again.
+- The runner: all three tasks done. Task 2 not done: task 2 is `failed`, and task 3 does not start. A retry after that: tasks 2 and 3 run.
+- The task prompt has the claims and the titles of the tasks below.
+
+Manual test (`spikes/phase5/check.sh`, a clone of the games repo, real GitHub):
+
+The task session is a stub `claude` (`AWB_CLAUDE`). It writes a fixed page for its task, commits, and runs `awb prove` and `awb ship`. The proof tests are put in each task folder before the run, so no test writer runs, and the check costs no tokens. Phase 0 check 3 and phase 3 already prove a real `claude -p` session with `awb` commands.
+
+1. A stack of three: three stacked draft PRs in order. The base of PR 2 is the branch of PR 1, and the base of PR 3 is the branch of PR 2.
+2. A planted bug in task 2: task 2 is `failed`, and task 3 does not start.
+3. Remove the bug and run `awb retry`: task 2 and task 3 open their PRs.
+4. Close the PRs and delete the branches and releases.
+
 ## Rules for the next session
 
 - Read `PROPOSAL.md` sections 3, 5 and 6 before you start.

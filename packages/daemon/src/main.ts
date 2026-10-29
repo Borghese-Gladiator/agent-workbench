@@ -5,6 +5,7 @@ import { openStore } from "./store.ts";
 import { createApp } from "./server.ts";
 import { createStacks, migrateStacks } from "./stacks.ts";
 import { taskRoutes } from "./task-routes.ts";
+import { claudeSession, createRunner } from "./runner.ts";
 
 export async function startDaemon(home: string) {
   mkdirSync(home, { recursive: true });
@@ -12,10 +13,19 @@ export async function startDaemon(home: string) {
   migrateStacks(store.db);
   const stacks = createStacks(store.db, (id) => join(realpathSync(home), "tasks", id));
   const startedAt = new Date().toISOString();
-  const routes = taskRoutes(stacks, {
-    claude: process.env.AWB_CLAUDE || "claude",
-    writerBudgetUsd: Number(process.env.AWB_WRITER_BUDGET_USD || 3),
-  });
+  const runner = createRunner(stacks, (repo) =>
+    claudeSession({
+      home: realpathSync(home),
+      repo,
+      budgetUsd: Number(process.env.AWB_TASK_BUDGET_USD || 5),
+      timeoutMin: Number(process.env.AWB_TASK_TIMEOUT_MIN || 45),
+    }),
+  );
+  const routes = taskRoutes(
+    stacks,
+    { claude: process.env.AWB_WRITER_CLAUDE || "claude", writerBudgetUsd: Number(process.env.AWB_WRITER_BUDGET_USD || 3) },
+    runner,
+  );
   const server = createApp(store, { home, startedAt }, routes);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;

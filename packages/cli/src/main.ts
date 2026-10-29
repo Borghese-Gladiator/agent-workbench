@@ -37,6 +37,12 @@ switch (cmd) {
   case "ship":
     process.exitCode = await shipCmd(rest.includes("--json"));
     break;
+  case "run":
+    process.exitCode = await runCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"));
+    break;
+  case "retry":
+    process.exitCode = await retryCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"));
+    break;
   case "show":
     process.exitCode = await showCmd(rest.includes("--json"));
     break;
@@ -91,7 +97,8 @@ async function stackSet(json: boolean): Promise<number> {
   }
   const d = await ensureDaemon(home);
   try {
-    const base = input.base ?? defaultBranch(git.worktree);
+    const many = Array.isArray(input.tasks) && input.tasks.length > 1;
+    const base = input.base ?? (many ? git.branch : defaultBranch(git.worktree));
     const r = await api(d, "/api/stacks", { ...input, repo: git.repo, branch: git.branch, base });
     if (json) console.log(JSON.stringify(r, null, 2));
     else {
@@ -169,6 +176,39 @@ async function shipCmd(json: boolean): Promise<number> {
     else console.log(`${r.table}\nDraft PR: ${r.url}`);
     return 0;
   });
+}
+
+function printRun(r: any, json: boolean) {
+  if (json) console.log(JSON.stringify(r, null, 2));
+  else console.log(`run ${r.id} on stack ${r.stackId}: ${r.state}${r.current ? `, task ${r.current}` : ""}${r.reason ? ` (${r.reason})` : ""}`);
+}
+
+async function runCmd(stackId: string | undefined, json: boolean): Promise<number> {
+  const git = here();
+  if (!git) return 1;
+  const d = await ensureDaemon(home);
+  try {
+    printRun(await api(d, "/api/run", { repo: git.repo, stackId }), json);
+    return 0;
+  } catch (err) {
+    console.error(`awb: ${(err as Error).message}`);
+    return 1;
+  }
+}
+
+async function retryCmd(taskId: string | undefined, json: boolean): Promise<number> {
+  if (!taskId) {
+    console.error("usage: awb retry <task id>");
+    return 2;
+  }
+  const d = await ensureDaemon(home);
+  try {
+    printRun(await api(d, "/api/retry", { taskId }), json);
+    return 0;
+  } catch (err) {
+    console.error(`awb: ${(err as Error).message}`);
+    return 1;
+  }
 }
 
 async function showCmd(json: boolean): Promise<number> {

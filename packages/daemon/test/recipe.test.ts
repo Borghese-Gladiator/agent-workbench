@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseRecipe, fill } from "../src/recipe.ts";
+import { parseSetup, parseRecipe, fill } from "../src/recipe.ts";
 
 const vite = `# Run
 
@@ -38,3 +38,8 @@ for (const [name, text] of [
 ] as const) {
   test(`refuses ${name}`, () => assert.throws(() => parseRecipe(text)));
 }
+
+test("the setup section gives its command, and no section gives null", () => {
+  assert.equal(parseSetup("## setup\n```sh\nnpm ci\n```\n\n## start\nurl: http://x\n"), "npm ci");
+  assert.equal(parseSetup("## start\nurl: http://x\n"), null);
+});
