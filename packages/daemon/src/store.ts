@@ -117,6 +117,7 @@ export function openStore(file: string) {
   };
 
   return {
+    db,
     register(s: { id: string; repo: string; worktree: string; branch: string; pid?: number | null }): Session {
       const now = new Date().toISOString();
       addRepo.run(s.repo, now);

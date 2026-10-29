@@ -106,6 +106,36 @@ Manual test:
 3. The tool call shows in the UI in under 2 seconds.
 4. Stop the daemon during a chat. The chat keeps working.
 
+## Phase 3: stack of one, `awb prove` and the gate
+
+### Brief
+
+The chat can make a stack of one task, bind it to the current branch, and run `awb prove`. The daemon runs the test writer in the task folder (phase 0 fact 1), runs the proof tests, and runs the gate. The command prints the claim table. The fender spike runs when the `app` stack is up. Phase 3 is proven on the games repo, which needs no stack.
+
+### Changes
+
+- **Tables:** `stacks` (id, repo, version), `tasks` (id, stack, position, title, claims, status, branch, base), `attempts` (id, task, session, started, ended), `gate_results` (id, attempt, commit, pass, rows JSON).
+- **`awb stack set`:** JSON on stdin: `{ "version"?, "tasks": [{ "id"?, "title", "claims": [{ "id", "text" }] }] }`. For a stack of one, the task binds to the current branch. A replace changes only `waiting` tasks, and checks the version. It returns the changes.
+- **Task folder:** `$AWB_HOME/tasks/<id>/` (real path) with `claims.md`, `playwright.config.ts`, `proof-tests/`, `proof/`. The daemon writes `claims.md` and the config when the task is created.
+- **Start recipe:** `.awb/run.md` in the repo, with a fenced `start` block, a `url` line and a `ready` path. `awb prove` starts the app from the recipe at the commit, and stops it after the run.
+- **`awb prove`:** finds the task from the branch. Sets it to `doing`. Starts the app. If `proof-tests/` has no test for a claim, starts the test writer (`claude -p`, cwd = task folder, `--agents`, `--mcp-config` with `--headless`, `--max-budget-usd`). Saves `sha.txt` and `test-hash.txt`. Runs `@playwright/test`. Runs the gate. Saves the gate result. Prints the claim table, and exits 1 if the gate fails.
+- **Gate:** a pure function from the claims, the report, the head commit, the source state and the test hashes to the claim table. Rules 1 to 5 of section 4.3. Rule 6: the test writer is always a fresh session in phase 3, so rule 6 holds by design.
+- **`@playwright/test` and the Playwright agents:** a dependency of `@awb/daemon`, so the target repo needs no install.
+
+### Tests
+
+Unit tests:
+
+- The gate: one row for each rule that can fail (no test, skipped, fixme, failed, no video, no trace, SHA mismatch, dirty source, test hash changed), and a pass.
+- `awb stack set`: create, replace a waiting task, refuse a change to a started task, refuse a stale version.
+- The start recipe parser.
+
+Manual test (`spikes/phase3/check.sh`, games repo, real `claude`):
+
+1. Pass: the Tic-Tac-Toe scoreboard claims C1 to C6 on the current games code. `awb prove` passes.
+2. Planted bug: X wins not counted. `awb prove` fails C2 and the other claims that depend on it.
+3. Independence: the test-writer session reads no file outside the task folder.
+
 ## Rules for the next session
 
 - Read `PROPOSAL.md` sections 3, 5 and 6 before you start.

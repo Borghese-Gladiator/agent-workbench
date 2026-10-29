@@ -17,6 +17,9 @@ awb ui                           # opens the session list in the browser
 | `awb sessions [--json]` | Lists the sessions. |
 | `awb doctor` | Checks the setup and prints a fix for each problem. |
 | `awb daemon start\|stop\|status` | Controls the daemon of the active `AWB_HOME`. |
+| `awb stack set [--json]` | Reads a stack as JSON on stdin and creates or replaces it. A stack of one binds to the current branch. |
+| `awb prove [--json]` | Starts the app from `.awb/run.md`, writes the missing proof tests with a fresh test-writer session, runs them, and runs the gate. Prints the claim table. Exits 1 if the gate fails. |
+| `awb show [--json]` | Shows the task on the current branch, its claims and every gate result. |
 
 `AWB_HOME` defaults to `~/.awb`. Each `AWB_HOME` has its own daemon, database and `daemon.json`. For a dev instance, use `AWB_HOME=~/.awb-dev`.
 

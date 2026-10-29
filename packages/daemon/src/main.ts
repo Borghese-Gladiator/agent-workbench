@@ -1,14 +1,22 @@
-import { mkdirSync, writeFileSync, renameSync, rmSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, renameSync, rmSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { openStore } from "./store.ts";
 import { createApp } from "./server.ts";
+import { createStacks, migrateStacks } from "./stacks.ts";
+import { taskRoutes } from "./task-routes.ts";
 
 export async function startDaemon(home: string) {
   mkdirSync(home, { recursive: true });
   const store = openStore(join(home, "awb.db"));
+  migrateStacks(store.db);
+  const stacks = createStacks(store.db, (id) => join(realpathSync(home), "tasks", id));
   const startedAt = new Date().toISOString();
-  const server = createApp(store, { home, startedAt });
+  const routes = taskRoutes(stacks, {
+    claude: process.env.AWB_CLAUDE || "claude",
+    writerBudgetUsd: Number(process.env.AWB_WRITER_BUDGET_USD || 3),
+  });
+  const server = createApp(store, { home, startedAt }, routes);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;
 

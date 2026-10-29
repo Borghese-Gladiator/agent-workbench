@@ -2,5 +2,8 @@
   "name": "@awb/daemon",
   "private": true,
   "type": "module",
-  "main": "src/main.ts"
+  "main": "src/main.ts",
+  "dependencies": {
+    "@playwright/test": "1.61.1"
+  }
 }

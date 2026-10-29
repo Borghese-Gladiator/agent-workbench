@@ -4,8 +4,9 @@ import type { Store } from "./store.ts";
 import { tokenTotals } from "./usage.ts";
 
 type Info = { home: string; startedAt: string };
+type Extra = (req: IncomingMessage, res: ServerResponse, url: URL, body: () => Promise<Record<string, any>>) => Promise<boolean>;
 
-export function createApp(store: Store, info: Info) {
+export function createApp(store: Store, info: Info, extra?: Extra) {
   const clients = new Set<ServerResponse>();
   const broadcast = (sessionId: string) => {
     const row = store.feedRow(sessionId);
@@ -16,9 +17,12 @@ export function createApp(store: Store, info: Info) {
 
   const server = createServer(async (req, res) => {
     try {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      if (extra && (await extra(req, res, url, () => readJson(req)))) return;
       await route(req, res, store, info, clients, broadcast);
     } catch (err) {
-      send(res, 400, { error: (err as Error).message });
+      if (res.headersSent) res.end();
+      else send(res, 400, { error: (err as Error).message });
     }
   });
   server.on("close", () => {
