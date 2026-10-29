@@ -7,7 +7,7 @@ PHASE0="$HERE/../phase0"
 FENDER="${FENDER:-$HOME/Klaviyo/Repos/fender}"
 SEED="$HOME/GitHub/klaviyo-local-seed/bin/seed"
 PW_VERSION="${PW_VERSION:-1.61.1}"
-BASE="http://www.local-klaviyo.com:8080"
+BASE="${BASE:-https://local-klaviyo.com:4000}"
 WORK="$(cd "${WORK:-$(mktemp -d)}" && pwd -P)"
 TASK="$WORK/task"
 EMAIL="awb-spike-$(date +%s)@test.com"
@@ -20,7 +20,7 @@ fail() { echo; echo "FAIL ($1): $2"; exit 1; }
 FENDER_BEFORE="$(git -C "$FENDER" status --porcelain)"
 
 step "1. stack health" doctor
-curl -sf -o /dev/null -m 10 "$BASE/login" || fail 1 "$BASE/login does not answer"
+curl -skf -o /dev/null -m 10 "$BASE/login" || fail 1 "$BASE/login does not answer"
 "$SEED" doctor > "$WORK/doctor.txt" 2>&1 || { grep -v '"logger"' "$WORK/doctor.txt" | tail -20; fail 1 "seed doctor failed"; }
 grep -v '"logger"' "$WORK/doctor.txt" | tail -8
 
@@ -51,10 +51,10 @@ cat > "$TASK/global-setup.ts" <<EOF
 import { chromium } from "@playwright/test";
 export default async function () {
   const browser = await chromium.launch();
-  const page = await browser.newPage();
+  const page = await browser.newPage({ ignoreHTTPSErrors: true });
   await page.goto("$BASE/login");
-  await page.getByLabel(/email/i).fill("$EMAIL");
-  await page.getByLabel(/password/i).fill("$PASSWORD");
+  await page.getByLabel("Email", { exact: true }).fill("$EMAIL");
+  await page.getByLabel("Password", { exact: true }).fill("$PASSWORD");
   await page.getByRole("button", { name: /log in|sign in/i }).click();
   await page.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 60_000 });
   await page.context().storageState({ path: "$TASK/auth.json" });
@@ -70,7 +70,7 @@ export default defineConfig({
   timeout: 90_000,
   globalSetup: "./global-setup.ts",
   reporter: [["list"], ["json", { outputFile: "proof/report.json" }]],
-  use: { baseURL: "$BASE", storageState: "$TASK/auth.json", video: "on", trace: "on" },
+  use: { baseURL: "$BASE", ignoreHTTPSErrors: true, storageState: "$TASK/auth.json", video: "on", trace: "on" },
 });
 EOF
 

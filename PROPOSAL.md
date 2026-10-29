@@ -513,6 +513,27 @@ Facts that change the design:
 6. **Send the prompt on stdin.** `--allowedTools` takes many values, so a prompt after it becomes a tool name, and `claude -p` waits for input.
 7. **The user's global git hooks can stop a task.** In check 3, a global `core.hooksPath` hook failed in a repo without lefthook. The agent stopped and asked, which is correct. `awb doctor` should check that a test commit works in the repo.
 
+### 6.4 Fender spike results (part)
+
+Run on 2026-10-29 with `spikes/fender/run.sh`, against the `app` stack and the fender dev server. The stack stopped during the test-writer step, so the proof run did not happen. The user does not plan to start the stack again, so this result is final for v6.
+
+| Step | Result | Time |
+|---|---|---|
+| `seed doctor` | Pass | 73 s |
+| `seed scenario full` and `verify` (user, company, "Local Seed Dashboard") | Pass | 180 s |
+| Login with `global-setup.ts`, `storageState` saved | Pass | 10 s |
+| Test writer, cwd = task folder | C1 written and checked on the live app. C2 written, not checked: the server went down. C3 not started. 7 turns, 0.97 USD. | 32 min |
+| Proof run | Not run: the server refused connections. | none |
+| fender `git status` | Unchanged | |
+
+Facts that change the design:
+
+1. **The URL is `https://local-klaviyo.com:4000`, not `:8080`.** Port 8080 is the Django server. Its page loads the fender JS from `https://localhost:4000`, which Chromium blocks (`ERR_BLOCKED_BY_ORB`), so the page shows "Something went wrong". The recipe must name port 4000, and the proof config must set `ignoreHTTPSErrors` for the local certificate.
+2. **The login belongs in the recipe.** A `globalSetup` file that fills the login form and saves `storageState` worked at the first try. `.awb/run.md` needs a login section, and `prove.ts` needs to write it into the task folder. This is not built yet.
+3. **The test writer is slow on fender.** One claim took about 15 minutes, because each page load on the dev server is slow. The `--max-budget-usd` limit does not stop a slow session. The runner needs a wall-clock timeout for the test writer.
+4. **The test writer reports honestly when the app goes down.** It stopped, wrote what it had checked and what it had not, and did not invent a pass.
+5. **Use exact labels.** `getByLabel(/password/i)` matches the password field and the "Show password" button.
+
 ## 7. Risks and open questions
 
 ### 7.1 Risks
