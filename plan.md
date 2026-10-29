@@ -136,10 +136,47 @@ Manual test (`spikes/phase3/check.sh`, games repo, real `claude`):
 2. Planted bug: X wins not counted. `awb prove` fails C2 and the other claims that depend on it.
 3. Independence: the test-writer session reads no file outside the task folder.
 
+## Phase 4: `awb ship`, the PR body and PR sync
+
+### Brief
+
+When the gate passes, `awb ship` opens a draft PR with a video link for each claim. The daemon then sees when GitHub merges or closes the PR, and sets the task to `merged` or `closed`.
+
+### Changes
+
+- **Gate from disk:** `gateFromDisk(task, worktree)` reads `proof/report.json`, `proof/sha.txt` and `proof/test-hash.txt`, and gets `HEAD`, the source state and the test hash now. `awb prove` and `awb ship` both use it, so `awb ship` does not trust the database (section 3.10).
+- **`awb ship`:** finds the task from the branch. Refuses if a proof run or a ship for the task is busy, or if the task is `done`. Then it does the steps of section 4.4:
+  1. Run the gate from disk. Stop if it fails, and print the claim table.
+  2. Scan the spec files and the PR body for secrets. Stop if it finds one.
+  3. Push the branch.
+  4. Open a draft PR (or use the open PR of the branch, so that a second try works).
+  5. Upload the videos to the prerelease `awb-proof-<PR number>`.
+  6. Write the PR body: Summary, Features, How it was run, Not proven, Test code.
+  7. Save the PR number and URL, and set the task to `done`.
+- **Traces stay local.** A trace holds the network data, which can include login cookies. The PR body names the task folder.
+- **PR sync:** every 60 s the daemon asks `gh pr view` for the state of each `done` task, and sets `merged` or `closed`.
+- **Deny rules:** the `awb` settings deny `gh pr create` and file writes to `$AWB_HOME`.
+- **Playbook:** step 9 runs `awb ship`.
+
+### Tests
+
+Unit tests:
+
+- The PR body: a row and a video link for each claim, the commit, the start command, and the spec files in a collapsed block.
+- The secret scan: it finds a GitHub token, an AWS key and a private key, and passes normal test code.
+- The gate from disk: a pass, and a fail when a spec file changed after the run.
+- PR sync: `MERGED` sets `merged`, `CLOSED` sets `closed`, `OPEN` changes nothing.
+- The settings have the deny rules.
+
+Manual test (`spikes/phase4/check.sh`, games repo, real `claude` and GitHub):
+
+1. Pass case of phase 3, then `awb ship`. A draft PR opens on `browser-games__ai` with a video link for each claim. Each link downloads a video.
+2. Change a file after `awb prove`, then `awb ship`. It refuses and prints the claim table.
+3. Close the PR on GitHub (a merge would change `main` of the games repo). After a sync, `awb show` shows `closed`. The `MERGED` case has a unit test.
+
 ## Rules for the next session
 
 - Read `PROPOSAL.md` sections 3, 5 and 6 before you start.
 - The v5 code is in `archive/agentic-development-task-system-v5__ai/code/`. You can copy small parts, such as the GitHub release upload. Do not copy its structure. v5 had 19 packages and Temporal.
 - Work on a branch, not on `main`. Open a draft PR at the end of each phase. Do not push to `main`.
-- Do not start phase 3. Phase 3 waits for the fender spike, and the user must start the `app` stack for it.
 - If a phase 0 check fails, stop and report. Do not change the design yourself.

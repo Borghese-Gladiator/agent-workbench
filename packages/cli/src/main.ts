@@ -34,6 +34,9 @@ switch (cmd) {
   case "prove":
     process.exitCode = await proveCmd(rest.includes("--json"));
     break;
+  case "ship":
+    process.exitCode = await shipCmd(rest.includes("--json"));
+    break;
   case "show":
     process.exitCode = await showCmd(rest.includes("--json"));
     break;
@@ -116,11 +119,23 @@ function defaultBranch(cwd: string): string {
 async function proveCmd(json: boolean): Promise<number> {
   const git = here();
   if (!git) return 1;
+  return streamNdjson("/api/prove", { ...git, sessionId: process.env.AWB_SESSION_ID }, (r) => {
+    if (json) console.log(JSON.stringify(r, null, 2));
+    else {
+      console.log(r.table);
+      for (const row of r.rows) if (row.status === "FAIL" && row.videos.length) console.log(`  ${row.id} video: ${row.videos[0]}\n  ${row.id} trace: ${row.traces[0]}`);
+      console.log(`evidence: ${r.folder}`);
+    }
+    return r.pass ? 0 : 1;
+  });
+}
+
+async function streamNdjson(path: string, body: object, onResult: (r: any) => number): Promise<number> {
   const d = await ensureDaemon(home);
-  const res = await fetch(`http://127.0.0.1:${d.port}/api/prove`, {
+  const res = await fetch(`http://127.0.0.1:${d.port}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...git, sessionId: process.env.AWB_SESSION_ID }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     console.error(`awb: ${(await res.json()).error}`);
@@ -136,19 +151,24 @@ async function proveCmd(json: boolean): Promise<number> {
       const msg = JSON.parse(buf.slice(0, i));
       buf = buf.slice(i + 1);
       if (msg.log) console.error(`awb: ${msg.log}`);
-      if (msg.error) console.error(`awb: prove failed: ${msg.error}`);
-      if (msg.result) {
-        if (json) console.log(JSON.stringify(msg.result, null, 2));
-        else {
-          console.log(msg.result.table);
-          for (const r of msg.result.rows) if (r.status === "FAIL" && r.videos.length) console.log(`  ${r.id} video: ${r.videos[0]}\n  ${r.id} trace: ${r.traces[0]}`);
-          console.log(`evidence: ${msg.result.folder}`);
-        }
-        code = msg.result.pass ? 0 : 1;
+      if (msg.error) {
+        console.error(`awb: ${msg.error}`);
+        if (msg.table) console.log(msg.table);
       }
+      if (msg.result) code = onResult(msg.result);
     }
   }
   return code;
+}
+
+async function shipCmd(json: boolean): Promise<number> {
+  const git = here();
+  if (!git) return 1;
+  return streamNdjson("/api/ship", git, (r) => {
+    if (json) console.log(JSON.stringify(r, null, 2));
+    else console.log(`${r.table}\nDraft PR: ${r.url}`);
+    return 0;
+  });
 }
 
 async function showCmd(json: boolean): Promise<number> {
@@ -159,6 +179,7 @@ async function showCmd(json: boolean): Promise<number> {
     const t = await api(d, `/api/task?repo=${encodeURIComponent(git.repo)}&branch=${encodeURIComponent(git.branch)}`);
     if (json) return console.log(JSON.stringify(t, null, 2)), 0;
     console.log(`task ${t.id}  ${t.status}  ${t.branch}\n  ${t.title}\n  folder: ${t.folder}`);
+    if (t.pr_url) console.log(`  PR: ${t.pr_url}`);
     for (const c of t.claims) console.log(`  ${c.id}: ${c.text}`);
     for (const a of t.attempts) {
       console.log(`attempt ${a.id}  ${a.started_at}${a.ended_at ? "" : "  (running)"}`);

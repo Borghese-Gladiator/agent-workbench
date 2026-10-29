@@ -13,6 +13,10 @@ test("settings register the hook sender for every hook type, with AWB_HOME", () 
   }
 });
 
+test("settings deny gh pr create and file writes to AWB_HOME", () => {
+  assert.deepEqual(awbSettings("/h/.awb").permissions.deny, ["Bash(gh pr create:*)", "Edit(//h/.awb/**)", "Write(//h/.awb/**)"]);
+});
+
 for (const passThrough of [["--resume"], ["--resume", "abc"], ["-p", "hello world"], []]) {
   test(`pass-through ${JSON.stringify(passThrough)} reaches claude unchanged and last`, () => {
     const args = claudeArgs(passThrough, DEFAULT_PLAYBOOK, { env: { AWB_HOME: "/h" } });

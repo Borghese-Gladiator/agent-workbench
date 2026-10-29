@@ -19,6 +19,8 @@ export async function startDaemon(home: string) {
   const server = createApp(store, { home, startedAt }, routes);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;
+  const sync = setInterval(() => routes.syncPrs().catch(() => {}), Number(process.env.AWB_SYNC_MS || 60_000));
+  sync.unref();
 
   const file = join(home, "daemon.json");
   const tmp = `${file}.${process.pid}.tmp`;
@@ -29,6 +31,7 @@ export async function startDaemon(home: string) {
     try {
       if (JSON.parse(readFileSync(file, "utf8")).pid === process.pid) rmSync(file);
     } catch {}
+    clearInterval(sync);
     server.close();
     store.close();
   };

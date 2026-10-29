@@ -94,3 +94,17 @@ test("attempts and gate results are kept for each try", () => {
   assert.equal(h.gates[0].commit_sha, "abc");
   assert.ok(h.ended_at);
 });
+
+test("ship saves the PR and sets done; a closed task still shows, and the branch can take a new task", () => {
+  const s = setup();
+  const { stack } = s.set({ ...where, tasks: [task()] });
+  const id = stack.tasks[0].id;
+  s.setPr(id, 51, "https://gh/pr/51");
+  assert.deepEqual(s.shipped().map((t) => [t.id, t.pr_number, t.repo]), [[id, 51, "/r"]]);
+  assert.equal(s.task(id)?.status, "done");
+  s.setStatus(id, "closed");
+  assert.equal(s.shipped().length, 0);
+  assert.equal(s.taskForBranch("/r", "awb/x")?.status, "closed");
+  const next = s.set({ ...where, tasks: [task("Again")] });
+  assert.equal(s.taskForBranch("/r", "awb/x")?.id, next.stack.tasks[0].id);
+});

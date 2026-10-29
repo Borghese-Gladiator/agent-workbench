@@ -102,7 +102,7 @@ async function startApp(recipe: Recipe, cwd: string, log: (l: string) => void) {
   return { url, stop };
 }
 
-function run(cmd: string, args: string[], cwd: string, input?: string): Promise<{ code: number; out: string }> {
+export function run(cmd: string, args: string[], cwd: string, input?: string): Promise<{ code: number; out: string }> {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
     let out = "";
@@ -160,6 +160,22 @@ async function runWriter(folder: string, claims: Claim[], url: string, ready: st
   }
 }
 
+export function gateFromDisk(claims: Claim[], folder: string, worktree: string): GateResult {
+  const proof = join(folder, "proof");
+  const read = (f: string) => (existsSync(join(proof, f)) ? readFileSync(join(proof, f), "utf8").trim() : "");
+  const report: Report = read("report.json") ? JSON.parse(read("report.json")) : { suites: [] };
+  return runGate({
+    claims,
+    report,
+    head: git(worktree, "rev-parse", "HEAD"),
+    savedSha: read("sha.txt"),
+    dirty: git(worktree, "status", "--porcelain") !== "",
+    testHashAtStart: read("test-hash.txt"),
+    testHashNow: testHash(join(folder, "proof-tests")),
+    fileExists: existsSync,
+  });
+}
+
 export type ProveResult = { gate: GateResult; table: string; folder: string };
 
 export async function prove(task: Task, worktree: string, deps: ProveDeps): Promise<ProveResult> {
@@ -193,24 +209,12 @@ export async function prove(task: Task, worktree: string, deps: ProveDeps): Prom
     const missing = claimsWithoutTest(task.claims, tests);
     if (missing.length) await runWriter(folder, missing, app.url, recipe.ready, deps);
 
-    const hashAtStart = testHash(tests);
-    writeFileSync(join(proof, "test-hash.txt"), hashAtStart + "\n");
+    writeFileSync(join(proof, "test-hash.txt"), testHash(tests) + "\n");
     deps.log("proof run: playwright test");
     const pw = await run(PLAYWRIGHT, ["test", "--config", "playwright.config.ts"], folder);
     writeFileSync(join(proof, "run.log"), pw.out);
 
-    const reportFile = join(proof, "report.json");
-    const report: Report = existsSync(reportFile) ? JSON.parse(readFileSync(reportFile, "utf8")) : { suites: [] };
-    const gate = runGate({
-      claims: task.claims,
-      report,
-      head: git(worktree, "rev-parse", "HEAD"),
-      savedSha: head,
-      dirty: git(worktree, "status", "--porcelain") !== "",
-      testHashAtStart: hashAtStart,
-      testHashNow: testHash(tests),
-      fileExists: existsSync,
-    });
+    const gate = gateFromDisk(task.claims, folder, worktree);
     writeFileSync(join(proof, "gate.json"), JSON.stringify(gate, null, 2));
     return { gate, table: claimTable(gate), folder };
   } finally {

@@ -19,6 +19,7 @@ awb ui                           # opens the session list in the browser
 | `awb daemon start\|stop\|status` | Controls the daemon of the active `AWB_HOME`. |
 | `awb stack set [--json]` | Reads a stack as JSON on stdin and creates or replaces it. A stack of one binds to the current branch. |
 | `awb prove [--json]` | Starts the app from `.awb/run.md`, writes the missing proof tests with a fresh test-writer session, runs them, and runs the gate. Prints the claim table. Exits 1 if the gate fails. |
+| `awb ship [--json]` | Runs the gate again from the files on disk. If it passes, scans the specs for secrets, pushes the branch, opens a draft PR, uploads each video to the prerelease `awb-proof-<PR>`, and writes the PR body. Sets the task to `done`. Refuses when the gate fails. |
 | `awb show [--json]` | Shows the task on the current branch, its claims and every gate result. |
 
 `AWB_HOME` defaults to `~/.awb`. Each `AWB_HOME` has its own daemon, database and `daemon.json`. For a dev instance, use `AWB_HOME=~/.awb-dev`.
@@ -27,6 +28,8 @@ A repo can replace the default playbook with `.awb/playbook.md`.
 
 `awb` passes hooks to `claude` with `--settings`. Each hook runs `bin/awb-hook`, which sends the hook JSON to the daemon of `AWB_HOME` for the session in `AWB_SESSION_ID`. The sender prints nothing, waits at most 1 s, and always exits 0. If the daemon is down, the event is dropped and the chat continues. On `Stop` and `SessionEnd`, the daemon reads the token totals from the transcript file that the hook names. The UI page gets live updates from `/api/feed` (server-sent events).
 
+The settings also deny `gh pr create` and `Edit`/`Write` in `AWB_HOME`, so `awb ship` is the only way to open a PR. Every 60 s (`AWB_SYNC_MS`), the daemon asks GitHub for the state of each shipped PR and sets the task to `merged` or `closed`. Traces stay in the task folder and are not uploaded, because a trace can hold cookies.
+
 To test:
 
 ```sh
@@ -34,4 +37,6 @@ npm test
 npm run typecheck
 bash spikes/phase1/check.sh      # manual check with a stub claude, no tokens
 bash spikes/phase2/check.sh      # live feed check with the real claude (haiku)
+bash spikes/phase3/check.sh      # awb prove on the games repo (real claude, about 1.20 USD)
+SPECS=<phase 3 task>/proof-tests bash spikes/phase4/check.sh   # awb ship to GitHub, then close the PR
 ```

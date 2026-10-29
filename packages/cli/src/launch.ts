@@ -12,6 +12,9 @@ export function awbSettings(home: string, hookBin = HOOK_BIN) {
   const entry = (matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: quoted, timeout: 5 }] }];
   return {
     env: { AWB_HOME: home },
+    permissions: {
+      deny: ["Bash(gh pr create:*)", ...["Edit", "Write"].map((t) => `${t}(/${home}/**)`)],
+    },
     hooks: Object.fromEntries(
       HOOK_EVENTS.map((e) => [e, entry(e === "PreToolUse" || e === "PostToolUse" ? "*" : undefined)]),
     ),

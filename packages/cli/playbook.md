@@ -26,10 +26,10 @@ You work inside Agent Workbench (`awb`). The workbench tracks this session and p
 6. Commit. `awb prove` refuses uncommitted changes.
 7. Run `awb prove`. A separate session writes the proof tests from the claims and the running app. Then the gate runs them. The command prints a claim table.
 8. If a claim fails, fix the code, commit, and run `awb prove` again. Do not edit the proof tests. They are not yours, and the gate refuses a test that changed during a run.
-9. When every claim passes, stop and report the claim table.
+9. When every claim passes, run `awb ship`. It runs the gate again, pushes the branch, uploads the videos and opens a draft PR. Report the PR URL and the claim table.
 
 ## Rules
 
 - Your own message is never proof. Only the claim table from `awb prove` is.
 - Run `awb show` to see the task, its claims and every gate result.
-- `awb ship` comes in a later version. Do not open a pull request yourself.
+- Do not open a pull request yourself. `awb ship` is the only way. It refuses when the gate fails.

@@ -14,6 +14,8 @@ export type Task = {
   branch: string | null;
   base: string | null;
   folder: string;
+  pr_number: number | null;
+  pr_url: string | null;
 };
 
 export type Stack = { id: string; repo: string; version: number; created_at: string; tasks: Task[] };
@@ -68,6 +70,8 @@ export function migrateStacks(db: DatabaseSync) {
       at TEXT NOT NULL
     );
   `);
+  const cols = (db.prepare("PRAGMA table_info(tasks)").all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes("pr_number")) db.exec("ALTER TABLE tasks ADD COLUMN pr_number INTEGER; ALTER TABLE tasks ADD COLUMN pr_url TEXT;");
 }
 
 export function validateTasks(tasks: unknown): TaskInput[] {
@@ -93,7 +97,7 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     tasks: db.prepare("SELECT * FROM tasks WHERE stack_id = ? ORDER BY position"),
     task: db.prepare("SELECT * FROM tasks WHERE id = ?"),
     byBranch: db.prepare(
-      "SELECT t.* FROM tasks t JOIN stacks s ON s.id = t.stack_id WHERE s.repo = ? AND t.branch = ? AND t.status NOT IN ('merged', 'closed') ORDER BY t.created_at DESC LIMIT 1",
+      "SELECT t.* FROM tasks t JOIN stacks s ON s.id = t.stack_id WHERE s.repo = ? AND t.branch = ? ORDER BY t.status IN ('merged', 'closed'), t.created_at DESC LIMIT 1",
     ),
     addStack: db.prepare("INSERT INTO stacks (id, repo, version, created_at) VALUES (?, ?, 1, ?)"),
     bump: db.prepare("UPDATE stacks SET version = version + 1 WHERE id = ?"),
@@ -103,6 +107,8 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     updTask: db.prepare("UPDATE tasks SET position = ?, title = ?, claims = ? WHERE id = ?"),
     delTask: db.prepare("DELETE FROM tasks WHERE id = ?"),
     setStatus: db.prepare("UPDATE tasks SET status = ? WHERE id = ?"),
+    setPr: db.prepare("UPDATE tasks SET pr_number = ?, pr_url = ?, status = 'done' WHERE id = ?"),
+    shipped: db.prepare("SELECT t.*, s.repo FROM tasks t JOIN stacks s ON s.id = t.stack_id WHERE t.status = 'done' AND t.pr_number IS NOT NULL"),
     addAttempt: db.prepare("INSERT INTO attempts (id, task_id, session_id, started_at) VALUES (?, ?, ?, ?)"),
     endAttempt: db.prepare("UPDATE attempts SET ended_at = ? WHERE id = ?"),
     attempts: db.prepare("SELECT * FROM attempts WHERE task_id = ? ORDER BY started_at"),
@@ -146,7 +152,7 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
         if (!input.stackId) {
           if (input.tasks.length !== 1) throw new StackError("phase 3 supports a stack of one task only", 400);
           const bound = this.taskForBranch(input.repo, input.branch);
-          if (bound && bound.status !== "done") {
+          if (bound && !["done", "merged", "closed"].includes(bound.status)) {
             throw new StackError(`branch ${input.branch} already has task ${bound.id} (${bound.status})`);
           }
           const id = randomUUID();
@@ -198,6 +204,12 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
 
     setStatus(taskId: string, status: TaskStatus) {
       q.setStatus.run(status, taskId);
+    },
+    setPr(taskId: string, number: number, url: string) {
+      q.setPr.run(number, url, taskId);
+    },
+    shipped(): (Task & { repo: string })[] {
+      return (q.shipped.all() as any[]).map(row) as (Task & { repo: string })[];
     },
     startAttempt(taskId: string, sessionId: string | null): string {
       const id = randomUUID();

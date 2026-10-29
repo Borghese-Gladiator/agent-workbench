@@ -34,7 +34,7 @@ step "3. task folder: claims, proof config, login setup" setup
 mkdir -p "$TASK/proof-tests" "$WORK/init"
 (cd "$WORK/init" && npx -y "playwright@$PW_VERSION" init-agents --loop=claude >/dev/null)
 node "$PHASE0/agents-to-json.mjs" "$WORK/init/.claude/agents" > "$WORK/agents.json"
-(cd "$TASK" && npm init -y >/dev/null && npm i -s "@playwright/test@$PW_VERSION")
+(cd "$TASK" && npm init -y >/dev/null && npm pkg set type=module && npm i -s "@playwright/test@$PW_VERSION")
 
 cat > "$TASK/claims.md" <<EOF
 # Claims: signed-in fender shell and the seeded dashboard
