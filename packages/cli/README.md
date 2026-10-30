@@ -13,7 +13,7 @@ awb ui                           # opens the session list in the browser
 | Command | What it does |
 |---|---|
 | `awb [claude args]` | Starts the daemon if it is not up, registers a session, and starts `claude` with the playbook and `AWB_HOME`. Every argument goes to `claude`. |
-| `awb ui [--no-open]` | Prints the UI URL and opens it. |
+| `awb ui [--no-open]` | Prints the UI URL and opens it. The UI has four views: Live (every session), Session (its events and tokens), Stacks (each task with its status and PR; you can edit a waiting task) and the proof page of a task (the claim table, a video for each claim, the trace, the proof tests and the diff). |
 | `awb sessions [--json]` | Lists the sessions. |
 | `awb doctor` | Checks the setup and prints a fix for each problem. |
 | `awb daemon start\|stop\|status` | Controls the daemon of the active `AWB_HOME`. |
@@ -47,4 +47,5 @@ bash spikes/phase3/check.sh      # awb prove on the games repo (real claude, abo
 SPECS=<phase 3 task>/proof-tests bash spikes/phase4/check.sh   # awb ship to GitHub, then close the PR
 bash spikes/phase5/check.sh      # a stack of three with a stub claude: stacked PRs, a planted bug, a retry
 bash spikes/phase6/check.sh      # a failed task, then the real claude (haiku) answers "what failed?"
+bash spikes/phase7/check.sh      # the four UI views in a headless browser, with a screenshot of each
 ```

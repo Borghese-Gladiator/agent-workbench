@@ -238,6 +238,39 @@ Manual test (`spikes/phase6/check.sh`, local only, real `claude`):
 2. Ask `awb -p "What did you do today, and what failed?"` with the real `claude`. No `awb` command is typed by hand.
 3. The answer names the failed task, claim C1 and the reason. The transcript shows that the agent ran `awb tasks` or `awb show`.
 
+## Phase 7: UI and the PR proof page
+
+### Brief
+
+You can review a PR from the UI only. The UI has the four views of section 3.9: Live, Session, Stacks and PR proof. The proposal names React and Vite. This repo has no build step, so the UI is one HTML page with plain JavaScript that the daemon serves. It reuses the v5 color tokens, in light and dark mode. If the page grows past about 600 lines, move it to Vite.
+
+### Changes
+
+- **`ui.ts`:** the page. Hash routes: `#/` Live, `#/session/<id>`, `#/stacks`, `#/task/<id>` (PR proof). The Live view keeps the SSE feed of phase 2.
+- **Live:** every session with its state, repo, branch, task, last tool and tokens. A click opens the Session view.
+- **Session:** the event feed (hook, tool, time) and the token totals.
+- **Stacks:** each stack in order, with the status, attempts and PR of each task. A waiting task has an edit form for the title and the claims. Save sends the whole stack with its version, so the version check of section 3.5 applies.
+- **PR proof:** the claim table of the last gate, a video player for each claim, a trace link with the `npx playwright show-trace` command, the failure reason, the attempts, the cost, the proof spec code and the diff of the branch.
+- **New routes:** `GET /api/stacks` (all stacks with their tasks), `GET /api/tasks/<id>/diff` (the git diff of the branch against its base), `GET /files?path=` (a video or a trace).
+- **Security:** `/files` serves only real files inside `$AWB_HOME/tasks/`, so a link cannot read any other file. The daemon listens on 127.0.0.1 only, as before.
+
+### Tests
+
+Unit tests:
+
+- `/files` path check: a file in a task folder passes; `..`, a symlink out of the folder, and a path outside `AWB_HOME` fail.
+- The diff route: the diff of a branch with one commit has the changed file.
+
+Manual test (`spikes/phase7/check.sh`, games repo, local, no tokens). Frontend, so it is a list of browser actions, run by a Playwright script with a screenshot of each view:
+
+1. Make data: a stack of three. A stub task passes the gate on task 1 (with videos), and the proof of task 2 fails. Task 3 stays waiting.
+2. Open `awb ui`. The Live view shows the task sessions.
+3. Click a session. The Session view shows its events.
+4. Open Stacks. It shows task 1 and task 2 with their status. Only a waiting task has the edit form.
+5. Open the proof page of task 1. Each claim row has PASS and a video that plays (`readyState` 4 and a duration). The trace link answers 200. The spec code and the diff show.
+6. Open the proof page of the failed task. It shows FAIL, the reason and the video of the failure.
+7. Edit a waiting task in Stacks, and save. The title changes, and the stack version goes up by 1.
+
 ## Rules for the next session
 
 - Read `PROPOSAL.md` sections 3, 5 and 6 before you start.

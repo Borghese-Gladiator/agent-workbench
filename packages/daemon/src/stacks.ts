@@ -121,6 +121,7 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
       "SELECT t.* FROM tasks t JOIN stacks s ON s.id = t.stack_id WHERE s.repo = ? AND t.branch = ? ORDER BY t.status IN ('merged', 'closed'), t.created_at DESC LIMIT 1",
     ),
     addStack: db.prepare("INSERT INTO stacks (id, repo, base, version, created_at) VALUES (?, ?, ?, 1, ?)"),
+    allStacks: db.prepare("SELECT id FROM stacks ORDER BY created_at DESC, rowid DESC LIMIT ?"),
     newest: db.prepare("SELECT id FROM stacks WHERE repo = ? ORDER BY created_at DESC, rowid DESC LIMIT 1"),
     updBase: db.prepare("UPDATE tasks SET base = ? WHERE id = ?"),
     setFail: db.prepare("UPDATE tasks SET status = 'failed', fail_reason = ? WHERE id = ?"),
@@ -252,6 +253,9 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
 
     setStatus(taskId: string, status: TaskStatus) {
       q.setStatus.run(status, taskId);
+    },
+    stacks(limit = 50): Stack[] {
+      return (q.allStacks.all(limit) as { id: string }[]).map((r) => get(r.id)!);
     },
     newestStack(repo: string): Stack | undefined {
       const r = q.newest.get(repo) as { id: string } | undefined;

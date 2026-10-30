@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { randomUUID } from "node:crypto";
 import type { Store } from "./store.ts";
 import { tokenTotals } from "./usage.ts";
+import { page } from "./ui.ts";
 
 type Info = { home: string; startedAt: string };
 type Extra = (req: IncomingMessage, res: ServerResponse, url: URL, body: () => Promise<Record<string, any>>) => Promise<boolean>;
@@ -107,37 +108,4 @@ async function readJson(req: IncomingMessage): Promise<Record<string, any>> {
 function send(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
-}
-
-const esc = (s: unknown) =>
-  String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
-
-function page(home: string) {
-  return `<!doctype html><meta charset="utf-8"><title>awb sessions</title>
-<style>
-body{font:14px system-ui;margin:24px}table{border-collapse:collapse}
-td,th{padding:4px 10px;border-bottom:1px solid #ddd;text-align:left}
-.busy{color:#b45309;font-weight:600}.idle{color:#15803d}.ended{color:#888}
-#status{color:#888}
-</style>
-<h1>awb sessions</h1><p>AWB_HOME: ${esc(home)} <span id="status">connecting…</span></p>
-<table><thead><tr><th>state</th><th>repo</th><th>branch</th><th>last tool</th><th>last event</th><th>tokens in / out</th><th>started</th></tr></thead>
-<tbody id="rows"></tbody></table>
-<script>
-const rows = new Map();
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-const tok = (u) => u ? (u.input + u.cache_read + u.cache_creation) + " / " + u.output : "";
-function render() {
-  const list = [...rows.values()].sort((a, b) => b.started_at.localeCompare(a.started_at));
-  document.getElementById("rows").innerHTML = list.map((s) =>
-    "<tr data-id='" + esc(s.id) + "'><td class='" + s.state + "'>" + s.state + "</td><td>" + esc(s.repo) + "</td><td>" + esc(s.branch) +
-    "</td><td>" + esc(s.last_tool) + "</td><td>" + esc(s.last_hook) + " " + esc(s.last_event_at) + "</td><td>" + tok(s.usage) +
-    "</td><td>" + esc(s.started_at) + "</td></tr>").join("");
-}
-const es = new EventSource("/api/feed");
-es.addEventListener("snapshot", (e) => { rows.clear(); for (const s of JSON.parse(e.data)) rows.set(s.id, s); render(); });
-es.addEventListener("session", (e) => { const s = JSON.parse(e.data); rows.set(s.id, s); render(); });
-es.onopen = () => document.getElementById("status").textContent = "live";
-es.onerror = () => document.getElementById("status").textContent = "disconnected, retrying…";
-</script>`;
 }

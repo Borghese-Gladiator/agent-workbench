@@ -1,10 +1,39 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { join } from "node:path";
+import { extname, join, sep } from "node:path";
 import { parseSince, StackError, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
 import { prove, run, type ProveDeps } from "./prove.ts";
 import { ship, ShipRefused, syncStatus } from "./ship.ts";
 import type { createRunner } from "./runner.ts";
+
+export function proofFile(home: string, path: string): string | null {
+  try {
+    const root = realpathSync(join(home, "tasks")) + sep;
+    const real = realpathSync(path);
+    return real.startsWith(root) && statSync(real).isFile() ? real : null;
+  } catch {
+    return null;
+  }
+}
+
+export function branchDiff(repo: string, base: string, branch: string): string {
+  const ref = (r: string) => {
+    for (const c of [r, `origin/${r}`]) {
+      try {
+        execFileSync("git", ["rev-parse", "--verify", "-q", c], { cwd: repo, stdio: "ignore" });
+        return c;
+      } catch {}
+    }
+    return null;
+  };
+  const b = ref(base);
+  const h = ref(branch);
+  if (!b || !h) return "";
+  return execFileSync("git", ["diff", `${b}...${h}`], { cwd: repo, encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
+}
+
+const TYPES: Record<string, string> = { ".webm": "video/webm", ".zip": "application/zip", ".png": "image/png", ".json": "application/json" };
 
 export function costOf(transcript: string): number {
   let cost = 0;
@@ -25,6 +54,7 @@ export function taskRoutes(
   proveDeps: Omit<ProveDeps, "log">,
   runner: ReturnType<typeof createRunner>,
   usageOf: (sessionId: string) => unknown = () => null,
+  home = "",
 ) {
   const proving = new Set<string>();
 
@@ -44,7 +74,11 @@ export function taskRoutes(
       ...(existsSync(join(t.folder, "proof", "writer.jsonl")) ? [join(t.folder, "proof", "writer.jsonl")] : []),
     ];
     const attempts = stacks.history(t.id).map((a: any) => ({ ...a, usage: a.session_id ? usageOf(a.session_id) : null }));
-    return { ...t, stack: stacks.get(t.stack_id), attempts, transcripts, cost_usd: transcripts.reduce((n, f) => n + costOf(f), 0) };
+    const tests = join(t.folder, "proof-tests");
+    const specs = existsSync(tests)
+      ? readdirSync(tests).filter((f) => /\.spec\.(ts|js)$/.test(f) && f !== "seed.spec.ts").sort().map((name) => ({ name, text: readFileSync(join(tests, name), "utf8") }))
+      : [];
+    return { ...t, stack: stacks.get(t.stack_id), attempts, transcripts, specs, cost_usd: transcripts.reduce((n, f) => n + costOf(f), 0) };
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse, url: URL, body: () => Promise<Json>): Promise<boolean> {
@@ -130,6 +164,28 @@ export function taskRoutes(
       const stack = b.stackId ? stacks.get(b.stackId) : stacks.newestStack(b.repo ?? "");
       if (!stack) return send(404, { error: "no stack for this repo; run awb stack set first" }), true;
       return send(202, runner.start(stack.id)), true;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/stacks") {
+      return send(200, stacks.stacks()), true;
+    }
+
+    if (req.method === "GET" && url.pathname === "/files") {
+      const f = proofFile(home, url.searchParams.get("path") ?? "");
+      if (!f) return send(404, { error: "no such proof file" }), true;
+      res.writeHead(200, { "content-type": TYPES[extname(f)] ?? "application/octet-stream", "content-length": statSync(f).size });
+      createReadStream(f).pipe(res);
+      return true;
+    }
+
+    const diffMatch = url.pathname.match(/^\/api\/tasks\/([\w-]+)\/diff$/);
+    if (req.method === "GET" && diffMatch) {
+      const t = stacks.find(diffMatch[1]);
+      if (!t) return send(404, { error: `no task ${diffMatch[1]}` }), true;
+      const repo = stacks.get(t.stack_id)!.repo;
+      res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+      res.end(t.branch && t.base ? branchDiff(repo, t.base, t.branch) : "");
+      return true;
     }
 
     if (req.method === "GET" && url.pathname === "/api/tasks") {
