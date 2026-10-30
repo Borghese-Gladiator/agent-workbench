@@ -13,7 +13,10 @@ export function awbSettings(home: string, hookBin = HOOK_BIN) {
   return {
     env: { AWB_HOME: home },
     permissions: {
-      deny: ["Bash(gh pr create:*)", ...["Edit", "Write"].map((t) => `${t}(/${home}/**)`)],
+      deny: [
+        "Bash(gh pr create:*)",
+        ...["awb.db*", "daemon.json", "tasks/**"].map((p) => `Edit(/${home}/${p})`),
+      ],
     },
     hooks: Object.fromEntries(
       HOOK_EVENTS.map((e) => [e, entry(e === "PreToolUse" || e === "PostToolUse" ? "*" : undefined)]),

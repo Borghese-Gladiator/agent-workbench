@@ -23,6 +23,16 @@ export function taskPrompt(task: Task, below: Task[]): string {
   ].join("\n");
 }
 
+export function failReason(stacks: Stacks, taskId: string): string {
+  const gate = stacks.history(taskId).flatMap((a) => a.gates).at(-1);
+  if (!gate) return "the session ended without a PR and never ran awb prove";
+  if (!gate.pass) {
+    const failed = gate.result.rows.filter((r: any) => r.status === "FAIL").map((r: any) => `${r.id} ${r.reasons.join(", ")}`);
+    return `the gate failed at ${gate.commit_sha.slice(0, 10)}: ${failed.join("; ")}`;
+  }
+  return "the gate passed, but the session ended without awb ship";
+}
+
 export async function runStack(stacks: Stacks, stackId: string, session: Session, state: RunState): Promise<RunState> {
   for (;;) {
     const stack = stacks.get(stackId);
@@ -41,8 +51,9 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
     }
     const after = stacks.task(task.id)!;
     if (after.status !== "done") {
-      stacks.setStatus(task.id, "failed");
-      return Object.assign(state, { state: "stopped", reason: state.reason ?? `task ${task.id} ended without a PR` });
+      const reason = state.reason ?? failReason(stacks, task.id);
+      stacks.fail(task.id, reason);
+      return Object.assign(state, { state: "stopped", reason });
     }
   }
 }

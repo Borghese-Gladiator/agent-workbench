@@ -44,6 +44,21 @@ One session has a limit. If the feature needs more than about one session of wor
 4. Run `awb run`. It returns at once. A fresh session does each task in its own worktree. Each task branches from the task below, so the PRs stack.
 5. If a task fails, the stack stops. Run `awb show` in that task's worktree, or read the reason from `awb run`. To try again, run `awb retry <task id>`.
 
+## Questions about tasks
+
+The daemon keeps every task, attempt and gate result. Answer from it, not from memory. Run the command, then answer in a few lines.
+
+| The user asks | Run |
+| --- | --- |
+| What did you do today? What is open? | `awb tasks --since 1d --json` |
+| What failed (this week)? | `awb tasks --status failed --since 7d --json`, then `awb show <id> --json` for each one |
+| Why did a task fail? | `awb show <id> --json`: the failure reason, the gate rows of each attempt, the cost and the transcripts |
+| Which PRs are still open? | `awb tasks --status done --json` (a merged PR shows as `merged`) |
+| Retry it. | `awb retry <id>` |
+| Drop these tasks. | `awb task rm <id...>` (waiting tasks only) |
+
+A task id prefix of 8 characters, as `awb tasks` prints it, works in every command.
+
 ## Rules
 
 - Your own message is never proof. Only the claim table from `awb prove` is.

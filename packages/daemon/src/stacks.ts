@@ -16,7 +16,20 @@ export type Task = {
   folder: string;
   pr_number: number | null;
   pr_url: string | null;
+  fail_reason: string | null;
 };
+
+export type TaskRow = Task & { repo: string; created_at: string; failed_claims: string[]; last_gate_at: string | null };
+
+export type TaskFilter = { repo?: string; status?: TaskStatus[]; since?: string };
+
+export function parseSince(v: string, now = Date.now()): string {
+  const m = v.match(/^(\d+)([dhm])$/);
+  if (m) return new Date(now - Number(m[1]) * { d: 86_400_000, h: 3_600_000, m: 60_000 }[m[2] as "d" | "h" | "m"]).toISOString();
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) throw new StackError(`bad --since ${v}: use 7d, 12h, 30m or a date`, 400);
+  return d.toISOString();
+}
 
 export type Stack = { id: string; repo: string; base: string | null; version: number; created_at: string; tasks: Task[] };
 
@@ -74,6 +87,7 @@ export function migrateStacks(db: DatabaseSync) {
   if (!cols.includes("pr_number")) db.exec("ALTER TABLE tasks ADD COLUMN pr_number INTEGER; ALTER TABLE tasks ADD COLUMN pr_url TEXT;");
   const stackCols = (db.prepare("PRAGMA table_info(stacks)").all() as { name: string }[]).map((c) => c.name);
   if (!stackCols.includes("base")) db.exec("ALTER TABLE stacks ADD COLUMN base TEXT;");
+  if (!cols.includes("fail_reason")) db.exec("ALTER TABLE tasks ADD COLUMN fail_reason TEXT;");
 }
 
 export function taskBranch(title: string, id: string): string {
@@ -109,6 +123,15 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     addStack: db.prepare("INSERT INTO stacks (id, repo, base, version, created_at) VALUES (?, ?, ?, 1, ?)"),
     newest: db.prepare("SELECT id FROM stacks WHERE repo = ? ORDER BY created_at DESC, rowid DESC LIMIT 1"),
     updBase: db.prepare("UPDATE tasks SET base = ? WHERE id = ?"),
+    setFail: db.prepare("UPDATE tasks SET status = 'failed', fail_reason = ? WHERE id = ?"),
+    clearFail: db.prepare("UPDATE tasks SET status = 'waiting', fail_reason = NULL WHERE id = ?"),
+    byPrefix: db.prepare("SELECT * FROM tasks WHERE id LIKE ? || '%' LIMIT 2"),
+    all: db.prepare(
+      "SELECT t.*, s.repo FROM tasks t JOIN stacks s ON s.id = t.stack_id WHERE t.created_at >= ? ORDER BY t.created_at DESC, t.position DESC",
+    ),
+    lastGate: db.prepare(
+      "SELECT g.result, g.at FROM gate_results g JOIN attempts a ON a.id = g.attempt_id WHERE a.task_id = ? ORDER BY g.id DESC LIMIT 1",
+    ),
     bump: db.prepare("UPDATE stacks SET version = version + 1 WHERE id = ?"),
     addTask: db.prepare(
       "INSERT INTO tasks (id, stack_id, position, title, claims, status, branch, base, folder, created_at) VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?)",
@@ -140,6 +163,18 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
       db.exec("ROLLBACK");
       throw err;
     }
+  };
+
+  const rebase = (stackId: string, fallback?: string) => {
+    const stack = get(stackId)!;
+    let base = stack.base ?? fallback ?? stack.tasks[0]?.base ?? null;
+    stack.tasks.forEach((t, position) => {
+      if (t.status === "waiting" && (t.base !== base || t.position !== position)) {
+        q.updBase.run(base, t.id);
+        q.updTask.run(position, t.title, JSON.stringify(t.claims), t.id);
+      }
+      base = t.branch;
+    });
   };
 
   return {
@@ -208,12 +243,7 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
           if (moved) changes.moved.push(old.id);
           if (edited || moved) q.updTask.run(position, t.title, JSON.stringify(t.claims), old.id);
         });
-        const after = get(current.id)!;
-        let base = current.base ?? input.base;
-        for (const t of after.tasks) {
-          if (t.status === "waiting" && t.base !== base) q.updBase.run(base, t.id);
-          base = t.branch!;
-        }
+        rebase(current.id, input.base);
         const any = changes.added.length + changes.removed.length + changes.changed.length + changes.moved.length;
         if (any) q.bump.run(current.id);
         return { stack: get(current.id)!, changes };
@@ -226,6 +256,47 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     newestStack(repo: string): Stack | undefined {
       const r = q.newest.get(repo) as { id: string } | undefined;
       return r && get(r.id);
+    },
+    find(idOrPrefix: string): Task | undefined {
+      if (idOrPrefix.length < 6) throw new StackError("a task id prefix needs 6 or more characters", 400);
+      const rows = q.byPrefix.all(idOrPrefix) as any[];
+      if (rows.length > 1) throw new StackError(`task id prefix ${idOrPrefix} matches more than one task`, 400);
+      return rows[0] ? row(rows[0]) : undefined;
+    },
+    list(f: TaskFilter = {}): TaskRow[] {
+      return (q.all.all(f.since ?? "") as any[])
+        .map((r) => {
+          const t = row(r) as TaskRow;
+          const g = q.lastGate.get(t.id) as { result: string; at: string } | undefined;
+          const result = g && (JSON.parse(g.result) as GateResult);
+          t.failed_claims = result ? result.rows.filter((x) => x.status === "FAIL").map((x) => x.id) : [];
+          t.last_gate_at = g?.at ?? null;
+          return t;
+        })
+        .filter((t) => (!f.repo || t.repo === f.repo) && (!f.status?.length || f.status.includes(t.status)));
+    },
+    remove(ids: string[]): string[] {
+      return tx(() => {
+        const tasks = ids.map((id) => {
+          const t = this.find(id);
+          if (!t) throw new StackError(`no task ${id}`, 404);
+          if (t.status !== "waiting") throw new StackError(`task ${t.id} is ${t.status}; only waiting tasks can be removed`);
+          return t;
+        });
+        const stacksTouched = new Set(tasks.map((t) => t.stack_id));
+        for (const t of tasks) q.delTask.run(t.id);
+        for (const id of stacksTouched) {
+          q.bump.run(id);
+          rebase(id);
+        }
+        return tasks.map((t) => t.id);
+      });
+    },
+    fail(taskId: string, reason: string) {
+      q.setFail.run(reason, taskId);
+    },
+    retry(taskId: string) {
+      q.clearFail.run(taskId);
     },
     setPr(taskId: string, number: number, url: string) {
       q.setPr.run(number, url, taskId);

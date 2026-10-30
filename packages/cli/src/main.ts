@@ -44,7 +44,18 @@ switch (cmd) {
     process.exitCode = await retryCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"));
     break;
   case "show":
-    process.exitCode = await showCmd(rest.includes("--json"));
+    process.exitCode = await showCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"));
+    break;
+  case "tasks":
+    process.exitCode = await tasksCmd(rest);
+    break;
+  case "task":
+    if (rest[0] !== "rm" || rest.length < 2) {
+      console.error("usage: awb task rm <id...>");
+      process.exitCode = 2;
+      break;
+    }
+    process.exitCode = await taskRm(rest.slice(1).filter((a) => !a.startsWith("-")), rest.includes("--json"));
     break;
   case "sessions": {
     const d = await ensureDaemon(home);
@@ -211,20 +222,64 @@ async function retryCmd(taskId: string | undefined, json: boolean): Promise<numb
   }
 }
 
-async function showCmd(json: boolean): Promise<number> {
-  const git = here();
-  if (!git) return 1;
+async function showCmd(taskId: string | undefined, json: boolean): Promise<number> {
   const d = await ensureDaemon(home);
   try {
-    const t = await api(d, `/api/task?repo=${encodeURIComponent(git.repo)}&branch=${encodeURIComponent(git.branch)}`);
+    let t;
+    if (taskId) t = await api(d, `/api/tasks/${encodeURIComponent(taskId)}`);
+    else {
+      const git = here();
+      if (!git) return 1;
+      t = await api(d, `/api/task?repo=${encodeURIComponent(git.repo)}&branch=${encodeURIComponent(git.branch)}`);
+    }
     if (json) return console.log(JSON.stringify(t, null, 2)), 0;
     console.log(`task ${t.id}  ${t.status}  ${t.branch}\n  ${t.title}\n  folder: ${t.folder}`);
     if (t.pr_url) console.log(`  PR: ${t.pr_url}`);
+    if (t.fail_reason) console.log(`  failed: ${t.fail_reason}`);
+    console.log(`  cost: ${t.cost_usd.toFixed(2)} USD`);
     for (const c of t.claims) console.log(`  ${c.id}: ${c.text}`);
     for (const a of t.attempts) {
       console.log(`attempt ${a.id}  ${a.started_at}${a.ended_at ? "" : "  (running)"}`);
-      for (const g of a.gates) console.log(`  gate ${g.pass ? "PASS" : "FAIL"} at ${g.commit_sha.slice(0, 10)}: ${g.result.rows.map((r: any) => `${r.id}=${r.status}`).join(" ")}`);
+      for (const g of a.gates) {
+        console.log(`  gate ${g.pass ? "PASS" : "FAIL"} at ${g.commit_sha.slice(0, 10)}`);
+        for (const r of g.result.rows) console.log(`    ${r.id} ${r.status}${r.reasons.length ? "  " + r.reasons.join(", ") : ""}`);
+      }
     }
+    for (const f of t.transcripts) console.log(`transcript: ${f}`);
+    return 0;
+  } catch (err) {
+    console.error(`awb: ${(err as Error).message}`);
+    return 1;
+  }
+}
+
+async function tasksCmd(args: string[]): Promise<number> {
+  const q = new URLSearchParams();
+  for (const k of ["repo", "status", "since"]) {
+    const i = args.indexOf(`--${k}`);
+    if (i >= 0 && args[i + 1]) q.set(k, args[i + 1]);
+  }
+  const d = await ensureDaemon(home);
+  try {
+    const rows = await api(d, `/api/tasks?${q}`);
+    if (args.includes("--json")) return console.log(JSON.stringify(rows, null, 2)), 0;
+    if (!rows.length) console.log("no tasks");
+    for (const t of rows) {
+      const extra = t.pr_url ?? (t.failed_claims.length ? `failed: ${t.failed_claims.join(",")}` : "");
+      console.log(`${t.id.slice(0, 8)}  ${t.status.padEnd(7)} ${t.created_at.slice(0, 16)}  ${t.title}  (${t.repo.split("/").at(-1)} ${t.branch})  ${extra}`);
+    }
+    return 0;
+  } catch (err) {
+    console.error(`awb: ${(err as Error).message}`);
+    return 1;
+  }
+}
+
+async function taskRm(ids: string[], json: boolean): Promise<number> {
+  const d = await ensureDaemon(home);
+  try {
+    const r = await api(d, "/api/tasks/rm", { ids });
+    console.log(json ? JSON.stringify(r, null, 2) : `removed: ${r.removed.join(", ")}`);
     return 0;
   } catch (err) {
     console.error(`awb: ${(err as Error).message}`);

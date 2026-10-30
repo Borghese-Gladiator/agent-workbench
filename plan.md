@@ -209,6 +209,35 @@ The task session is a stub `claude` (`AWB_CLAUDE`). It writes a fixed page for i
 3. Remove the bug and run `awb retry`: task 2 and task 3 open their PRs.
 4. Close the PRs and delete the branches and releases.
 
+## Phase 6: `awb tasks`, `awb show`, `awb task rm`
+
+### Brief
+
+The chat can answer "what did you do today, and what failed?" from the daemon. The playbook tells the agent which `awb` command answers which question. The user types no `awb` command. Stack replace with the version check is already in phase 3.
+
+### Changes
+
+- **`awb tasks`:** lists the tasks of all repos, newest first. Filters: `--repo <path>`, `--status <status>` (more than one with commas), `--since <7d|12h|30m|ISO date>`. `--json` gives the rows. Each row has the id, status, title, repo, branch, PR URL, the failed claims of the last gate result, and the failure reason.
+- **`awb show [task]`:** with no id, the task of the current branch, as before. With an id or an id prefix of 6 or more characters, that task. It now shows the failure reason, the cost and the transcript paths (`session-*.jsonl` and `proof/writer.jsonl` in the task folder), and the PR.
+- **Failure reason:** the runner saves why a task failed (`tasks.fail_reason`), for example "the gate failed: C1 not passed" or "the session ended without a PR". A retry clears it.
+- **`awb task rm <id...>`:** removes waiting tasks, in one transaction. If one id is not waiting or not found, nothing is removed. The stack version goes up, and the bases of the waiting tasks are computed again.
+- **Playbook:** a section with the question and the command for each case in section 2.4 of the proposal.
+
+### Tests
+
+Unit tests:
+
+- `tasks` filters: status, repo, since, and the failed claims of the last gate.
+- The `--since` parser.
+- `task rm`: removes waiting tasks and computes the bases again; refuses all when one task has started.
+- The failure reason is saved by the runner, and a retry clears it.
+
+Manual test (`spikes/phase6/check.sh`, local only, real `claude`):
+
+1. Make a stack of two tasks in a scratch clone of the games repo. A stub task session plants a bug in task 1, so the gate fails task 1, and task 2 stays waiting. No GitHub.
+2. Ask `awb -p "What did you do today, and what failed?"` with the real `claude`. No `awb` command is typed by hand.
+3. The answer names the failed task, claim C1 and the reason. The transcript shows that the agent ran `awb tasks` or `awb show`.
+
 ## Rules for the next session
 
 - Read `PROPOSAL.md` sections 3, 5 and 6 before you start.

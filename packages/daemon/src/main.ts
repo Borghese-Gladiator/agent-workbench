@@ -25,6 +25,7 @@ export async function startDaemon(home: string) {
     stacks,
     { claude: process.env.AWB_WRITER_CLAUDE || "claude", writerBudgetUsd: Number(process.env.AWB_WRITER_BUDGET_USD || 3) },
     runner,
+    (id) => store.feedRow(id)?.usage ?? null,
   );
   const server = createApp(store, { home, startedAt }, routes);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
