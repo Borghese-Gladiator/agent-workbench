@@ -41,7 +41,7 @@ export function costOf(transcript: string): number {
     if (!line.includes('"total_cost_usd"')) continue;
     try {
       const r = JSON.parse(line);
-      if (r.type === "result") cost += Number(r.total_cost_usd) || 0;
+      if (r.type === "result") cost = Number(r.total_cost_usd) || cost;
     } catch {}
   }
   return cost;
@@ -116,6 +116,9 @@ export function taskRoutes(
       if (!t) return send(404, { error: "no task on this branch; run awb stack set first" }), true;
       if (!["waiting", "doing", "failed"].includes(t.status)) return send(409, { error: `task ${t.id} is ${t.status}` }), true;
       if (proving.has(t.id)) return send(409, { error: `a proof run for task ${t.id} is already running` }), true;
+      const rewrite: string[] = Array.isArray(b.rewrite) ? b.rewrite.map(String) : [];
+      const unknown = rewrite.filter((id) => !t.claims.some((c) => c.id === id));
+      if (unknown.length) return send(400, { error: `no claim ${unknown.join(", ")} in task ${t.id}` }), true;
 
       proving.add(t.id);
       res.writeHead(200, { "content-type": "application/x-ndjson" });
@@ -123,7 +126,7 @@ export function taskRoutes(
       stacks.setStatus(t.id, "doing");
       const attempt = stacks.startAttempt(t.id, typeof b.sessionId === "string" ? b.sessionId : null);
       try {
-        const r = await prove(t, b.worktree, { ...proveDeps, log: (msg) => line({ log: msg }) });
+        const r = await prove(t, b.worktree, { ...proveDeps, log: (msg) => line({ log: msg }) }, rewrite);
         stacks.saveGate(attempt, r.gate);
         line({ result: { pass: r.gate.pass, table: r.table, rows: r.gate.rows, folder: r.folder, taskId: t.id } });
       } catch (err) {
@@ -164,6 +167,10 @@ export function taskRoutes(
       const stack = b.stackId ? stacks.get(b.stackId) : stacks.newestStack(b.repo ?? "");
       if (!stack) return send(404, { error: "no stack for this repo; run awb stack set first" }), true;
       return send(202, runner.start(stack.id)), true;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/session-tasks") {
+      return send(200, stacks.sessionTasks()), true;
     }
 
     if (req.method === "GET" && url.pathname === "/api/stacks") {

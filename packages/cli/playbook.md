@@ -27,6 +27,7 @@ You work inside Agent Workbench (`awb`). The workbench tracks this session and p
 6. Commit. `awb prove` refuses uncommitted changes.
 7. Run `awb prove`. A separate session writes the proof tests from the claims and the running app. Then the gate runs them. The command prints a claim table.
 8. If a claim fails, fix the code, commit, and run `awb prove` again. Do not edit the proof tests. They are not yours, and the gate refuses a test that changed during a run.
+   If the video and the trace show that the test itself is wrong (it checks something that the claim does not say), run `awb prove --rewrite C1` (a comma list of claim ids). This deletes those tests, and the test writer writes them again. Do not use it to get past a real bug in your code.
 9. When every claim passes, run `awb ship`. It runs the gate again, pushes the branch, uploads the videos and opens a draft PR. Report the PR URL and the claim table.
 
 ## For a big feature
@@ -41,8 +42,8 @@ One session has a limit. If the feature needs more than about one session of wor
    EOF
    ```
 3. Make sure that `.awb/run.md` exists and is committed, and push the current branch. The first task starts from the current branch, and the PR of the first task targets it.
-4. Run `awb run`. It returns at once. A fresh session does each task in its own worktree. Each task branches from the task below, so the PRs stack.
-5. If a task fails, the stack stops. Run `awb show` in that task's worktree, or read the reason from `awb run`. To try again, run `awb retry <task id>`.
+4. Run `awb run --wait`. A fresh session does each task in its own worktree. Each task branches from the task below, so the PRs stack. The command returns when the run is `done` or `stopped`. Each task can take 30 minutes or more, so run it in the background. Do not write your own wait loop: a stopped stack keeps its later tasks `waiting`.
+5. If a task fails, the stack stops. Run `awb show <task id>` to read the reason. To try again, run `awb retry <task id> --wait`.
 
 ## Questions about tasks
 
@@ -54,7 +55,7 @@ The daemon keeps every task, attempt and gate result. Answer from it, not from m
 | What failed (this week)? | `awb tasks --status failed --since 7d --json`, then `awb show <id> --json` for each one |
 | Why did a task fail? | `awb show <id> --json`: the failure reason, the gate rows of each attempt, the cost and the transcripts |
 | Which PRs are still open? | `awb tasks --status done --json` (a merged PR shows as `merged`) |
-| Retry it. | `awb retry <id>` |
+| Retry it. | `awb retry <id> --wait` |
 | Drop these tasks. | `awb task rm <id...>` (waiting tasks only) |
 
 A task id prefix of 8 characters, as `awb tasks` prints it, works in every command.

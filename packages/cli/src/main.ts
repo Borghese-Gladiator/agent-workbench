@@ -6,6 +6,10 @@ import { doctor } from "./doctor.ts";
 
 const home = awbHome();
 const [cmd, ...rest] = process.argv.slice(2);
+const flag = (name: string) => {
+  const i = rest.indexOf(name);
+  return i >= 0 ? rest[i + 1] : undefined;
+};
 
 console.error(`awb: AWB_HOME=${home}`);
 
@@ -32,16 +36,16 @@ switch (cmd) {
     process.exitCode = await stackSet(rest.includes("--json"));
     break;
   case "prove":
-    process.exitCode = await proveCmd(rest.includes("--json"));
+    process.exitCode = await proveCmd(rest.includes("--json"), flag("--rewrite")?.split(",").filter(Boolean) ?? []);
     break;
   case "ship":
     process.exitCode = await shipCmd(rest.includes("--json"));
     break;
   case "run":
-    process.exitCode = await runCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"));
+    process.exitCode = await runCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"), rest.includes("--wait"));
     break;
   case "retry":
-    process.exitCode = await retryCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"));
+    process.exitCode = await retryCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"), rest.includes("--wait"));
     break;
   case "show":
     process.exitCode = await showCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"));
@@ -134,10 +138,10 @@ function defaultBranch(cwd: string): string {
   }
 }
 
-async function proveCmd(json: boolean): Promise<number> {
+async function proveCmd(json: boolean, rewrite: string[]): Promise<number> {
   const git = here();
   if (!git) return 1;
-  return streamNdjson("/api/prove", { ...git, sessionId: process.env.AWB_SESSION_ID }, (r) => {
+  return streamNdjson("/api/prove", { ...git, sessionId: process.env.AWB_SESSION_ID, rewrite }, (r) => {
     if (json) console.log(JSON.stringify(r, null, 2));
     else {
       console.log(r.table);
@@ -194,28 +198,40 @@ function printRun(r: any, json: boolean) {
   else console.log(`run ${r.id} on stack ${r.stackId}: ${r.state}${r.current ? `, task ${r.current}` : ""}${r.reason ? ` (${r.reason})` : ""}`);
 }
 
-async function runCmd(stackId: string | undefined, json: boolean): Promise<number> {
+async function waitRun(d: Awaited<ReturnType<typeof ensureDaemon>>, r: any): Promise<any> {
+  while (r.state === "running") {
+    await new Promise((ok) => setTimeout(ok, 5000));
+    r = await api(d, `/api/runs/${r.id}`);
+  }
+  return r;
+}
+
+async function runCmd(stackId: string | undefined, json: boolean, wait: boolean): Promise<number> {
   const git = here();
   if (!git) return 1;
   const d = await ensureDaemon(home);
   try {
-    printRun(await api(d, "/api/run", { repo: git.repo, stackId }), json);
-    return 0;
+    let r = await api(d, "/api/run", { repo: git.repo, stackId });
+    if (wait) r = await waitRun(d, r);
+    printRun(r, json);
+    return wait && r.state !== "done" ? 1 : 0;
   } catch (err) {
     console.error(`awb: ${(err as Error).message}`);
     return 1;
   }
 }
 
-async function retryCmd(taskId: string | undefined, json: boolean): Promise<number> {
+async function retryCmd(taskId: string | undefined, json: boolean, wait: boolean): Promise<number> {
   if (!taskId) {
     console.error("usage: awb retry <task id>");
     return 2;
   }
   const d = await ensureDaemon(home);
   try {
-    printRun(await api(d, "/api/retry", { taskId }), json);
-    return 0;
+    let r = await api(d, "/api/retry", { taskId });
+    if (wait) r = await waitRun(d, r);
+    printRun(r, json);
+    return wait && r.state !== "done" ? 1 : 0;
   } catch (err) {
     console.error(`awb: ${(err as Error).message}`);
     return 1;
@@ -256,8 +272,8 @@ async function showCmd(taskId: string | undefined, json: boolean): Promise<numbe
 async function tasksCmd(args: string[]): Promise<number> {
   const q = new URLSearchParams();
   for (const k of ["repo", "status", "since"]) {
-    const i = args.indexOf(`--${k}`);
-    if (i >= 0 && args[i + 1]) q.set(k, args[i + 1]);
+    const v = flag(`--${k}`);
+    if (v) q.set(k, v);
   }
   const d = await ensureDaemon(home);
   try {

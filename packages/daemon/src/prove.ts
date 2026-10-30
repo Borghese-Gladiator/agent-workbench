@@ -16,6 +16,7 @@ const NODE_MODULES = join(PKG, "..", "..", "node_modules");
 export type ProveDeps = {
   claude: string;
   writerBudgetUsd: number;
+  writerTimeoutMin?: number;
   log: (line: string) => void;
 };
 
@@ -50,6 +51,17 @@ export function claimsWithoutTest(claims: Claim[], dir: string): Claim[] {
     ? readdirSync(dir).filter((f) => /\.spec\.(ts|js)$/.test(f)).map((f) => readFileSync(join(dir, f), "utf8")).join("\n")
     : "";
   return claims.filter((c) => !new RegExp(`['"\`]${c.id}\\b`).test(text));
+}
+
+export function removeTests(ids: string[], dir: string): string[] {
+  if (!ids.length || !existsSync(dir)) return [];
+  const removed = readdirSync(dir).filter((f) => {
+    if (f === "seed.spec.ts" || !/\.spec\.(ts|js)$/.test(f)) return false;
+    const text = readFileSync(join(dir, f), "utf8");
+    return ids.some((id) => new RegExp(`['"\`]${id}\\b`).test(text));
+  });
+  for (const f of removed) rmSync(join(dir, f));
+  return removed;
 }
 
 const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
@@ -102,14 +114,18 @@ async function startApp(recipe: Recipe, cwd: string, log: (l: string) => void) {
   return { url, stop };
 }
 
-export function run(cmd: string, args: string[], cwd: string, input?: string): Promise<{ code: number; out: string }> {
+export function run(cmd: string, args: string[], cwd: string, input?: string, timeoutMs = 0): Promise<{ code: number; out: string }> {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
+    const timer = timeoutMs ? setTimeout(() => child.kill("SIGTERM"), timeoutMs) : null;
     let out = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (out += d));
     child.on("error", (e) => resolve({ code: 127, out: String(e) }));
-    child.on("close", (code) => resolve({ code: code ?? 1, out }));
+    child.on("close", (code) => {
+      if (timer) clearTimeout(timer);
+      resolve({ code: code ?? 1, out });
+    });
     child.stdin.end(input ?? "");
   });
 }
@@ -149,6 +165,7 @@ async function runWriter(folder: string, claims: Claim[], url: string, ready: st
     ],
     folder,
     writerPrompt(claims, url, ready),
+    (deps.writerTimeoutMin ?? 20) * 60_000,
   );
   writeFileSync(join(folder, "proof", "writer.jsonl"), r.out);
   const last = r.out.trim().split("\n").at(-1) ?? "";
@@ -178,7 +195,7 @@ export function gateFromDisk(claims: Claim[], folder: string, worktree: string):
 
 export type ProveResult = { gate: GateResult; table: string; folder: string };
 
-export async function prove(task: Task, worktree: string, deps: ProveDeps): Promise<ProveResult> {
+export async function prove(task: Task, worktree: string, deps: ProveDeps, rewrite: string[] = []): Promise<ProveResult> {
   const recipeFile = join(worktree, ".awb", "run.md");
   if (!existsSync(recipeFile)) throw new Error(`no start recipe: write ${recipeFile} with a '## start' section`);
   const recipe = parseRecipe(readFileSync(recipeFile, "utf8"));
@@ -206,6 +223,8 @@ export async function prove(task: Task, worktree: string, deps: ProveDeps): Prom
       );
     }
 
+    const removed = removeTests(rewrite, tests);
+    if (removed.length) deps.log(`removed for a rewrite: ${removed.join(", ")}`);
     const missing = claimsWithoutTest(task.claims, tests);
     if (missing.length) await runWriter(folder, missing, app.url, recipe.ready, deps);
 

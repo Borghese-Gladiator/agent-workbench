@@ -271,6 +271,43 @@ Manual test (`spikes/phase7/check.sh`, games repo, local, no tokens). Frontend, 
 6. Open the proof page of the failed task. It shows FAIL, the reason and the video of the failure.
 7. Edit a waiting task in Stacks, and save. The title changes, and the stack version goes up by 1.
 
+## Acceptance test (PROPOSAL section 6.2)
+
+### Brief
+
+Run the whole version once with the real `claude`, from a request to draft PRs, with no help. The games repo on GitHub `main` already has the scoreboard, so the single request is a new feature: an Undo button.
+
+### Changes
+
+- `spikes/acceptance/run.sh`. It changes no awb code.
+- The clone comes from GitHub. `node_modules` is copied from the local repo, which is the same as a user who already ran `npm ci`.
+- Safety: the clone gets a local `pre-push` hook that refuses a push to `main`. It also replaces the global git hooks that fail outside lefthook (phase 0 fact 7).
+- The stack request starts on a fresh branch `awb/acceptance-<ts>` that the script pushes. So the agent can commit `.awb/run.md` and push the base of the stack without a push to `main`.
+- Budgets: the chat 8 USD, each task session 5 USD, each test writer 3 USD.
+
+### Tests
+
+Manual test (`spikes/acceptance/run.sh`):
+
+1. In a clean clone, `awb -p "Add an Undo button to Tic-Tac-Toe…"`. Nothing else.
+2. Result: a draft PR with a feature table and a video for each claim.
+3. The daemon has the session of the chat with its tool events, and the session links to the task (the Live view data).
+4. Planted bug: a branch from the PR branch with the feature code reverted. `awb prove` fails, and `awb ship` refuses. No PR opens.
+5. Ask for three features as a stack. Result: three stacked draft PRs, each with its own proof.
+6. Ask with haiku: "What did you do today, and what failed?" The answer comes from `awb tasks` and lists the tasks and PRs.
+7. Leave the draft PRs open for review. Close nothing that passed.
+
+### Fixes from the first stack run
+
+The first stack run stopped at task 2. The gate refused it correctly, but the run showed two gaps:
+
+- The C1 test was wrong: it assumed that O moves first in game 2. A wrong test stayed forever, because `awb prove` writes only missing tests, and the session cannot edit `tasks/**`. Fix: `awb prove --rewrite C1` deletes the tests of those claims, so that the independent writer writes them again. The route accepts only claim ids of the task.
+- The chat waited until no task was `waiting`. A stopped stack keeps its later tasks `waiting`, so the loop ran until its 2-hour limit. Fix: `awb run --wait` and `awb retry --wait` return when the run is `done` or `stopped`. The playbook tells the agent to use them.
+- The C2 test did not exist, because the writer reached its 20-minute limit. The retry uses `AWB_WRITER_TIMEOUT_MIN=30`.
+
+Unit test: `removeTests` deletes only the specs that name a listed claim, and never the seed.
+Manual test: `awb retry <task 2> --wait` on the stopped stack. Task 2 and task 3 must ship stacked draft PRs.
+
 ## Rules for the next session
 
 - Read `PROPOSAL.md` sections 3, 5 and 6 before you start.

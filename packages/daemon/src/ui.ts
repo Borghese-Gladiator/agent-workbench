@@ -37,6 +37,7 @@ const file = (p) => "/files?path=" + encodeURIComponent(p);
 const get = async (u) => { const r = await fetch(u); if (!r.ok) throw new Error((await r.json()).error); return r.headers.get("content-type").includes("json") ? r.json() : r.text(); };
 const sessions = new Map();
 let tasks = [];
+let bySession = {};
 
 const es = new EventSource("/api/feed");
 es.addEventListener("snapshot", (e) => { sessions.clear(); for (const s of JSON.parse(e.data)) sessions.set(s.id, s); if (view() === "live") live(); });
@@ -45,7 +46,7 @@ es.onopen = () => ($("#status").textContent = "live");
 es.onerror = () => ($("#status").textContent = "disconnected, retrying…");
 
 const view = () => (location.hash.split("/")[1] || "live");
-const taskOf = (s) => tasks.find((t) => t.repo === s.repo && t.branch === s.branch);
+const taskOf = (s) => tasks.find((t) => t.id === bySession[s.id]) ?? tasks.find((t) => t.repo === s.repo && t.branch === s.branch);
 
 function live() {
   const list = [...sessions.values()].sort((a, b) => b.started_at.localeCompare(a.started_at));
@@ -123,7 +124,7 @@ async function proof(id) {
 }
 
 async function loadTasks() {
-  try { tasks = await get("/api/tasks"); } catch {}
+  try { [tasks, bySession] = await Promise.all([get("/api/tasks"), get("/api/session-tasks")]); } catch {}
 }
 
 async function route() {

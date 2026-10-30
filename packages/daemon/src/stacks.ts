@@ -127,6 +127,7 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     setFail: db.prepare("UPDATE tasks SET status = 'failed', fail_reason = ? WHERE id = ?"),
     clearFail: db.prepare("UPDATE tasks SET status = 'waiting', fail_reason = NULL WHERE id = ?"),
     byPrefix: db.prepare("SELECT * FROM tasks WHERE id LIKE ? || '%' LIMIT 2"),
+    sessionTasks: db.prepare("SELECT DISTINCT session_id, task_id FROM attempts WHERE session_id IS NOT NULL"),
     all: db.prepare(
       "SELECT t.*, s.repo FROM tasks t JOIN stacks s ON s.id = t.stack_id WHERE t.created_at >= ? ORDER BY t.created_at DESC, t.position DESC",
     ),
@@ -266,6 +267,9 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
       const rows = q.byPrefix.all(idOrPrefix) as any[];
       if (rows.length > 1) throw new StackError(`task id prefix ${idOrPrefix} matches more than one task`, 400);
       return rows[0] ? row(rows[0]) : undefined;
+    },
+    sessionTasks(): Record<string, string> {
+      return Object.fromEntries((q.sessionTasks.all() as { session_id: string; task_id: string }[]).map((r) => [r.session_id, r.task_id]));
     },
     list(f: TaskFilter = {}): TaskRow[] {
       return (q.all.all(f.since ?? "") as any[])

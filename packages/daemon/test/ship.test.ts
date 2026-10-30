@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { prBody, findSecrets, syncStatus } from "../src/ship.ts";
-import { gateFromDisk, testHash } from "../src/prove.ts";
+import { gateFromDisk, testHash, removeTests } from "../src/prove.ts";
 import type { GateResult } from "../src/gate.ts";
 
 const claims = [
@@ -111,4 +111,15 @@ test("gate from disk fails when the source is dirty", () => {
   const { repo, folder } = proofOnDisk();
   writeFileSync(join(repo, "a.txt"), "changed");
   assert.deepEqual(gateFromDisk([{ id: "C1", text: "a" }], folder, repo).reasons, ["source has uncommitted changes"]);
+});
+
+test("removeTests deletes only the specs that name a listed claim, and never the seed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "awb-rewrite-"));
+  writeFileSync(join(dir, "c1.spec.ts"), 'test("C1: x wins", () => {});');
+  writeFileSync(join(dir, "c12.spec.ts"), 'test("C12: other", () => {});');
+  writeFileSync(join(dir, "c3.spec.ts"), 'test("C3: locked", () => {});');
+  writeFileSync(join(dir, "seed.spec.ts"), 'test("seed C1", () => {});');
+  assert.deepEqual(removeTests(["C1"], dir), ["c1.spec.ts"]);
+  assert.deepEqual(readdirSync(dir).sort(), ["c12.spec.ts", "c3.spec.ts", "seed.spec.ts"]);
+  assert.deepEqual(removeTests([], dir), []);
 });

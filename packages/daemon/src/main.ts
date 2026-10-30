@@ -23,7 +23,7 @@ export async function startDaemon(home: string) {
   );
   const routes = taskRoutes(
     stacks,
-    { claude: process.env.AWB_WRITER_CLAUDE || "claude", writerBudgetUsd: Number(process.env.AWB_WRITER_BUDGET_USD || 3) },
+    { claude: process.env.AWB_WRITER_CLAUDE || "claude", writerBudgetUsd: Number(process.env.AWB_WRITER_BUDGET_USD || 3), writerTimeoutMin: Number(process.env.AWB_WRITER_TIMEOUT_MIN || 20) },
     runner,
     (id) => store.feedRow(id)?.usage ?? null,
     home,

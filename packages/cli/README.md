@@ -18,15 +18,15 @@ awb ui                           # opens the session list in the browser
 | `awb doctor` | Checks the setup and prints a fix for each problem. |
 | `awb daemon start\|stop\|status` | Controls the daemon of the active `AWB_HOME`. |
 | `awb stack set [--json]` | Reads a stack as JSON on stdin and creates or replaces it. A stack of one binds to the current branch. In a stack of many, each task gets its own branch: task 1 starts from the current branch, and each later task starts from the task below. |
-| `awb run [stack] [--json]` | Starts the runner on the stack (default: the newest stack of the repo) and returns at once. The runner makes a worktree in `AWB_HOME/worktrees/` for each task, runs the `## setup` block of `.awb/run.md` in it, and starts `awb -p` with the task prompt. If a task ends without a PR, the task is `failed` and the stack stops. |
-| `awb retry <task> [--json]` | Sets a `failed` task back to `waiting` and starts the runner. The new session uses the same worktree and branch. |
-| `awb prove [--json]` | Starts the app from `.awb/run.md`, writes the missing proof tests with a fresh test-writer session, runs them, and runs the gate. Prints the claim table. Exits 1 if the gate fails. |
+| `awb run [stack] [--wait] [--json]` | Starts the runner on the stack (default: the newest stack of the repo). Without `--wait` it returns at once. With `--wait` it returns when the run is `done` or `stopped`, and exits 1 if it is not `done`. The runner makes a worktree in `AWB_HOME/worktrees/` for each task, runs the `## setup` block of `.awb/run.md` in it, and starts `awb -p` with the task prompt. If a task ends without a PR, the task is `failed` and the stack stops. |
+| `awb retry <task> [--wait] [--json]` | Sets a `failed` task back to `waiting` and starts the runner. `--wait` works as in `awb run`. The new session uses the same worktree and branch. |
+| `awb prove [--rewrite C1,C2] [--json]` | Starts the app from `.awb/run.md`, writes the missing proof tests with a fresh test-writer session, runs them, and runs the gate. `--rewrite` first deletes the tests of those claims, so that the writer writes them again. Prints the claim table. Exits 1 if the gate fails. |
 | `awb ship [--json]` | Runs the gate again from the files on disk. If it passes, scans the specs for secrets, pushes the branch, opens a draft PR, uploads each video to the prerelease `awb-proof-<PR>`, and writes the PR body. Sets the task to `done`. Refuses when the gate fails. |
 | `awb show [task] [--json]` | Shows a task: with no id, the task of the current branch. A prefix of 6 or more characters works. Shows the claims, the failure reason, every gate row, the cost, the transcripts and the PR. |
 | `awb tasks [--repo <path>] [--status a,b] [--since 7d\|12h\|30m\|date] [--json]` | Lists the tasks of all repos, newest first, with the failed claims of the last gate. |
 | `awb task rm <id...> [--json]` | Removes waiting tasks in one transaction. If one id has started or does not exist, nothing is removed. |
 
-Limits for a task session: `AWB_TASK_BUDGET_USD` (default 5) and `AWB_TASK_TIMEOUT_MIN` (default 45). `AWB_CLAUDE` replaces `claude` in the launcher and the task sessions, and `AWB_WRITER_CLAUDE` replaces it in the test writer.
+Limits for a task session: `AWB_TASK_BUDGET_USD` (default 5) and `AWB_TASK_TIMEOUT_MIN` (default 45). Limits for the test writer: `AWB_WRITER_BUDGET_USD` (default 3) and `AWB_WRITER_TIMEOUT_MIN` (default 20). `AWB_CLAUDE` replaces `claude` in the launcher and the task sessions, and `AWB_WRITER_CLAUDE` replaces it in the test writer.
 
 `AWB_HOME` defaults to `~/.awb`. Each `AWB_HOME` has its own daemon, database and `daemon.json`. For a dev instance, use `AWB_HOME=~/.awb-dev`.
 

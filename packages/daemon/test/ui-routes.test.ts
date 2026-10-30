@@ -43,3 +43,12 @@ test("branchDiff gives the diff of the branch against its base", () => {
   assert.doesNotMatch(d, /a\.txt/);
   assert.equal(branchDiff(repo, "main", "no-such-branch"), "");
 });
+
+test("costOf takes the last running total, not the sum of the result rows", async () => {
+  const { costOf } = await import("../src/task-routes.ts");
+  const dir = tmp();
+  const f = join(dir, "w.jsonl");
+  const row = (c: number) => JSON.stringify({ type: "result", subtype: "success", total_cost_usd: c });
+  writeFileSync(f, [row(0.5), '{"type":"assistant"}', row(1.5), row(1.5)].join("\n"));
+  assert.equal(costOf(f), 1.5);
+});
