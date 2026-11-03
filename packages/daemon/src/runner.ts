@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { run } from "./prove.ts";
-import { parseSetup } from "./recipe.ts";
+import { parseSetup } from "./run-md.ts";
 import type { Stacks, Task } from "./stacks.ts";
 
 export type RunState = { id: string; stackId: string; state: "running" | "done" | "stopped"; current: string | null; reason: string | null };
@@ -69,8 +69,8 @@ export function claudeSession(opts: { home: string; repo: string; budgetUsd: num
       const base = (await run("git", ["rev-parse", "--verify", "-q", task.base!], opts.repo)).code === 0 ? task.base! : `origin/${task.base}`;
       const add = await run("git", ["worktree", "add", "-b", task.branch!, worktree, base], opts.repo);
       if (add.code !== 0) throw new Error(`git worktree add failed: ${add.out.trim()}`);
-      const recipe = join(worktree, ".awb", "run.md");
-      const setup = existsSync(recipe) ? parseSetup(readFileSync(recipe, "utf8")) : null;
+      const runMdFile = join(worktree, ".awb", "run.md");
+      const setup = existsSync(runMdFile) ? parseSetup(readFileSync(runMdFile, "utf8")) : null;
       if (setup) {
         const r = await run("sh", ["-c", setup], worktree);
         mkdirSync(task.folder, { recursive: true });

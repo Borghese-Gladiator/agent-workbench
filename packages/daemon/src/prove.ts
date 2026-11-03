@@ -5,7 +5,7 @@ import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runGate, claimTable, type Claim, type GateResult, type Report } from "./gate.ts";
-import { parseRecipe, fill, type Recipe } from "./recipe.ts";
+import { parseRunMd, fill, type RunMd } from "./run-md.ts";
 import type { Task } from "./stacks.ts";
 
 const PKG = fileURLToPath(new URL("..", import.meta.url));
@@ -89,12 +89,12 @@ async function waitReady(url: string, ms: number) {
   throw new Error(`the app did not answer at ${url} in ${ms / 1000} s`);
 }
 
-async function startApp(recipe: Recipe, cwd: string, log: (l: string) => void) {
+async function startApp(runMd: RunMd, cwd: string, log: (l: string) => void) {
   const port = await freePort();
-  const url = fill(recipe.url, port).replace(/\/$/, "");
+  const url = fill(runMd.url, port).replace(/\/$/, "");
   let child: ChildProcess | null = null;
-  if (recipe.start) {
-    const cmd = fill(recipe.start, port);
+  if (runMd.start) {
+    const cmd = fill(runMd.start, port);
     log(`app: ${cmd}`);
     child = spawn("sh", ["-c", cmd], { cwd, stdio: "ignore", detached: true });
   }
@@ -106,7 +106,7 @@ async function startApp(recipe: Recipe, cwd: string, log: (l: string) => void) {
     }
   };
   try {
-    await waitReady(url + recipe.ready, 60_000);
+    await waitReady(url + runMd.ready, 60_000);
   } catch (err) {
     stop();
     throw err;
@@ -196,9 +196,9 @@ export function gateFromDisk(claims: Claim[], folder: string, worktree: string):
 export type ProveResult = { gate: GateResult; table: string; folder: string };
 
 export async function prove(task: Task, worktree: string, deps: ProveDeps, rewrite: string[] = []): Promise<ProveResult> {
-  const recipeFile = join(worktree, ".awb", "run.md");
-  if (!existsSync(recipeFile)) throw new Error(`no start recipe: write ${recipeFile} with a '## start' section`);
-  const recipe = parseRecipe(readFileSync(recipeFile, "utf8"));
+  const runMdFile = join(worktree, ".awb", "run.md");
+  if (!existsSync(runMdFile)) throw new Error(`no run file: write ${runMdFile} with a '## start' section`);
+  const runMd = parseRunMd(readFileSync(runMdFile, "utf8"));
 
   mkdirSync(task.folder, { recursive: true });
   const folder = realpathSync(task.folder);
@@ -212,21 +212,21 @@ export async function prove(task: Task, worktree: string, deps: ProveDeps, rewri
   const head = git(worktree, "rev-parse", "HEAD");
   writeFileSync(join(proof, "sha.txt"), head + "\n");
 
-  const app = await startApp(recipe, worktree, deps.log);
+  const app = await startApp(runMd, worktree, deps.log);
   try {
     writeFileSync(join(folder, "claims.md"), claimsMarkdown(task, app.url));
     writeFileSync(join(folder, "playwright.config.ts"), proofConfig(app.url));
     if (!existsSync(join(tests, "seed.spec.ts"))) {
       writeFileSync(
         join(tests, "seed.spec.ts"),
-        `import { test } from "@playwright/test";\ntest("seed", async ({ page }) => {\n  await page.goto(${JSON.stringify(recipe.ready)});\n});\n`,
+        `import { test } from "@playwright/test";\ntest("seed", async ({ page }) => {\n  await page.goto(${JSON.stringify(runMd.ready)});\n});\n`,
       );
     }
 
     const removed = removeTests(rewrite, tests);
     if (removed.length) deps.log(`removed for a rewrite: ${removed.join(", ")}`);
     const missing = claimsWithoutTest(task.claims, tests);
-    if (missing.length) await runWriter(folder, missing, app.url, recipe.ready, deps);
+    if (missing.length) await runWriter(folder, missing, app.url, runMd.ready, deps);
 
     writeFileSync(join(proof, "test-hash.txt"), testHash(tests) + "\n");
     deps.log("proof run: playwright test");

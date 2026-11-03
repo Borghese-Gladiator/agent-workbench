@@ -1,11 +1,11 @@
-export type Recipe = { start: string | null; url: string; ready: string };
+export type RunMd = { start: string | null; url: string; ready: string };
 
 export function parseSetup(text: string): string | null {
   const section = text.match(/^##\s+setup\s*$([\s\S]*?)(?=^##\s|(?![\s\S]))/im)?.[1];
   return section?.match(/```(?:sh|bash|shell)?\n([\s\S]*?)```/)?.[1].trim() || null;
 }
 
-export function parseRecipe(text: string): Recipe {
+export function parseRunMd(text: string): RunMd {
   const section = text.match(/^##\s+start\s*$([\s\S]*?)(?=^##\s|(?![\s\S]))/im)?.[1];
   if (!section) throw new Error("run.md has no '## start' section");
   const start = section.match(/```(?:sh|bash|shell)?\n([\s\S]*?)```/)?.[1].trim() || null;

@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpat
 import { join } from "node:path";
 import { claimTable, type GateResult } from "./gate.ts";
 import { gateFromDisk, run } from "./prove.ts";
-import { parseRecipe } from "./recipe.ts";
+import { parseRunMd } from "./run-md.ts";
 import type { Task, TaskStatus } from "./stacks.ts";
 
 const SECRETS: [string, RegExp][] = [
@@ -141,14 +141,14 @@ export async function ship(task: Task, worktree: string, log: (l: string) => voi
     .filter((f) => /\.spec\.(ts|js)$/.test(f) && f !== "seed.spec.ts")
     .sort()
     .map((name) => ({ name, text: readFileSync(join(tests, name), "utf8") }));
-  const recipe = parseRecipe(readFileSync(join(worktree, ".awb", "run.md"), "utf8"));
+  const runMd = parseRunMd(readFileSync(join(worktree, ".awb", "run.md"), "utf8"));
   await run("git", ["fetch", "-q", "origin", `+refs/heads/${task.base}:refs/remotes/origin/${task.base}`], worktree);
   const commits = execFileSync("git", ["log", "--format=%h %s", `origin/${task.base}..HEAD`], { cwd: worktree, encoding: "utf8" })
     .trim()
     .split("\n")
     .filter(Boolean);
   const body = (videoUrls: Record<string, string[]>) =>
-    prBody({ title: task.title, commits, claims: task.claims, gate, videoUrls, start: recipe.start ?? recipe.url, folder, specs });
+    prBody({ title: task.title, commits, claims: task.claims, gate, videoUrls, start: runMd.start ?? runMd.url, folder, specs });
 
   const secrets = findSecrets([...specs, { name: "the PR body", text: body({}) }]);
   if (secrets.length) throw new ShipRefused(`secret scan: ${secrets.join("; ")}`, table);
