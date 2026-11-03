@@ -24,6 +24,13 @@ v6 is a proof of concept. The acceptance test passes (`e2e/acceptance.sh`), but 
 The first task makes the rest possible. Today the gate proves claims only with Playwright tests in a browser, and most of awb has no browser.
 
 - [ ] **Claims proven by repo tests (first, and do it by hand).** A claim can say `"proof": "test"`. The writer then writes a unit test in the repo (for this repo: `node --test`), not a Playwright test. The gate runs it from a command in `.awb/run.md` (`## test`) and reads the result per claim. The same rules hold: the agent does not write the test, and the gate refuses a test that changed during the run.
+- [ ] **A run file for a repo that cannot hold awb files.** A team repo (for example, every repo in `~/Klaviyo/Repos`) must not get `.awb/run.md`. Keep the file as the first choice, because it changes with the branch. If the worktree has no file, use a copy that the daemon keeps.
+  - Add a `run_md TEXT` column and an `env_file TEXT` column to `repos`.
+  - `awb repo set [--env-file <path>]` reads a run file on stdin, in the same format as `.awb/run.md`, and saves it for the current repo. `awb repo show` prints the run file that a run uses, and its source (`file` or `daemon`).
+  - One function reads the run file: the worktree file first, then `repos.run_md`. `prove.ts`, `ship.ts` and `runner.ts` call it, and do not read `.awb/run.md` themselves.
+  - When the runner makes a worktree, it copies `env_file` into it before `## setup`. The file stays outside the repo, so its secrets are not committed.
+  - Playbook step 4: if the repo is not yours, run `awb repo set`. Do not write `.awb/run.md`. To find out, check if the repo root is in `AWB_TEAM_ROOTS` (default `~/Klaviyo/Repos`).
+  - Done when `awb prove` and `awb run` work in a team repo, and `git status` in it shows no awb file.
 - [ ] **Run awb on awb.** Add `.awb/run.md` to this repo: `## setup` runs `npm ci`, `## test` runs `npm test`, and `## start` starts a daemon with its own `AWB_HOME` on `{port}`, so that the UI claims also work. Then do each item below as an awb task in this repo. Each task gets its own worktree, so a change cannot break the daemon that runs it.
 - [ ] **Concurrent stacks.** The runner runs one stack at a time. Allow N stacks (default 2) in parallel, and never more than 5 (the v5 lesson: 10 at a time overloaded the host).
 - [ ] **Linux.** `cp -c` in the setup recipes and the `open` call are macOS only.
