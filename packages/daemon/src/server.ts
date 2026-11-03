@@ -3,8 +3,9 @@ import { randomUUID } from "node:crypto";
 import type { Store } from "./store.ts";
 import { tokenTotals } from "./usage.ts";
 import { page } from "./ui.ts";
+import type { Log } from "./log.ts";
 
-type Info = { home: string; startedAt: string };
+type Info = { home: string; startedAt: string; log?: Log };
 type Extra = (req: IncomingMessage, res: ServerResponse, url: URL, body: () => Promise<Record<string, any>>) => Promise<boolean>;
 
 export function createApp(store: Store, info: Info, extra?: Extra) {
@@ -22,6 +23,7 @@ export function createApp(store: Store, info: Info, extra?: Extra) {
       if (extra && (await extra(req, res, url, () => readJson(req)))) return;
       await route(req, res, store, info, clients, broadcast);
     } catch (err) {
+      info.log?.("error", "http", "error", { method: req.method, path: req.url?.split("?")[0], error: err });
       if (res.headersSent) res.end();
       else send(res, 400, { error: (err as Error).message });
     }
@@ -80,7 +82,9 @@ async function route(
     if ((ev.hook === "Stop" || ev.hook === "SessionEnd") && typeof payload?.transcript_path === "string") {
       try {
         store.setUsage(awb_session_id, tokenTotals(payload.transcript_path));
-      } catch {}
+      } catch (err) {
+        info.log?.("warn", "usage", "error", { session: awb_session_id, error: err });
+      }
     }
     broadcast(awb_session_id);
     return send(res, 201, { id: ev.id });

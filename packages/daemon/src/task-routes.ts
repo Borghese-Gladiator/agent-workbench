@@ -2,7 +2,8 @@ import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, 
 import { execFileSync } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, sep } from "node:path";
-import { parseSince, StackError, taskLog, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
+import { parseSince, StackError, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
+import { readLog, type Log } from "./log.ts";
 import { prove, run, type ProveDeps } from "./prove.ts";
 import { costReport, costText } from "./cost.ts";
 import type { DatabaseSync } from "node:sqlite";
@@ -58,15 +59,23 @@ export function taskRoutes(
   usageOf: (sessionId: string) => unknown = () => null,
   home = "",
   db?: DatabaseSync,
+  log: Log = () => {},
+  logDir = "",
 ) {
   const proving = new Set<string>();
 
   async function syncPrs() {
     for (const t of stacks.shipped()) {
       const r = await run("gh", ["pr", "view", String(t.pr_number), "--json", "state"], t.repo);
-      if (r.code !== 0) continue;
+      if (r.code !== 0) {
+        log("warn", "sync", "pr.error", { task: t.id, pr: t.pr_number, repo: t.repo, error: r.out.trim().slice(0, 500) });
+        continue;
+      }
       const next = syncStatus(JSON.parse(r.out).state);
-      if (next) stacks.setStatus(t.id, next);
+      if (next) {
+        stacks.setStatus(t.id, next);
+        log("info", "sync", "pr.state", { task: t.id, pr: t.pr_number, state: next });
+      }
     }
   }
 
@@ -84,11 +93,10 @@ export function taskRoutes(
     const sessionUsd = transcripts.filter((f) => !f.endsWith("writer.jsonl")).reduce((n, f) => n + costOf(f), 0);
     const saved = attempts.map((a: any) => a.writer_usd).filter((v: unknown): v is number => typeof v === "number");
     const writerUsd = saved.length ? saved.reduce((n: number, v: number) => n + v, 0) : transcripts.filter((f) => f.endsWith("writer.jsonl")).reduce((n, f) => n + costOf(f), 0);
-    const logFile = join(t.folder, "events.log");
-    const log = existsSync(logFile) ? readFileSync(logFile, "utf8").split("\n").filter(Boolean).slice(-200) : [];
+    const lines = logDir ? readLog(logDir, { task: t.id, limit: 200 }) : [];
     const writerEndFile = join(t.folder, "proof", "writer-end.txt");
     const writer_end = existsSync(writerEndFile) ? readFileSync(writerEndFile, "utf8").trim() : null;
-    return { ...t, stack: stacks.get(t.stack_id), attempts, transcripts, specs, log, writer_end, cost_usd: sessionUsd + writerUsd, writer_usd: writerUsd };
+    return { ...t, stack: stacks.get(t.stack_id), attempts, transcripts, specs, log: lines, writer_end, cost_usd: sessionUsd + writerUsd, writer_usd: writerUsd };
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse, url: URL, body: () => Promise<Json>): Promise<boolean> {
@@ -137,17 +145,19 @@ export function taskRoutes(
       const ownedByRun = runner.owns(t.id);
       stacks.setStatus(t.id, "doing");
       const attempt = stacks.startAttempt(t.id, typeof b.sessionId === "string" ? b.sessionId : null);
-      taskLog(t.folder, `prove started${rewrite.length ? `, rewrite ${rewrite.join(",")}` : ""}`);
+      const ids = { task: t.id, attempt, session: typeof b.sessionId === "string" ? b.sessionId : undefined };
+      log("info", "prove", "start", { ...ids, rewrite: rewrite.length ? rewrite : undefined });
       let after: TaskStatus = before === "failed" ? "failed" : "waiting";
       try {
-        const r = await prove(t, b.worktree, { ...proveDeps, log: (msg) => (line({ log: msg }), taskLog(t.folder, msg)) }, rewrite);
+        const r = await prove(t, b.worktree, { ...proveDeps, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite);
         stacks.saveGate(attempt, r.gate);
         if (r.writer?.usd != null) stacks.setWriterCost(attempt, r.writer.usd);
-        taskLog(t.folder, `gate ${r.gate.pass ? "PASS" : "FAIL"} at ${r.gate.head.slice(0, 10)}`);
+        const failed = r.gate.rows.filter((x) => x.status === "FAIL").map((x) => `${x.id}: ${x.reasons.join(", ")}`);
+        log(r.gate.pass ? "info" : "warn", "prove", "gate", { ...ids, pass: r.gate.pass, sha: r.gate.head, failed: failed.length ? failed : undefined, writer: r.writer?.end, writer_usd: r.writer?.usd });
         after = r.gate.pass ? "waiting" : after;
         line({ result: { pass: r.gate.pass, table: r.table, rows: r.gate.rows, folder: r.folder, taskId: t.id, writer: r.writer } });
       } catch (err) {
-        taskLog(t.folder, `prove error: ${(err as Error).message}`);
+        log("error", "prove", "error", { ...ids, error: err });
         line({ error: (err as Error).message });
       } finally {
         stacks.endAttempt(attempt);
@@ -169,12 +179,13 @@ export function taskRoutes(
       res.writeHead(200, { "content-type": "application/x-ndjson" });
       const line = (o: Json) => res.write(JSON.stringify(o) + "\n");
       try {
-        const r = await ship(t, b.worktree, (msg) => (line({ log: msg }), taskLog(t.folder, `ship: ${msg}`)));
+        log("info", "ship", "start", { task: t.id, branch: t.branch });
+        const r = await ship(t, b.worktree, (msg) => (line({ log: msg }), log("info", "ship", "step", { task: t.id, msg })));
         stacks.setPr(t.id, r.number, r.url);
-        taskLog(t.folder, `shipped: ${r.url}`);
+        log("info", "ship", "pr", { task: t.id, pr: r.number, url: r.url });
         line({ result: { url: r.url, number: r.number, table: r.table, taskId: t.id } });
       } catch (err) {
-        taskLog(t.folder, `ship refused: ${(err as Error).message}`);
+        log(err instanceof ShipRefused ? "warn" : "error", "ship", err instanceof ShipRefused ? "refused" : "error", { task: t.id, error: err });
         line({ error: (err as Error).message, table: err instanceof ShipRefused ? err.table : undefined });
       } finally {
         proving.delete(t.id);

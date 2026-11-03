@@ -1,7 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
 import type { Claim, GateResult } from "./gate.ts";
 
 export type TaskStatus = "waiting" | "doing" | "done" | "failed" | "merged" | "closed";
@@ -34,13 +32,6 @@ export function parseSince(v: string, now = Date.now()): string {
 }
 
 export type RunState = { id: string; stackId: string; state: "running" | "done" | "stopped"; current: string | null; reason: string | null };
-
-export function taskLog(folder: string, msg: string) {
-  try {
-    mkdirSync(folder, { recursive: true });
-    appendFileSync(join(folder, "events.log"), `${new Date().toISOString()} ${msg}\n`);
-  } catch {}
-}
 
 export type Stack = { id: string; repo: string; base: string | null; version: number; created_at: string; tasks: Task[] };
 
@@ -368,10 +359,7 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
       const now = new Date().toISOString();
       const runs = Number(q.stopRuns.run("daemon restart", now).changes);
       const tasks = (q.doingTasks.all() as any[]).map(row);
-      for (const t of tasks) {
-        q.setFail.run("the daemon restarted while the task ran", t.id);
-        taskLog(t.folder, "failed: the daemon restarted while the task ran");
-      }
+      for (const t of tasks) q.setFail.run("the daemon restarted while the task ran", t.id);
       return { runs, tasks: tasks.map((t) => t.id) };
     },
     saveGate(attemptId: string, g: GateResult) {

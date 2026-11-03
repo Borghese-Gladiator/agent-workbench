@@ -5,11 +5,12 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { run } from "./prove.ts";
 import { parseSetup } from "./run-md.ts";
-import { taskLog, type RunState, type Stacks, type Task } from "./stacks.ts";
+import type { RunState, Stacks, Task } from "./stacks.ts";
+import type { Log } from "./log.ts";
 
 export type { RunState };
 export type Session = (task: Task, below: Task[]) => Promise<string | void>;
-export type RunOpts = { onEnd?: (r: RunState) => void };
+export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log };
 
 export function sessionEnd(out: string, timedOut: boolean, code: number | null, timeoutMin: number): string {
   if (timedOut) return `timeout after ${timeoutMin} min`;
@@ -64,20 +65,21 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
 
     end({ current: task.id });
     stacks.setStatus(task.id, "doing");
-    taskLog(task.folder, "session started");
+    const ids = { task: task.id, run: state.id, stack: stackId, repo: stack.repo };
+    opts.log?.("info", "runner", "session.start", { ...ids, branch: task.branch });
     let how = "";
     try {
       how = (await session(task, stack.tasks.slice(0, i))) || "";
     } catch (err) {
       state.reason = (err as Error).message;
     }
-    taskLog(task.folder, `session ended${how ? `: ${how}` : ""}`);
+    opts.log?.(how || state.reason ? "warn" : "info", "runner", "session.ended", { ...ids, how: how || undefined, error: state.reason ?? undefined });
     const after = stacks.task(task.id)!;
     if (after.status !== "done") {
       const base = state.reason ?? failReason(stacks, task.id);
       const reason = how ? `${base} (session: ${how})` : base;
       stacks.fail(task.id, reason);
-      taskLog(task.folder, `failed: ${reason}`);
+      opts.log?.("error", "runner", "task.failed", { ...ids, reason });
       return end({ state: "stopped", reason });
     }
   }
@@ -145,6 +147,7 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
       runs.set(state.id, state);
       active.set(stackId, state.id);
       stacks.saveRun(state);
+      opts.log?.("info", "runner", "run.start", { run: state.id, stack: stackId, repo: stack.repo });
       runStack(stacks, stackId, session(stack.repo), state, opts)
         .catch((err) => {
           Object.assign(state, { state: "stopped", reason: (err as Error).message });
@@ -152,9 +155,13 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
         })
         .finally(() => {
           active.delete(stackId);
+          const level = state.state === "done" ? "info" : "warn";
+          opts.log?.(level, "runner", "run.end", { run: state.id, stack: stackId, task: state.current, state: state.state, reason: state.reason });
           try {
             opts.onEnd?.(state);
-          } catch {}
+          } catch (err) {
+            opts.log?.("warn", "runner", "notify.error", { run: state.id, error: err });
+          }
         });
       return state;
     },

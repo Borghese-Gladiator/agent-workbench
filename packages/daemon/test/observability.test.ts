@@ -12,6 +12,7 @@ import { writerEnd } from "../src/prove.ts";
 import { runGate } from "../src/gate.ts";
 import { costReport, costText } from "../src/cost.ts";
 import { runMessage } from "../src/notify.ts";
+import { createLog, readLog } from "../src/log.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "awb-obs-"));
 const setup = (file = ":memory:", opts = {}) => {
@@ -71,13 +72,17 @@ test("the gate gives the writer end as the cause of a missing test", () => {
 test("runStack puts how the session ended in the reason, logs it and saves the run", async () => {
   const { stacks } = setup();
   const { stack } = stacks.set({ ...where, tasks: two });
-  const r = await runStack(stacks, stack.id, async () => "timeout after 1 min", state(stack.id));
+  const dir = tmp();
+  const r = await runStack(stacks, stack.id, async () => "timeout after 1 min", state(stack.id), { log: createLog(dir) });
   assert.equal(r.state, "stopped");
   assert.match(r.reason!, /never ran awb prove \(session: timeout after 1 min\)$/);
   assert.equal(stacks.task(stack.tasks[0].id)!.fail_reason, r.reason);
   assert.deepEqual(stacks.run("run-1"), { id: "run-1", stackId: stack.id, state: "stopped", current: stack.tasks[0].id, reason: r.reason });
-  const log = readFileSync(join(stack.tasks[0].folder, "events.log"), "utf8");
-  assert.match(log, /session started\n.*session ended: timeout after 1 min\n.*failed: /);
+  const lines = readLog(dir, { task: stack.tasks[0].id });
+  assert.deepEqual(lines.map((l) => `${l.level} ${l.source}.${l.event}`), ["info runner.session.start", "warn runner.session.ended", "error runner.task.failed"]);
+  assert.equal(lines[1].how, "timeout after 1 min");
+  assert.equal(lines[2].reason, r.reason);
+  assert.ok(lines.every((l) => l.run === "run-1" && l.repo === "/r"));
 });
 
 test("after a restart, recover stops a running run and fails a doing task", () => {

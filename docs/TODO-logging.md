@@ -50,7 +50,7 @@ awb itself knows nothing about Alloy or Loki. It only writes a local file. So th
    ```json
    {"ts":"2026-11-03T16:12:04.120Z","level":"error","source":"runner","event":"session.ended","task":"0e751a8c","run":"7f2c...","repo":"games","how":"timeout after 45 min"}
    ```
-3. Rotate the file: a new file at 50 MB, and keep 10 files. Use no new dependency.
+3. Rotate the file: a new file at 50 MB. Keep every rotated file. An expiration setting (`AWB_LOG_KEEP_DAYS`) exists, but its default is "none". Use no new dependency.
 4. Replace `taskLog` and `events.log` with `log()`. The task folder keeps the raw evidence files only.
 5. Replace each `console.log` and `console.error` in the daemon with `log()`. `daemon.log` then holds only the crash output from Node.
 6. Change each of the 14 `catch {}` blocks to log a `warn` line, with the error message.
@@ -78,7 +78,7 @@ Tests:
 
 1. Add `infra/logging/` to this repo:
    - `docker-compose.yml` with Loki and Grafana. Pin the image versions.
-   - `loki.yaml`: one local storage, keep logs 30 days.
+   - `loki.yaml`: one local storage, no retention period (logs are never deleted).
    - `grafana/provisioning/`: the Loki data source and one dashboard, "awb".
    - `alloy/config.alloy`: tail `AWB_HOME/logs/awb.jsonl*`, read the JSON, and send to Loki.
 2. Labels must stay few, because each new label value makes a new Loki stream. Use these labels: `host`, `level` and `source`. Put `task`, `run`, `repo` and `session` in the JSON body, and filter them in LogQL with `| json`.
@@ -93,6 +93,10 @@ Tests:
    - **The same LAN.** Grafana with its own login, on the LAN address. Never open it to the internet.
    - **An SSH tunnel.** `ssh -L 3000:localhost:3000 <host>`. No setup, but not for a team.
 6. The Loki server can run on the awb machine or on another machine. If Loki runs on another machine, Alloy sends to it over Tailscale. When the link is down, Alloy buffers the logs and sends them later, and the local file is still complete.
+7. **When Docker is not running, no log is lost.** awb writes to the local file and never needs Docker. `awb logs` still works on this machine, and from another computer with `ssh <host> awb logs`. Only Grafana is not available. When Docker starts again, Alloy sends the lines that it missed. Three settings make this work:
+   - **Alloy keeps its read position on a Docker volume.** Mount a named volume at the Alloy storage path (`--storage.path`). Without it, a restart loses the position, and Alloy sends every line again or skips the gap.
+   - **Alloy reads the rotated files too.** Tail `awb.jsonl*`, not only `awb.jsonl`. Otherwise Alloy misses the lines of a file that rotated during the outage.
+   - **Loki accepts old lines.** Set `limits_config.reject_old_samples: false` in `loki.yaml`. The default rejects lines older than about one week, so a long outage would leave a gap in Grafana.
 
 Tests:
 - Manual: start the stack with `docker compose up`. Run one awb task. From a second computer on the tailnet, open Grafana. Find the task by id, and see a live tail during a run.
@@ -104,12 +108,12 @@ Tests:
 - The task page shows the log lines of that task.
 - Optional: a link from each task page to the same query in Grafana.
 
-## Open questions for the user
+## Decisions (from the user, 2026-11-03)
 
-1. Where does the log server run: on the awb machine, or on a separate machine (for example a home server)?
-2. Is Tailscale acceptable for access from other computers?
-3. How long must logs stay: 30 days, or longer?
-4. Is Docker acceptable on the log server, for Loki and Grafana?
+1. Loki and Grafana run on this local machine, the same machine as awb. Other computers reach Grafana through Tailscale. There is no cloud server.
+2. Tailscale is the access path. Grafana listens only on the Tailscale address.
+3. Never delete logs for now. Build an expiration setting, but its default is "none": `log.ts` keeps every rotated file, and Loki has no retention period.
+4. Docker is acceptable for Loki and Grafana.
 
 ## Sources
 
