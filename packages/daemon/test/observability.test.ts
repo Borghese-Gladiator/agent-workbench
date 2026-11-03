@@ -10,7 +10,7 @@ import { createStacks, migrateStacks } from "../src/stacks.ts";
 import { runStack, sessionEnd, type RunState } from "../src/runner.ts";
 import { writerEnd } from "../src/prove.ts";
 import { runGate } from "../src/gate.ts";
-import { budgetCheck, costReport } from "../src/cost.ts";
+import { costReport } from "../src/cost.ts";
 import { runMessage } from "../src/notify.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "awb-obs-"));
@@ -56,7 +56,7 @@ test("a session with no event for the quiet time is quiet, and a dead awb proces
 test("sessionEnd and writerEnd name a timeout, a result subtype and an exit code", () => {
   const result = (subtype: string) => JSON.stringify({ type: "result", subtype, num_turns: 3, total_cost_usd: 1.25 });
   assert.equal(sessionEnd("", true, null, 45), "timeout after 45 min");
-  assert.equal(sessionEnd(result("error_max_budget_usd"), false, 1, 45), "error_max_budget_usd");
+  assert.equal(sessionEnd(result("error_max_turns"), false, 1, 45), "error_max_turns");
   assert.equal(sessionEnd(result("success"), false, 0, 45), "");
   assert.equal(sessionEnd("", false, 137, 45), "exit 137");
   assert.deepEqual(writerEnd(result("success"), false, 0, 30), { end: "success, 3 turns", usd: 1.25 });
@@ -78,16 +78,6 @@ test("runStack puts how the session ended in the reason, logs it and saves the r
   assert.deepEqual(stacks.run("run-1"), { id: "run-1", stackId: stack.id, state: "stopped", current: stack.tasks[0].id, reason: r.reason });
   const log = readFileSync(join(stack.tasks[0].folder, "events.log"), "utf8");
   assert.match(log, /session started\n.*session ended: timeout after 1 min\n.*failed: /);
-});
-
-test("the budget stops the run before a session starts", async () => {
-  const { stacks } = setup();
-  const { stack } = stacks.set({ ...where, tasks: two });
-  let started = 0;
-  const r = await runStack(stacks, stack.id, async () => void started++, state(stack.id), { budget: () => "the daily budget is used" });
-  assert.equal(started, 0);
-  assert.equal(r.reason, "the daily budget is used");
-  assert.equal(stacks.task(stack.tasks[0].id)!.status, "waiting", "the task is not failed, so a retry is not needed");
 });
 
 test("after a restart, recover stops a running run and fails a doing task", () => {
@@ -131,9 +121,6 @@ test("the cost report adds sessions and writers by day, repo and task, and count
   assert.equal(costReport(store.db, "", "/other").total_usd, 0.5);
   assert.equal(costReport(store.db, "2999-01-01T00:00:00Z").total_usd, 0, "since filters the rows");
 
-  assert.equal(budgetCheck(store.db, 0), null, "no budget set");
-  assert.equal(budgetCheck(store.db, 100), null);
-  assert.match(budgetCheck(store.db, 2)!, /^the daily budget is used: 3\.00 of 2\.00 USD today/);
 });
 
 test("the run notice names the repo, the task and the reason", () => {

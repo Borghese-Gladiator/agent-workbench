@@ -10,7 +10,6 @@ LOCAL_GAMES="${LOCAL_GAMES:-$HOME/GitHub/wip-browser-games}"
 mkdir -p "$WORK"
 WORK="$(cd "$WORK" && pwd -P)"
 export AWB_HOME="$WORK/home"
-export AWB_TASK_BUDGET_USD="${AWB_TASK_BUDGET_USD:-5}" AWB_WRITER_BUDGET_USD="${AWB_WRITER_BUDGET_USD:-3}"
 REPO="$WORK/games"
 mkdir -p "$WORK/bin"
 ln -sf "$AWB" "$WORK/bin/awb"
@@ -18,10 +17,10 @@ export PATH="$WORK/bin:$PATH"
 TOOLS=(--permission-mode acceptEdits --allowedTools Read Edit Write Glob Grep Bash)
 
 chat() {
-  local name=$1 budget=$2 prompt=$3
+  local name=$1 prompt=$2
   echo "prompt: $prompt"
   local start=$(date +%s)
-  (cd "$REPO" && echo "$prompt" | awb -p "${TOOLS[@]}" --max-budget-usd "$budget" --output-format stream-json --verbose) > "$WORK/$name.jsonl" 2> "$WORK/$name.err" || true
+  (cd "$REPO" && echo "$prompt" | awb -p "${TOOLS[@]}" --output-format stream-json --verbose) > "$WORK/$name.jsonl" 2> "$WORK/$name.err" || true
   node -e '
 const rows = require("fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
 const awb = rows.flatMap((r) => (r.message?.content ?? []).filter((c) => c.type === "tool_use" && c.name === "Bash" && /(^|[;&|]\s*|\n)awb /.test(c.input.command)).map((c) => c.input.command.split("\n")[0].slice(0, 140)));
@@ -55,7 +54,7 @@ EOF
   ;;
 single)
   git -C "$REPO" checkout -q main
-  chat single 8 "Add an Undo button to Tic-Tac-Toe. It takes back the last move. It is disabled when there is no move to take back, and after a game ends."
+  chat single "Add an Undo button to Tic-Tac-Toe. It takes back the last move. It is disabled when there is no move to take back, and after a game ends."
   ;;
 bug)
   T=$(awb tasks --json 2>/dev/null | node -e 'const t=JSON.parse(require("fs").readFileSync(0)).find((x)=>x.status==="done"); console.log(t.branch, t.base, t.id)')
@@ -82,10 +81,10 @@ stack)
   git -C "$REPO" checkout -q -b "$BASE"
   git -C "$REPO" push -q -u origin "$BASE"
   echo "stack base: $BASE"
-  chat stack 6 "Add a match mode to Tic-Tac-Toe, built as a stack of three tasks with one PR each: (1) a \"Best of 3\" toggle that, when on, shows the match score as \"Match: X 0 - O 0\"; (2) when a player wins 2 games in best-of-3 mode, show the banner \"X wins the match!\" (or O) and disable the board until a new match starts; (3) a \"New match\" button that resets the match score and hides the banner. Run the stack and wait until awb run is no longer running, then report each task and its PR."
+  chat stack "Add a match mode to Tic-Tac-Toe, built as a stack of three tasks with one PR each: (1) a \"Best of 3\" toggle that, when on, shows the match score as \"Match: X 0 - O 0\"; (2) when a player wins 2 games in best-of-3 mode, show the banner \"X wins the match!\" (or O) and disable the board until a new match starts; (3) a \"New match\" button that resets the match score and hides the banner. Run the stack and wait until awb run is no longer running, then report each task and its PR."
   ;;
 ask)
-  (cd "$REPO" && echo "What did you do today, and what failed?" | awb -p --model haiku --allowedTools "Bash(awb:*)" --max-budget-usd 0.5 --output-format stream-json --verbose) > "$WORK/ask.jsonl" 2>/dev/null || true
+  (cd "$REPO" && echo "What did you do today, and what failed?" | awb -p --model haiku --allowedTools "Bash(awb:*)" --output-format stream-json --verbose) > "$WORK/ask.jsonl" 2>/dev/null || true
   node -e '
 const rows = require("fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
 rows.flatMap((r) => (r.message?.content ?? []).filter((c) => c.type === "tool_use")).forEach((c) => console.log("ran: " + c.input.command));

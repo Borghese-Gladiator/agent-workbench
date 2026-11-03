@@ -9,7 +9,7 @@ import { taskLog, type RunState, type Stacks, type Task } from "./stacks.ts";
 
 export type { RunState };
 export type Session = (task: Task, below: Task[]) => Promise<string | void>;
-export type RunOpts = { budget?: () => string | null; onEnd?: (r: RunState) => void };
+export type RunOpts = { onEnd?: (r: RunState) => void };
 
 export function sessionEnd(out: string, timedOut: boolean, code: number | null, timeoutMin: number): string {
   if (timedOut) return `timeout after ${timeoutMin} min`;
@@ -61,11 +61,6 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
     if (i < 0) return end({ state: "done", current: null });
     const task = stack.tasks[i];
     if (task.status !== "waiting") return end({ state: "stopped", current: task.id, reason: `task ${task.id} is ${task.status}` });
-    const over = opts.budget?.();
-    if (over) {
-      taskLog(task.folder, `not started: ${over}`);
-      return end({ state: "stopped", current: task.id, reason: over });
-    }
 
     end({ current: task.id });
     stacks.setStatus(task.id, "doing");
@@ -90,7 +85,7 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
 
 const AWB = fileURLToPath(new URL("../../cli/bin/awb", import.meta.url));
 
-export function claudeSession(opts: { home: string; repo: string; budgetUsd: number; timeoutMin: number }): Session {
+export function claudeSession(opts: { home: string; repo: string; timeoutMin: number }): Session {
   return async (task, below) => {
     const worktree = join(opts.home, "worktrees", task.id);
     if (!existsSync(worktree)) {
@@ -115,7 +110,6 @@ export function claudeSession(opts: { home: string; repo: string; budgetUsd: num
       "-p",
       "--permission-mode", "acceptEdits",
       "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep", "Bash",
-      "--max-budget-usd", String(opts.budgetUsd),
       "--output-format", "stream-json", "--verbose",
     ];
     return new Promise<string>((resolve) => {

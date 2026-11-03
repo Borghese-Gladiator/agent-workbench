@@ -28,7 +28,7 @@ awb ui                           # opens the session list in the browser
 | `awb tasks [--repo <path>] [--status a,b] [--since 7d\|12h\|30m\|date] [--json]` | Lists the tasks of all repos, newest first, with the failed claims of the last gate. |
 | `awb task rm <id...> [--json]` | Removes waiting tasks in one transaction. If one id has started or does not exist, nothing is removed. |
 
-Limits for a task session: `AWB_TASK_BUDGET_USD` (default 5) and `AWB_TASK_TIMEOUT_MIN` (default 45). Limits for the test writer: `AWB_WRITER_BUDGET_USD` (default 3) and `AWB_WRITER_TIMEOUT_MIN` (default 20). `AWB_CLAUDE` replaces `claude` in the launcher and the task sessions, and `AWB_WRITER_CLAUDE` replaces it in the test writer.
+Time limits: `AWB_TASK_TIMEOUT_MIN` for a task session (default 45) and `AWB_WRITER_TIMEOUT_MIN` for the test writer (default 30). awb sets no spend limit. It records the cost of each session and test writer. `AWB_CLAUDE` replaces `claude` in the launcher and the task sessions, and `AWB_WRITER_CLAUDE` replaces it in the test writer.
 
 `AWB_HOME` defaults to `~/.awb`. Each `AWB_HOME` has its own daemon, database and `daemon.json`. For a dev instance, use `AWB_HOME=~/.awb-dev`.
 

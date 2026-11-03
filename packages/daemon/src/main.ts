@@ -6,7 +6,6 @@ import { createApp } from "./server.ts";
 import { createStacks, migrateStacks } from "./stacks.ts";
 import { taskRoutes } from "./task-routes.ts";
 import { claudeSession, createRunner } from "./runner.ts";
-import { budgetCheck } from "./cost.ts";
 import { notify, runMessage } from "./notify.ts";
 
 export async function startDaemon(home: string) {
@@ -17,18 +16,15 @@ export async function startDaemon(home: string) {
   const recovered = stacks.recover();
   if (recovered.runs || recovered.tasks.length) console.log(`awb daemon: stopped ${recovered.runs} run(s) and failed ${recovered.tasks.length} task(s) left from before the restart`);
   const startedAt = new Date().toISOString();
-  const budget = () => budgetCheck(store.db, Number(process.env.AWB_DAILY_BUDGET_USD || 0));
   const runner = createRunner(
     stacks,
     (repo) =>
       claudeSession({
         home: realpathSync(home),
         repo,
-        budgetUsd: Number(process.env.AWB_TASK_BUDGET_USD || 5),
         timeoutMin: Number(process.env.AWB_TASK_TIMEOUT_MIN || 45),
       }),
     {
-      budget,
       onEnd: (r) => {
         const m = runMessage(stacks, r);
         notify(m.title, m.body);
@@ -39,9 +35,7 @@ export async function startDaemon(home: string) {
     stacks,
     {
       claude: process.env.AWB_WRITER_CLAUDE || "claude",
-      writerBudgetUsd: Number(process.env.AWB_WRITER_BUDGET_USD || 3),
       writerTimeoutMin: Number(process.env.AWB_WRITER_TIMEOUT_MIN || 30),
-      budget,
     },
     runner,
     (id) => store.feedRow(id)?.usage ?? null,

@@ -15,9 +15,7 @@ const NODE_MODULES = join(PKG, "..", "..", "node_modules");
 
 export type ProveDeps = {
   claude: string;
-  writerBudgetUsd: number;
   writerTimeoutMin?: number;
-  budget?: () => string | null;
   log: (line: string) => void;
 };
 
@@ -183,7 +181,6 @@ async function runWriter(folder: string, claims: Claim[], url: string, ready: st
       "--mcp-config", mcp,
       "--strict-mcp-config",
       "--allowedTools", "Task", "Agent", "Read", "Glob", "Grep", "LS", "mcp__playwright-test__*",
-      "--max-budget-usd", String(deps.writerBudgetUsd),
       "--output-format", "stream-json", "--verbose",
     ],
     folder,
@@ -248,11 +245,7 @@ export async function prove(task: Task, worktree: string, deps: ProveDeps, rewri
     if (removed.length) deps.log(`removed for a rewrite: ${removed.join(", ")}`);
     const missing = claimsWithoutTest(task.claims, tests);
     let writer: WriterEnd | null = null;
-    if (missing.length) {
-      const over = deps.budget?.();
-      if (over) throw new Error(`the test writer did not start: ${over}`);
-      writer = await runWriter(folder, missing, app.url, runMd.ready, deps);
-    }
+    if (missing.length) writer = await runWriter(folder, missing, app.url, runMd.ready, deps);
 
     writeFileSync(join(proof, "test-hash.txt"), testHash(tests) + "\n");
     deps.log("proof run: playwright test");

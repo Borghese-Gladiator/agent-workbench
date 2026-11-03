@@ -69,11 +69,3 @@ export function costReport(db: DatabaseSync, since: string, repo?: string): Cost
     unpriced_sessions: unpriced,
   };
 }
-
-export function budgetCheck(db: DatabaseSync, limitUsd: number, now = new Date()): string | null {
-  if (!(limitUsd > 0)) return null;
-  const day = new Date(now);
-  day.setHours(0, 0, 0, 0);
-  const spent = costReport(db, day.toISOString()).total_usd;
-  return spent >= limitUsd ? `the daily budget is used: ${spent.toFixed(2)} of ${limitUsd.toFixed(2)} USD today (AWB_DAILY_BUDGET_USD)` : null;
-}
