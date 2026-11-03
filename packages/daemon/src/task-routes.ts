@@ -2,8 +2,10 @@ import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, 
 import { execFileSync } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, sep } from "node:path";
-import { parseSince, StackError, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
+import { parseSince, StackError, taskLog, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
 import { prove, run, type ProveDeps } from "./prove.ts";
+import { costReport } from "./cost.ts";
+import type { DatabaseSync } from "node:sqlite";
 import { ship, ShipRefused, syncStatus } from "./ship.ts";
 import type { createRunner } from "./runner.ts";
 
@@ -55,6 +57,7 @@ export function taskRoutes(
   runner: ReturnType<typeof createRunner>,
   usageOf: (sessionId: string) => unknown = () => null,
   home = "",
+  db?: DatabaseSync,
 ) {
   const proving = new Set<string>();
 
@@ -78,7 +81,14 @@ export function taskRoutes(
     const specs = existsSync(tests)
       ? readdirSync(tests).filter((f) => /\.spec\.(ts|js)$/.test(f) && f !== "seed.spec.ts").sort().map((name) => ({ name, text: readFileSync(join(tests, name), "utf8") }))
       : [];
-    return { ...t, stack: stacks.get(t.stack_id), attempts, transcripts, specs, cost_usd: transcripts.reduce((n, f) => n + costOf(f), 0) };
+    const sessionUsd = transcripts.filter((f) => !f.endsWith("writer.jsonl")).reduce((n, f) => n + costOf(f), 0);
+    const saved = attempts.map((a: any) => a.writer_usd).filter((v: unknown): v is number => typeof v === "number");
+    const writerUsd = saved.length ? saved.reduce((n: number, v: number) => n + v, 0) : transcripts.filter((f) => f.endsWith("writer.jsonl")).reduce((n, f) => n + costOf(f), 0);
+    const logFile = join(t.folder, "events.log");
+    const log = existsSync(logFile) ? readFileSync(logFile, "utf8").split("\n").filter(Boolean).slice(-200) : [];
+    const writerEndFile = join(t.folder, "proof", "writer-end.txt");
+    const writer_end = existsSync(writerEndFile) ? readFileSync(writerEndFile, "utf8").trim() : null;
+    return { ...t, stack: stacks.get(t.stack_id), attempts, transcripts, specs, log, writer_end, cost_usd: sessionUsd + writerUsd, writer_usd: writerUsd };
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse, url: URL, body: () => Promise<Json>): Promise<boolean> {
@@ -123,16 +133,25 @@ export function taskRoutes(
       proving.add(t.id);
       res.writeHead(200, { "content-type": "application/x-ndjson" });
       const line = (o: Json) => res.write(JSON.stringify(o) + "\n");
+      const before = t.status;
+      const ownedByRun = runner.owns(t.id);
       stacks.setStatus(t.id, "doing");
       const attempt = stacks.startAttempt(t.id, typeof b.sessionId === "string" ? b.sessionId : null);
+      taskLog(t.folder, `prove started${rewrite.length ? `, rewrite ${rewrite.join(",")}` : ""}`);
+      let after: TaskStatus = before === "failed" ? "failed" : "waiting";
       try {
-        const r = await prove(t, b.worktree, { ...proveDeps, log: (msg) => line({ log: msg }) }, rewrite);
+        const r = await prove(t, b.worktree, { ...proveDeps, log: (msg) => (line({ log: msg }), taskLog(t.folder, msg)) }, rewrite);
         stacks.saveGate(attempt, r.gate);
-        line({ result: { pass: r.gate.pass, table: r.table, rows: r.gate.rows, folder: r.folder, taskId: t.id } });
+        if (r.writer?.usd != null) stacks.setWriterCost(attempt, r.writer.usd);
+        taskLog(t.folder, `gate ${r.gate.pass ? "PASS" : "FAIL"} at ${r.gate.head.slice(0, 10)}`);
+        after = r.gate.pass ? "waiting" : after;
+        line({ result: { pass: r.gate.pass, table: r.table, rows: r.gate.rows, folder: r.folder, taskId: t.id, writer: r.writer } });
       } catch (err) {
+        taskLog(t.folder, `prove error: ${(err as Error).message}`);
         line({ error: (err as Error).message });
       } finally {
         stacks.endAttempt(attempt);
+        if (!ownedByRun) stacks.setStatus(t.id, after);
         proving.delete(t.id);
         res.end();
       }
@@ -150,10 +169,12 @@ export function taskRoutes(
       res.writeHead(200, { "content-type": "application/x-ndjson" });
       const line = (o: Json) => res.write(JSON.stringify(o) + "\n");
       try {
-        const r = await ship(t, b.worktree, (msg) => line({ log: msg }));
+        const r = await ship(t, b.worktree, (msg) => (line({ log: msg }), taskLog(t.folder, `ship: ${msg}`)));
         stacks.setPr(t.id, r.number, r.url);
+        taskLog(t.folder, `shipped: ${r.url}`);
         line({ result: { url: r.url, number: r.number, table: r.table, taskId: t.id } });
       } catch (err) {
+        taskLog(t.folder, `ship refused: ${(err as Error).message}`);
         line({ error: (err as Error).message, table: err instanceof ShipRefused ? err.table : undefined });
       } finally {
         proving.delete(t.id);
@@ -167,6 +188,16 @@ export function taskRoutes(
       const stack = b.stackId ? stacks.get(b.stackId) : stacks.newestStack(b.repo ?? "");
       if (!stack) return send(404, { error: "no stack for this repo; run awb stack set first" }), true;
       return send(202, runner.start(stack.id)), true;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cost") {
+      if (!db) return send(501, { error: "no database" }), true;
+      try {
+        const since = parseSince(url.searchParams.get("since") ?? "7d");
+        return send(200, costReport(db, since, url.searchParams.get("repo") ?? undefined)), true;
+      } catch (err) {
+        return fail(err), true;
+      }
     }
 
     if (req.method === "GET" && url.pathname === "/api/session-tasks") {

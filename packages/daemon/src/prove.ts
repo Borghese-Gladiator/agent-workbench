@@ -17,8 +17,11 @@ export type ProveDeps = {
   claude: string;
   writerBudgetUsd: number;
   writerTimeoutMin?: number;
+  budget?: () => string | null;
   log: (line: string) => void;
 };
+
+export type WriterEnd = { end: string; usd: number | null };
 
 export function claimsMarkdown(task: Pick<Task, "title" | "claims">, url: string): string {
   return `# Claims: ${task.title}\n\nSite: ${url}\n\n${task.claims.map((c) => `- ${c.id}: ${c.text}`).join("\n")}\n`;
@@ -114,17 +117,23 @@ async function startApp(runMd: RunMd, cwd: string, log: (l: string) => void) {
   return { url, stop };
 }
 
-export function run(cmd: string, args: string[], cwd: string, input?: string, timeoutMs = 0): Promise<{ code: number; out: string }> {
+export function run(cmd: string, args: string[], cwd: string, input?: string, timeoutMs = 0): Promise<{ code: number; out: string; timedOut: boolean }> {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
-    const timer = timeoutMs ? setTimeout(() => child.kill("SIGTERM"), timeoutMs) : null;
+    let timedOut = false;
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGTERM");
+        }, timeoutMs)
+      : null;
     let out = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (out += d));
-    child.on("error", (e) => resolve({ code: 127, out: String(e) }));
+    child.on("error", (e) => resolve({ code: 127, out: String(e), timedOut }));
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
-      resolve({ code: code ?? 1, out });
+      resolve({ code: code ?? 1, out, timedOut });
     });
     child.stdin.end(input ?? "");
   });
@@ -141,7 +150,21 @@ export function writerPrompt(claims: Claim[], url: string, ready: string): strin
   ].join(" ");
 }
 
-async function runWriter(folder: string, claims: Claim[], url: string, ready: string, deps: ProveDeps) {
+export function writerEnd(out: string, timedOut: boolean, code: number, timeoutMin: number): WriterEnd {
+  let res: any = null;
+  for (const line of out.split("\n")) {
+    if (!line.includes('"type":"result"')) continue;
+    try {
+      res = JSON.parse(line);
+    } catch {}
+  }
+  const usd = res && typeof res.total_cost_usd === "number" ? res.total_cost_usd : null;
+  if (timedOut) return { end: `timeout after ${timeoutMin} min`, usd };
+  if (res) return { end: res.subtype === "success" ? `success, ${res.num_turns} turns` : String(res.subtype), usd };
+  return { end: `exit ${code}`, usd };
+}
+
+async function runWriter(folder: string, claims: Claim[], url: string, ready: string, deps: ProveDeps): Promise<WriterEnd> {
   const mcp = join(folder, "mcp.json");
   writeFileSync(
     mcp,
@@ -165,16 +188,13 @@ async function runWriter(folder: string, claims: Claim[], url: string, ready: st
     ],
     folder,
     writerPrompt(claims, url, ready),
-    (deps.writerTimeoutMin ?? 20) * 60_000,
+    (deps.writerTimeoutMin ?? 30) * 60_000,
   );
   writeFileSync(join(folder, "proof", "writer.jsonl"), r.out);
-  const last = r.out.trim().split("\n").at(-1) ?? "";
-  try {
-    const res = JSON.parse(last);
-    deps.log(`test writer: ${res.subtype}, ${res.num_turns} turns, ${Number(res.total_cost_usd ?? 0).toFixed(2)} USD`);
-  } catch {
-    deps.log(`test writer exited with ${r.code}`);
-  }
+  const w = writerEnd(r.out, r.timedOut, r.code, deps.writerTimeoutMin ?? 30);
+  writeFileSync(join(folder, "proof", "writer-end.txt"), w.end + "\n");
+  deps.log(`test writer: ${w.end}${w.usd === null ? "" : `, ${w.usd.toFixed(2)} USD`}`);
+  return w;
 }
 
 export function gateFromDisk(claims: Claim[], folder: string, worktree: string): GateResult {
@@ -190,10 +210,11 @@ export function gateFromDisk(claims: Claim[], folder: string, worktree: string):
     testHashAtStart: read("test-hash.txt"),
     testHashNow: testHash(join(folder, "proof-tests")),
     fileExists: existsSync,
+    writerEnd: read("writer-end.txt") || undefined,
   });
 }
 
-export type ProveResult = { gate: GateResult; table: string; folder: string };
+export type ProveResult = { gate: GateResult; table: string; folder: string; writer: WriterEnd | null };
 
 export async function prove(task: Task, worktree: string, deps: ProveDeps, rewrite: string[] = []): Promise<ProveResult> {
   const runMdFile = join(worktree, ".awb", "run.md");
@@ -226,7 +247,12 @@ export async function prove(task: Task, worktree: string, deps: ProveDeps, rewri
     const removed = removeTests(rewrite, tests);
     if (removed.length) deps.log(`removed for a rewrite: ${removed.join(", ")}`);
     const missing = claimsWithoutTest(task.claims, tests);
-    if (missing.length) await runWriter(folder, missing, app.url, runMd.ready, deps);
+    let writer: WriterEnd | null = null;
+    if (missing.length) {
+      const over = deps.budget?.();
+      if (over) throw new Error(`the test writer did not start: ${over}`);
+      writer = await runWriter(folder, missing, app.url, runMd.ready, deps);
+    }
 
     writeFileSync(join(proof, "test-hash.txt"), testHash(tests) + "\n");
     deps.log("proof run: playwright test");
@@ -235,7 +261,7 @@ export async function prove(task: Task, worktree: string, deps: ProveDeps, rewri
 
     const gate = gateFromDisk(task.claims, folder, worktree);
     writeFileSync(join(proof, "gate.json"), JSON.stringify(gate, null, 2));
-    return { gate, table: claimTable(gate), folder };
+    return { gate, table: claimTable(gate), folder, writer };
   } finally {
     app.stop();
   }

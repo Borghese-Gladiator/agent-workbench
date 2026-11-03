@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { Claim, GateResult } from "./gate.ts";
 
 export type TaskStatus = "waiting" | "doing" | "done" | "failed" | "merged" | "closed";
@@ -29,6 +31,15 @@ export function parseSince(v: string, now = Date.now()): string {
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) throw new StackError(`bad --since ${v}: use 7d, 12h, 30m or a date`, 400);
   return d.toISOString();
+}
+
+export type RunState = { id: string; stackId: string; state: "running" | "done" | "stopped"; current: string | null; reason: string | null };
+
+export function taskLog(folder: string, msg: string) {
+  try {
+    mkdirSync(folder, { recursive: true });
+    appendFileSync(join(folder, "events.log"), `${new Date().toISOString()} ${msg}\n`);
+  } catch {}
 }
 
 export type Stack = { id: string; repo: string; base: string | null; version: number; created_at: string; tasks: Task[] };
@@ -88,6 +99,19 @@ export function migrateStacks(db: DatabaseSync) {
   const stackCols = (db.prepare("PRAGMA table_info(stacks)").all() as { name: string }[]).map((c) => c.name);
   if (!stackCols.includes("base")) db.exec("ALTER TABLE stacks ADD COLUMN base TEXT;");
   if (!cols.includes("fail_reason")) db.exec("ALTER TABLE tasks ADD COLUMN fail_reason TEXT;");
+  const attemptCols = (db.prepare("PRAGMA table_info(attempts)").all() as { name: string }[]).map((c) => c.name);
+  if (!attemptCols.includes("writer_usd")) db.exec("ALTER TABLE attempts ADD COLUMN writer_usd REAL;");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS runs (
+      id TEXT PRIMARY KEY,
+      stack_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      current TEXT,
+      reason TEXT,
+      started_at TEXT NOT NULL,
+      ended_at TEXT
+    );
+  `);
 }
 
 export function taskBranch(title: string, id: string): string {
@@ -148,6 +172,15 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     attempts: db.prepare("SELECT * FROM attempts WHERE task_id = ? ORDER BY started_at"),
     addGate: db.prepare("INSERT INTO gate_results (attempt_id, commit_sha, pass, result, at) VALUES (?, ?, ?, ?, ?)"),
     gates: db.prepare("SELECT * FROM gate_results WHERE attempt_id = ? ORDER BY id"),
+    setWriter: db.prepare("UPDATE attempts SET writer_usd = ? WHERE id = ?"),
+    saveRun: db.prepare(
+      `INSERT INTO runs (id, stack_id, state, current, reason, started_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET state = excluded.state, current = excluded.current, reason = excluded.reason,
+         ended_at = CASE WHEN excluded.state = 'running' THEN NULL ELSE ? END`,
+    ),
+    getRun: db.prepare("SELECT id, stack_id AS stackId, state, current, reason FROM runs WHERE id = ?"),
+    stopRuns: db.prepare("UPDATE runs SET state = 'stopped', reason = ?, ended_at = ? WHERE state = 'running'"),
+    doingTasks: db.prepare("SELECT * FROM tasks WHERE status = 'doing'"),
   };
 
   const get = (id: string): Stack | undefined => {
@@ -319,6 +352,27 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     },
     endAttempt(attemptId: string) {
       q.endAttempt.run(new Date().toISOString(), attemptId);
+    },
+    setWriterCost(attemptId: string, usd: number) {
+      q.setWriter.run(usd, attemptId);
+    },
+    saveRun(r: RunState) {
+      const now = new Date().toISOString();
+      q.saveRun.run(r.id, r.stackId, r.state, r.current, r.reason, now, now);
+    },
+    run(id: string): RunState | undefined {
+      const r = q.getRun.get(id) as RunState | undefined;
+      return r && { ...r };
+    },
+    recover(): { runs: number; tasks: string[] } {
+      const now = new Date().toISOString();
+      const runs = Number(q.stopRuns.run("daemon restart", now).changes);
+      const tasks = (q.doingTasks.all() as any[]).map(row);
+      for (const t of tasks) {
+        q.setFail.run("the daemon restarted while the task ran", t.id);
+        taskLog(t.folder, "failed: the daemon restarted while the task ran");
+      }
+      return { runs, tasks: tasks.map((t) => t.id) };
     },
     saveGate(attemptId: string, g: GateResult) {
       q.addGate.run(attemptId, g.head, g.pass ? 1 : 0, JSON.stringify(g), new Date().toISOString());

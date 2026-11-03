@@ -26,7 +26,7 @@ export type Event = {
 };
 
 export type FeedRow = Session & {
-  state: "busy" | "idle" | "ended";
+  state: "busy" | "idle" | "quiet" | "lost" | "ended";
   last_hook: string | null;
   last_tool: string | null;
   last_event_at: string | null;
@@ -35,7 +35,19 @@ export type FeedRow = Session & {
 
 const BUSY_HOOKS = new Set(["UserPromptSubmit", "PreToolUse", "PostToolUse"]);
 
-export function openStore(file: string) {
+const alive = (pid: number | null) => {
+  if (!pid) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
+
+export function openStore(file: string, opts: { quietMs?: number; isAlive?: (pid: number | null) => boolean } = {}) {
+  const quietMs = opts.quietMs ?? 15 * 60_000;
+  const isAlive = opts.isAlive ?? alive;
   const db = new DatabaseSync(file);
   db.exec(`
     PRAGMA journal_mode = WAL;
@@ -75,6 +87,8 @@ export function openStore(file: string) {
       updated_at TEXT NOT NULL
     );
   `);
+  const usageCols = (db.prepare("PRAGMA table_info(session_usage)").all() as { name: string }[]).map((c) => c.name);
+  if (!usageCols.includes("cost_usd")) db.exec("ALTER TABLE session_usage ADD COLUMN cost_usd REAL;");
 
   const addRepo = db.prepare("INSERT OR IGNORE INTO repos (root, first_seen) VALUES (?, ?)");
   const addSession = db.prepare(
@@ -95,20 +109,30 @@ export function openStore(file: string) {
     "SELECT tool_name FROM events WHERE session_id = ? AND tool_name IS NOT NULL ORDER BY id DESC LIMIT 1",
   );
   const setUsage = db.prepare(
-    `INSERT INTO session_usage (session_id, input, output, cache_read, cache_creation, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO session_usage (session_id, input, output, cache_read, cache_creation, cost_usd, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(session_id) DO UPDATE SET input = excluded.input, output = excluded.output,
-       cache_read = excluded.cache_read, cache_creation = excluded.cache_creation, updated_at = excluded.updated_at`,
+       cache_read = excluded.cache_read, cache_creation = excluded.cache_creation, cost_usd = excluded.cost_usd, updated_at = excluded.updated_at`,
   );
-  const getUsage = db.prepare("SELECT input, output, cache_read, cache_creation FROM session_usage WHERE session_id = ?");
+  const getUsage = db.prepare("SELECT input, output, cache_read, cache_creation, cost_usd FROM session_usage WHERE session_id = ?");
 
   const feedRow = (s: Session): FeedRow => {
     const last = lastEvent.get(s.id) as Event | undefined;
     const usage = getUsage.get(s.id) as Usage | undefined;
     const ended = !!s.ended_at || last?.hook === "SessionEnd";
+    const lastAt = Date.parse(last?.at ?? s.started_at);
+    const state = ended
+      ? "ended"
+      : !isAlive(s.pid)
+        ? "lost"
+        : Date.now() - lastAt > quietMs
+          ? "quiet"
+          : last && BUSY_HOOKS.has(last.hook)
+            ? "busy"
+            : "idle";
     return {
       ...s,
-      state: ended ? "ended" : last && BUSY_HOOKS.has(last.hook) ? "busy" : "idle",
+      state,
       last_hook: last?.hook ?? null,
       last_tool: (lastTool.get(s.id) as { tool_name: string } | undefined)?.tool_name ?? null,
       last_event_at: last?.at ?? null,
@@ -156,7 +180,7 @@ export function openStore(file: string) {
       return listEvents.all(sessionId) as Event[];
     },
     setUsage(sessionId: string, u: Usage) {
-      setUsage.run(sessionId, u.input, u.output, u.cache_read, u.cache_creation, new Date().toISOString());
+      setUsage.run(sessionId, u.input, u.output, u.cache_read, u.cache_creation, u.cost_usd, new Date().toISOString());
     },
     feed(): FeedRow[] {
       return this.list().map(feedRow);

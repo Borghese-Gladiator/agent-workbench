@@ -18,7 +18,7 @@ test("token totals for a session dedup rows by message.id", () => {
     file,
     [row("m1", 3, 7), row("m1", 3, 7), JSON.stringify({ type: "user", message: { content: "hi" } }), "not json", row("m2", 1, 2), ""].join("\n"),
   );
-  assert.deepEqual(tokenTotals(file), { input: 4, output: 9, cache_read: 20, cache_creation: 10 });
+  assert.deepEqual(tokenTotals(file), { input: 4, output: 9, cache_read: 20, cache_creation: 10, cost_usd: null });
 });
 
 test("the feed row has the totals and the last tool, and state follows the hooks", () => {
@@ -28,11 +28,11 @@ test("the feed row has the totals and the last tool, and state follows the hooks
   store.addEvent("s", { hook_event_name: "PreToolUse", tool_name: "Bash" });
   assert.equal(store.feedRow("s")!.state, "busy");
   store.addEvent("s", { hook_event_name: "Stop" });
-  store.setUsage("s", { input: 1, output: 2, cache_read: 3, cache_creation: 4 });
+  store.setUsage("s", { input: 1, output: 2, cache_read: 3, cache_creation: 4, cost_usd: 0.5 });
   const f = store.feedRow("s")!;
   assert.equal(f.state, "idle");
   assert.equal(f.last_tool, "Bash");
-  assert.deepEqual(f.usage, { input: 1, output: 2, cache_read: 3, cache_creation: 4 });
+  assert.deepEqual(f.usage, { input: 1, output: 2, cache_read: 3, cache_creation: 4, cost_usd: 0.5 });
   store.end("s", 0);
   assert.equal(store.feedRow("s")!.state, "ended");
 });

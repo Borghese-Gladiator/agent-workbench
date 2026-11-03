@@ -1,0 +1,145 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { priceOf, usageCost } from "../src/prices.ts";
+import { tokenTotals } from "../src/usage.ts";
+import { openStore } from "../src/store.ts";
+import { createStacks, migrateStacks } from "../src/stacks.ts";
+import { runStack, sessionEnd, type RunState } from "../src/runner.ts";
+import { writerEnd } from "../src/prove.ts";
+import { runGate } from "../src/gate.ts";
+import { budgetCheck, costReport } from "../src/cost.ts";
+import { runMessage } from "../src/notify.ts";
+
+const tmp = () => mkdtempSync(join(tmpdir(), "awb-obs-"));
+const setup = (file = ":memory:", opts = {}) => {
+  const store = openStore(file, opts);
+  migrateStacks(store.db);
+  const root = tmp();
+  return { store, stacks: createStacks(store.db, (id) => join(root, id)) };
+};
+const where = { repo: "/r", branch: "main", base: "main" };
+const two = ["A", "B"].map((title) => ({ title, claims: [{ id: "C1", text: `${title} works` }] }));
+const state = (stackId: string): RunState => ({ id: "run-1", stackId, state: "running", current: null, reason: null });
+
+test("prices: a known model, a dated id by prefix, and no cost for an unknown model", () => {
+  assert.deepEqual(priceOf("claude-opus-5-5"), { input: 4, output: 20, cacheRead: 0.2 });
+  assert.equal(priceOf("claude-opus-5-5-20261001")?.input, 4);
+  assert.equal(priceOf("claude-opus-5")?.input, 5, "the longer id does not shadow the shorter one");
+  assert.equal(priceOf("gpt-5"), null);
+  const usd = usageCost("claude-sonnet-5-5", { input_tokens: 1_000_000, output_tokens: 100_000, cache_read_input_tokens: 1_000_000, cache_creation_input_tokens: 0 });
+  assert.equal(usd!.toFixed(4), (2 + 1 + 0.2).toFixed(4));
+});
+
+test("tokenTotals gives cost_usd from the model of each message", () => {
+  const file = join(tmp(), "t.jsonl");
+  const msg = (id: string, model: string) => JSON.stringify({ message: { id, model, usage: { input_tokens: 1_000_000, output_tokens: 0 } } });
+  writeFileSync(file, [msg("a", "claude-haiku-5-5"), msg("b", "claude-opus-5-5")].join("\n"));
+  assert.equal(tokenTotals(file).cost_usd!.toFixed(2), "4.10");
+  writeFileSync(file, [msg("a", "claude-haiku-5-5"), msg("b", "some-other-model")].join("\n"));
+  assert.equal(tokenTotals(file).cost_usd, null, "one unpriced message makes the session unpriced");
+});
+
+test("a session with no event for the quiet time is quiet, and a dead awb process is lost", () => {
+  const quiet = openStore(":memory:", { quietMs: -1 });
+  quiet.register({ id: "s", repo: "/r", worktree: "/r", branch: "main", pid: process.pid });
+  assert.equal(quiet.feedRow("s")!.state, "quiet");
+  const lost = openStore(":memory:", { isAlive: () => false });
+  lost.register({ id: "s", repo: "/r", worktree: "/r", branch: "main", pid: 999999 });
+  assert.equal(lost.feedRow("s")!.state, "lost");
+  lost.end("s", 0);
+  assert.equal(lost.feedRow("s")!.state, "ended");
+});
+
+test("sessionEnd and writerEnd name a timeout, a result subtype and an exit code", () => {
+  const result = (subtype: string) => JSON.stringify({ type: "result", subtype, num_turns: 3, total_cost_usd: 1.25 });
+  assert.equal(sessionEnd("", true, null, 45), "timeout after 45 min");
+  assert.equal(sessionEnd(result("error_max_budget_usd"), false, 1, 45), "error_max_budget_usd");
+  assert.equal(sessionEnd(result("success"), false, 0, 45), "");
+  assert.equal(sessionEnd("", false, 137, 45), "exit 137");
+  assert.deepEqual(writerEnd(result("success"), false, 0, 30), { end: "success, 3 turns", usd: 1.25 });
+  assert.deepEqual(writerEnd("partial output", true, 143, 30), { end: "timeout after 30 min", usd: null });
+});
+
+test("the gate gives the writer end as the cause of a missing test", () => {
+  const g = runGate({ claims: [{ id: "C1", text: "x" }], report: { suites: [] }, head: "h", savedSha: "h", dirty: false, testHashAtStart: "a", testHashNow: "a", fileExists: () => true, writerEnd: "timeout after 30 min" });
+  assert.deepEqual(g.rows[0].reasons, ["no test (test writer: timeout after 30 min)"]);
+});
+
+test("runStack puts how the session ended in the reason, logs it and saves the run", async () => {
+  const { stacks } = setup();
+  const { stack } = stacks.set({ ...where, tasks: two });
+  const r = await runStack(stacks, stack.id, async () => "timeout after 1 min", state(stack.id));
+  assert.equal(r.state, "stopped");
+  assert.match(r.reason!, /never ran awb prove \(session: timeout after 1 min\)$/);
+  assert.equal(stacks.task(stack.tasks[0].id)!.fail_reason, r.reason);
+  assert.deepEqual(stacks.run("run-1"), { id: "run-1", stackId: stack.id, state: "stopped", current: stack.tasks[0].id, reason: r.reason });
+  const log = readFileSync(join(stack.tasks[0].folder, "events.log"), "utf8");
+  assert.match(log, /session started\n.*session ended: timeout after 1 min\n.*failed: /);
+});
+
+test("the budget stops the run before a session starts", async () => {
+  const { stacks } = setup();
+  const { stack } = stacks.set({ ...where, tasks: two });
+  let started = 0;
+  const r = await runStack(stacks, stack.id, async () => void started++, state(stack.id), { budget: () => "the daily budget is used" });
+  assert.equal(started, 0);
+  assert.equal(r.reason, "the daily budget is used");
+  assert.equal(stacks.task(stack.tasks[0].id)!.status, "waiting", "the task is not failed, so a retry is not needed");
+});
+
+test("after a restart, recover stops a running run and fails a doing task", () => {
+  const file = join(tmp(), "awb.db");
+  const a = setup(file);
+  const { stack } = a.stacks.set({ ...where, tasks: two });
+  a.stacks.saveRun({ ...state(stack.id), current: stack.tasks[0].id });
+  a.stacks.setStatus(stack.tasks[0].id, "doing");
+  a.store.close();
+
+  const b = setup(file);
+  assert.deepEqual(b.stacks.recover(), { runs: 1, tasks: [stack.tasks[0].id] });
+  assert.equal(b.stacks.run("run-1")!.state, "stopped");
+  assert.equal(b.stacks.run("run-1")!.reason, "daemon restart");
+  assert.equal(b.stacks.task(stack.tasks[0].id)!.status, "failed");
+  assert.deepEqual(b.stacks.recover(), { runs: 0, tasks: [] }, "a second recover changes nothing");
+});
+
+test("the cost report adds sessions and writers by day, repo and task, and counts unpriced sessions", () => {
+  const { store, stacks } = setup();
+  const { stack } = stacks.set({ ...where, tasks: two });
+  const [t1] = stack.tasks;
+  store.register({ id: "task-session", repo: "/r", worktree: "/w", branch: t1.branch! });
+  store.setUsage("task-session", { input: 0, output: 0, cache_read: 0, cache_creation: 0, cost_usd: 1.5 });
+  const a1 = stacks.startAttempt(t1.id, "task-session");
+  const a2 = stacks.startAttempt(t1.id, "task-session");
+  stacks.setWriterCost(a1, 0.75);
+  stacks.setWriterCost(a2, 0.25);
+  store.register({ id: "chat", repo: "/other", worktree: "/other", branch: "main" });
+  store.setUsage("chat", { input: 0, output: 0, cache_read: 0, cache_creation: 0, cost_usd: 0.5 });
+  store.register({ id: "unpriced", repo: "/r", worktree: "/r", branch: "main" });
+  store.setUsage("unpriced", { input: 9, output: 9, cache_read: 0, cache_creation: 0, cost_usd: null });
+
+  const r = costReport(store.db, "");
+  assert.equal(r.total_usd, 3);
+  assert.equal(r.session_usd, 2, "a session with two attempts counts once");
+  assert.equal(r.writer_usd, 1);
+  assert.deepEqual(r.by_repo, { "/r": 2.5, "/other": 0.5 });
+  assert.deepEqual(r.by_task, [{ task_id: t1.id, title: "A", usd: 2.5 }]);
+  assert.equal(r.unpriced_sessions, 1);
+  assert.equal(costReport(store.db, "", "/other").total_usd, 0.5);
+  assert.equal(costReport(store.db, "2999-01-01T00:00:00Z").total_usd, 0, "since filters the rows");
+
+  assert.equal(budgetCheck(store.db, 0), null, "no budget set");
+  assert.equal(budgetCheck(store.db, 100), null);
+  assert.match(budgetCheck(store.db, 2)!, /^the daily budget is used: 3\.00 of 2\.00 USD today/);
+});
+
+test("the run notice names the repo, the task and the reason", () => {
+  const { stacks } = setup();
+  const { stack } = stacks.set({ ...where, tasks: two });
+  const m = runMessage(stacks, { id: "x", stackId: stack.id, state: "stopped", current: stack.tasks[0].id, reason: "timeout" });
+  assert.deepEqual(m, { title: "awb: r stack stopped", body: "A: timeout" });
+  assert.equal(runMessage(stacks, { id: "x", stackId: stack.id, state: "done", current: null, reason: null }).body, "2 task(s) shipped");
+});
