@@ -6,18 +6,20 @@ v6 is a proof of concept. The acceptance test passes (`e2e/acceptance.sh`), but 
 
 ### When things go wrong
 
-- [ ] **A notice when a run stops.** A stopped stack reports nothing today. Send a desktop notice (`osascript` on macOS) when a run goes to `stopped` or `done`. Add Slack later, as an optional webhook.
-- [ ] **The true failure reason when a limit stops a session.** When the test writer reaches its time limit, the gate says "no test". When a task session reaches its budget or time limit, the reason says "ended without a PR". Record the limit (`timeout`, `budget`, `exit <code>`) on the attempt, and put it in `fail_reason`.
-- [ ] **No stuck `doing` task.** `awb prove` sets `doing`, and nothing resets it when the session ends. The planted-bug task in the acceptance run stayed `doing`. At the end of a proof run, and when the daemon starts, set each `doing` task with no live proof run back to `waiting` or `failed`.
-- [ ] **A quiet-session check.** Flag a session with no hook event for N minutes (default 15) as `quiet` in the feed.
-- [ ] **Logs where the task is.** Keep `setup.log`, `writer.jsonl`, `run.log` and the session transcript as they are now. Add the daemon errors for a task to its folder, as `daemon.log` is only one file for all tasks.
-- [ ] **A durable run state.** The runner keeps runs in memory, so a daemon restart loses a running stack. Store runs in SQLite, and on start mark a run that was `running` as `stopped` with the reason "daemon restart".
+- [x] **A notice when a run stops.** A stopped stack reports nothing today. Send a desktop notice (`osascript` on macOS) when a run goes to `stopped` or `done`. Add Slack later, as an optional webhook.
+- [x] **The true failure reason when a limit stops a session.** A task session and the test writer report how they ended (`timeout after N min`, a result subtype, or `exit <code>`). It goes into `fail_reason` and into the "no test" reason of the gate.
+- [x] **No stuck `doing` task.** `awb prove` sets `doing`, and nothing resets it when the session ends. The planted-bug task in the acceptance run stayed `doing`. At the end of a proof run, and when the daemon starts, set each `doing` task with no live proof run back to `waiting` or `failed`.
+- [x] **A quiet-session check.** A session with no hook event for `AWB_QUIET_MIN` minutes (default 15) is `quiet`. A session whose `awb` process is dead is `lost`. (The Live view does not show them yet: see section 3.)
+- [ ] **One structured log, viewable from another computer.** See [TODO-logging.md](TODO-logging.md). It replaces the `events.log` file in each task folder.
+- [x] **A durable run state.** The runner keeps runs in memory, so a daemon restart loses a running stack. Store runs in SQLite, and on start mark a run that was `running` as `stopped` with the reason "daemon restart".
 
 ### Cost
 
-- [ ] **USD for each session.** The Live view shows tokens. The result row of a `-p` session has `total_cost_usd`. For an interactive session, compute USD from the tokens and a price table for each model.
-- [ ] **Totals.** `awb cost [--since 7d] [--repo] [--json]`: the total for each day, repo, stack and task. Split it into the task session and the test writer.
-- [ ] **A total budget.** `AWB_DAILY_BUDGET_USD`. The runner and `awb prove` refuse to start a new session when today's total is above it. Each session has a limit already, but nothing stops the tenth retry.
+- [x] **USD for each session.** An estimated cost from the tokens and a price table for each model (`prices.ts`). The writer cost of each attempt is saved. `GET /api/cost` gives the totals.
+- [ ] **`awb cost [--since 7d] [--repo] [--json]`.** The CLI command for `GET /api/cost`: the total for each day, repo and task, split into the task session and the test writer.
+- [ ] **Keep the price table current.** `prices.ts` is a copy of the published prices. A new model has no price until someone adds it, and the cost report counts it as unpriced.
+
+awb tracks cost and sets no spend limit.
 
 ## 2. CLI and core, with awb on awb
 
