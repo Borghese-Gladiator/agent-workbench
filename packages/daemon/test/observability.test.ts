@@ -10,7 +10,7 @@ import { createStacks, migrateStacks } from "../src/stacks.ts";
 import { runStack, sessionEnd, type RunState } from "../src/runner.ts";
 import { writerEnd } from "../src/prove.ts";
 import { runGate } from "../src/gate.ts";
-import { costReport } from "../src/cost.ts";
+import { costReport, costText } from "../src/cost.ts";
 import { runMessage } from "../src/notify.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "awb-obs-"));
@@ -129,4 +129,26 @@ test("the run notice names the repo, the task and the reason", () => {
   const m = runMessage(stacks, { id: "x", stackId: stack.id, state: "stopped", current: stack.tasks[0].id, reason: "timeout" });
   assert.deepEqual(m, { title: "awb: r stack stopped", body: "A: timeout" });
   assert.equal(runMessage(stacks, { id: "x", stackId: stack.id, state: "done", current: null, reason: null }).body, "2 task(s) shipped");
+});
+
+test("the cost report filters by repo name or path, and the text form lists day, repo and task", () => {
+  const { store, stacks } = setup();
+  const { stack } = stacks.set({ repo: "/src/games", branch: "main", base: "main", tasks: two });
+  store.register({ id: "s1", repo: "/src/games", worktree: "/w", branch: "x" });
+  store.setUsage("s1", { input: 0, output: 0, cache_read: 0, cache_creation: 0, cost_usd: 1.25 });
+  stacks.setWriterCost(stacks.startAttempt(stack.tasks[0].id, "s1"), 0.5);
+  store.register({ id: "s2", repo: "/src/other", worktree: "/o", branch: "main" });
+  store.setUsage("s2", { input: 1, output: 1, cache_read: 0, cache_creation: 0, cost_usd: null });
+
+  assert.equal(costReport(store.db, "", "games").total_usd, 1.75);
+  assert.equal(costReport(store.db, "", "/src/games").total_usd, 1.75);
+  assert.equal(costReport(store.db, "", "games").unpriced_sessions, 0, "the unpriced count follows the repo filter");
+  assert.equal(costReport(store.db, "", "other").unpriced_sessions, 1);
+
+  const text = costText(costReport(store.db, ""));
+  assert.match(text, /^cost since .* \(estimate from token counts\)\ntotal 1\.75 USD: task and chat sessions 1\.25 USD, test writer 0\.50 USD/);
+  assert.match(text, /by repo:\n +1\.75 USD {2}games/);
+  assert.match(text, new RegExp(`top tasks:\\n +1\\.75 USD {2}${stack.tasks[0].id.slice(0, 8)} {2}A`));
+  assert.match(text, /1 session\(s\) have no price/);
+  assert.match(costText(costReport(store.db, "2999-01-01")), /no cost in this period/);
 });

@@ -26,6 +26,7 @@ awb ui                           # opens the session list in the browser
 | `awb ship [--json]` | Runs the gate again from the files on disk. If it passes, scans the specs for secrets, pushes the branch, opens a draft PR, uploads each video to the prerelease `awb-proof-<PR>`, and writes the PR body. Sets the task to `done`. Refuses when the gate fails. |
 | `awb show [task] [--json]` | Shows a task: with no id, the task of the current branch. A prefix of 6 or more characters works. Shows the claims, the failure reason, every gate row, the cost, the transcripts and the PR. |
 | `awb tasks [--repo <path>] [--status a,b] [--since 7d\|12h\|30m\|date] [--json]` | Lists the tasks of all repos, newest first, with the failed claims of the last gate. |
+| `awb cost [--since 7d] [--repo <name or path>] [--json]` | The estimated cost for each day, repo and task, split into sessions and the test writer. The estimate comes from the token counts and the price table in `prices.ts`. A session with a model that is not in the table counts as unpriced. |
 | `awb task rm <id...> [--json]` | Removes waiting tasks in one transaction. If one id has started or does not exist, nothing is removed. |
 
 Time limits: `AWB_TASK_TIMEOUT_MIN` for a task session (default 45) and `AWB_WRITER_TIMEOUT_MIN` for the test writer (default 30). awb sets no spend limit. It records the cost of each session and test writer. `AWB_CLAUDE` replaces `claude` in the launcher and the task sessions, and `AWB_WRITER_CLAUDE` replaces it in the test writer.

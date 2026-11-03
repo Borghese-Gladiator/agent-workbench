@@ -16,7 +16,7 @@ v6 is a proof of concept. The acceptance test passes (`e2e/acceptance.sh`), but 
 ### Cost
 
 - [x] **USD for each session.** An estimated cost from the tokens and a price table for each model (`prices.ts`). The writer cost of each attempt is saved. `GET /api/cost` gives the totals.
-- [ ] **`awb cost [--since 7d] [--repo] [--json]`.** The CLI command for `GET /api/cost`: the total for each day, repo and task, split into the task session and the test writer.
+- [x] **`awb cost [--since 7d] [--repo] [--json]`.** The CLI command for `GET /api/cost`: the total for each day, repo and task, split into the task session and the test writer.
 - [ ] **Keep the price table current.** `prices.ts` is a copy of the published prices. A new model has no price until someone adds it, and the cost report counts it as unpriced.
 
 awb tracks cost and sets no spend limit.

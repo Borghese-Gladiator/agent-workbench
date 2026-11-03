@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, sep } from "node:path";
 import { parseSince, StackError, taskLog, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
 import { prove, run, type ProveDeps } from "./prove.ts";
-import { costReport } from "./cost.ts";
+import { costReport, costText } from "./cost.ts";
 import type { DatabaseSync } from "node:sqlite";
 import { ship, ShipRefused, syncStatus } from "./ship.ts";
 import type { createRunner } from "./runner.ts";
@@ -194,7 +194,12 @@ export function taskRoutes(
       if (!db) return send(501, { error: "no database" }), true;
       try {
         const since = parseSince(url.searchParams.get("since") ?? "7d");
-        return send(200, costReport(db, since, url.searchParams.get("repo") ?? undefined)), true;
+        const report = costReport(db, since, url.searchParams.get("repo") ?? undefined);
+        if (url.searchParams.get("format") === "text") {
+          res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+          return res.end(costText(report)), true;
+        }
+        return send(200, report), true;
       } catch (err) {
         return fail(err), true;
       }

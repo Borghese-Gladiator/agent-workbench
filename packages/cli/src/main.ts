@@ -57,6 +57,9 @@ switch (cmd) {
   case "tasks":
     process.exitCode = await tasksCmd(rest);
     break;
+  case "cost":
+    process.exitCode = await costCmd(rest.includes("--json"));
+    break;
   case "task":
     if (rest[0] !== "rm" || rest.length < 2) {
       console.error("usage: awb task rm <id...>");
@@ -293,6 +296,21 @@ async function tasksCmd(args: string[]): Promise<number> {
     console.error(`awb: ${(err as Error).message}`);
     return 1;
   }
+}
+
+async function costCmd(json: boolean): Promise<number> {
+  const q = new URLSearchParams({ since: flag("--since") ?? "7d" });
+  const repo = flag("--repo");
+  if (repo) q.set("repo", repo);
+  if (!json) q.set("format", "text");
+  const d = await ensureDaemon(home);
+  const res = await fetch(`http://127.0.0.1:${d.port}/api/cost?${q}`);
+  if (!res.ok) {
+    console.error(`awb: ${(await res.json()).error ?? res.status}`);
+    return 1;
+  }
+  console.log(json ? JSON.stringify(await res.json(), null, 2) : await res.text());
+  return 0;
 }
 
 async function taskRm(ids: string[], json: boolean): Promise<number> {
