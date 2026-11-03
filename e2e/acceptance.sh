@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Acceptance test for v6 (PROPOSAL 6.2), with the real claude and real GitHub.
-# Usage: bash spikes/acceptance/run.sh setup|single|bug|stack|ask   (WORK=<dir> keeps state between parts)
+# Usage: bash e2e/acceptance.sh setup|single|bug|stack|ask   (WORK=<dir> keeps state between parts)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-AWB="$HERE/../../packages/cli/bin/awb"
+AWB="$HERE/../packages/cli/bin/awb"
 REMOTE="${REMOTE:-https://github.com/Borghese-Gladiator/browser-games__ai.git}"
 LOCAL_GAMES="${LOCAL_GAMES:-$HOME/GitHub/wip-browser-games}"
 : "${WORK:?set WORK to a folder for the run state}"

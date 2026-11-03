@@ -41,11 +41,5 @@ To test:
 ```sh
 npm test
 npm run typecheck
-bash spikes/phase1/check.sh      # manual check with a stub claude, no tokens
-bash spikes/phase2/check.sh      # live feed check with the real claude (haiku)
-bash spikes/phase3/check.sh      # awb prove on the games repo (real claude, about 1.20 USD)
-SPECS=<phase 3 task>/proof-tests bash spikes/phase4/check.sh   # awb ship to GitHub, then close the PR
-bash spikes/phase5/check.sh      # a stack of three with a stub claude: stacked PRs, a planted bug, a retry
-bash spikes/phase6/check.sh      # a failed task, then the real claude (haiku) answers "what failed?"
-bash spikes/phase7/check.sh      # the four UI views in a headless browser, with a screenshot of each
+WORK=<dir> bash e2e/acceptance.sh setup   # then single, bug, stack, ask (real claude and GitHub, about 6 USD)
 ```

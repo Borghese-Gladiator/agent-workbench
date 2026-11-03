@@ -130,7 +130,7 @@ multi-adapter runtime layer, and real QA with browser media. Ordinary runs
 reached a draft PR without a human at each gate.
 
 **Why it was archived:** v5 did not fail on features. It cost too much to run and
-to keep correct. A rebuild ([`PROPOSAL.md`](../PROPOSAL.md))
+to keep correct. A rebuild ([`v6-build/PROPOSAL.md`](v6-build/PROPOSAL.md))
 replaces it. The reasons are below.
 
 - **Runtime.** The system needed Temporal, a daemon, a worker, and a web server
@@ -155,3 +155,7 @@ replaces it. The reasons are below.
 
 The v6 plan keeps one hard rule in code: no PR claims a feature works without
 proof. It targets less than half the code, no Temporal, no worker, and one small daemon for the UI.
+
+## v6 build notes — `v6-build/`
+
+The live v6 code is in `packages/`. This folder keeps the design and the proof of how it was built: `PROPOSAL.md` (the design), `ADDENDUM-triage.md` (a draft fourth use case, not built), and `spikes/` (the phase 0 facts and the manual check of each phase 1 to 7). The spikes are not maintained and can break. The maintained end-to-end test is `e2e/acceptance.sh`.

@@ -1,6 +1,6 @@
 # Agent Workbench v6 architecture
 
-These diagrams follow `PROPOSAL.md` sections 3 and 4. Section 6.3 holds the phase 0 facts that shaped them.
+These diagrams follow `archive/v6-build/PROPOSAL.md` sections 3 and 4. Section 6.3 holds the phase 0 facts that shaped them.
 
 ## System
 
