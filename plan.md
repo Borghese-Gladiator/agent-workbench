@@ -79,24 +79,14 @@ Manual:
 - `awb logs --level error --since 1h` shows the failure.
 - `awb logs --follow` prints new lines while a run goes on.
 
-# Handoff (state at the end of the session, 2026-11-03)
+# Handoff (state at the end of the session, 2026-11-04)
 
-The last commit on this branch is a work-in-progress commit. `npx tsc --noEmit` fails until step 1 is done.
+The branch typechecks and 107 unit tests pass. Logging part 1 is done (`log.ts`, every daemon part logs, `awb logs`, CLI errors, no delete by default, `AWB_LOG_KEEP_DAYS`). `infra/logging/` exists but has not run.
 
-Answers from the user for `docs/TODO-logging.md`:
-1. The log server (Loki and Grafana) runs on this local machine, the same machine as awb. Other computers reach Grafana through Tailscale. There is no cloud server.
-2. Tailscale is the access path.
-3. Never delete logs. Build an expiration setting, with the default "none": no rotation delete in `log.ts`, no Loki retention.
-4. Docker is acceptable on the log server.
-
-Done in logging part 1:
-- `packages/daemon/src/log.ts`: `createLog`, `readLog`, `matches`, `logText`, `redact`, `SECRETS`. Not yet called from `main.ts`. Its rotation still deletes after 10 files: change this to the "none" default (step 3).
-- `ship.ts` imports `SECRETS` from `log.ts`.
-- `taskLog` and `events.log` are removed from `stacks.ts`.
-- `runner.ts`: `RunOpts.log`, and the events `session.start`, `session.ended` and `task.failed`.
+Decisions from the user: Loki and Grafana run on this local machine. Other computers reach Grafana through Tailscale. Logs are never deleted by default. Docker is acceptable. Do not start Docker without asking the user first.
 
 Next steps, in order. Commit after each one.
-1. `runner.ts` `createRunner`: log `run.start` and `run.end`, and log a `warn` when `onEnd` throws. `task-routes.ts`: replace the 7 `taskLog` calls with a `log` parameter (prove, gate, ship events), log a `warn` when `syncPrs` fails. `main.ts`: open `createLog(join(home, "logs"))`, pass it to the runner and the routes, log `daemon.start` and `daemon.recover`. `server.ts`: log a `warn` when the cost update fails. `notify.ts`: log a `warn` when the notice spawn fails. The task page reads its lines with `readLog(dir, { task })`. Then typecheck and test.
-2. `GET /api/logs`, `POST /api/log`, `awb logs [--task] [--run] [--level] [--source] [--since] [--follow] [--json]`, and the unit tests in `plan.md` above.
-3. The expiration setting (`AWB_LOG_KEEP_DAYS`, default none) in `log.ts`.
-4. `infra/logging/` for this local machine: Loki (no retention), Grafana bound to the Tailscale address only, the Alloy config, and a Tailscale README.
+1. `main.ts`: set `RunOpts.sessionUsd` so that the runner `session.ended` line carries `usd`. Read the newest `session-N.jsonl` in the task folder with `costOf` from `task-routes.ts`. The dashboard panel "Estimated cost per day" uses it.
+2. `infra/logging/README.md`: install Tailscale, set `GRAFANA_PASSWORD` and `GRAFANA_BIND` (the Tailscale address) in `infra/logging/.env`, set `AWB_LOGS` if `AWB_HOME` is not `~/.awb`, then `docker compose up -d`. Add `.env` to `.gitignore`. Check the files with `docker compose config` (this starts no container).
+3. End-to-end check with a stub claude (no tokens): a stack with a task that times out (`AWB_TASK_TIMEOUT_MIN` small), `awb run --wait`, then `awb logs --task <id>`, `awb logs --level error --since 1h`, and `awb logs --follow` during a run.
+4. Ask the user, then run `docker compose up -d` in `infra/logging/`. Check that the lines reach Loki (`curl -s 127.0.0.1:3100/loki/api/v1/labels`) and that the awb dashboard shows them.
