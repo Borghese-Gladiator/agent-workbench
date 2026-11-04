@@ -10,7 +10,7 @@ import type { Log } from "./log.ts";
 
 export type { RunState };
 export type Session = (task: Task, below: Task[]) => Promise<string | void>;
-export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log };
+export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log; sessionUsd?: (task: Task) => number | null };
 
 export function sessionEnd(out: string, timedOut: boolean, code: number | null, timeoutMin: number): string {
   if (timedOut) return `timeout after ${timeoutMin} min`;
@@ -73,7 +73,7 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
     } catch (err) {
       state.reason = (err as Error).message;
     }
-    opts.log?.(how || state.reason ? "warn" : "info", "runner", "session.ended", { ...ids, how: how || undefined, error: state.reason ?? undefined });
+    opts.log?.(how || state.reason ? "warn" : "info", "runner", "session.ended", { ...ids, how: how || undefined, error: state.reason ?? undefined, usd: opts.sessionUsd?.(task) ?? undefined });
     const after = stacks.task(task.id)!;
     if (after.status !== "done") {
       const base = state.reason ?? failReason(stacks, task.id);

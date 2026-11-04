@@ -1,0 +1,77 @@
+{
+  "uid": "awb",
+  "title": "awb",
+  "schemaVersion": 39,
+  "time": { "from": "now-7d", "to": "now" },
+  "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "host",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "query": "label_values(host)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "task",
+        "label": "task id (prefix)",
+        "type": "textbox",
+        "current": { "text": "", "value": "" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Warnings and errors by source",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (source, level) (count_over_time({job=\"awb\", host=~\"$host\", level=~\"warn|error\"} [$__interval]))", "legendFormat": "{{source}} {{level}}" }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Estimated cost per day (USD)",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        { "refId": "A", "expr": "sum(sum_over_time({job=\"awb\", host=~\"$host\", source=\"runner\"} | json | event=\"session.ended\" | usd != \"\" | unwrap usd [1d]))", "legendFormat": "task sessions", "step": "1d" },
+        { "refId": "B", "expr": "sum(sum_over_time({job=\"awb\", host=~\"$host\", source=\"prove\"} | json | event=\"gate\" | writer_usd != \"\" | unwrap writer_usd [1d]))", "legendFormat": "test writer", "step": "1d" }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "Failed tasks",
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending" },
+      "targets": [
+        { "refId": "A", "expr": "{job=\"awb\", host=~\"$host\", source=\"runner\", level=\"error\"} | json | event=\"task.failed\" | line_format \"{{.task}}  {{.reason}}\"" }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "Newest warnings and errors",
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 10 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true },
+      "targets": [
+        { "refId": "A", "expr": "{job=\"awb\", host=~\"$host\", level=~\"warn|error\"}" }
+      ]
+    },
+    {
+      "type": "logs",
+      "title": "One task (set the task id above)",
+      "gridPos": { "x": 0, "y": 26, "w": 24, "h": 12 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Ascending", "enableLogDetails": true },
+      "targets": [
+        { "refId": "A", "expr": "{job=\"awb\", host=~\"$host\"} | json | task=~\"$task.*\" | task != \"\"" }
+      ]
+    }
+  ]
+}
