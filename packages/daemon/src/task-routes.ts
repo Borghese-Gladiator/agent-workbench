@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, sep } from "node:path";
 import { parseSince, StackError, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
-import { readLog, type Log } from "./log.ts";
+import { LEVELS, logText, readLog, type Level, type Log, type LogFilter } from "./log.ts";
 import { prove, run, type ProveDeps } from "./prove.ts";
 import { costReport, costText } from "./cost.ts";
 import type { DatabaseSync } from "node:sqlite";
@@ -199,6 +199,42 @@ export function taskRoutes(
       const stack = b.stackId ? stacks.get(b.stackId) : stacks.newestStack(b.repo ?? "");
       if (!stack) return send(404, { error: "no stack for this repo; run awb stack set first" }), true;
       return send(202, runner.start(stack.id)), true;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/logs") {
+      const p = url.searchParams;
+      const level = p.get("level") ?? undefined;
+      if (level && !LEVELS.includes(level as Level)) return send(400, { error: `bad level ${level}: use ${LEVELS.join(", ")}` }), true;
+      let since: string | undefined;
+      try {
+        since = p.get("since") ? parseSince(p.get("since")!) : undefined;
+      } catch (err) {
+        return fail(err), true;
+      }
+      const f: LogFilter = {
+        task: p.get("task") ?? undefined,
+        run: p.get("run") ?? undefined,
+        session: p.get("session") ?? undefined,
+        source: p.get("source") ?? undefined,
+        level: level as Level | undefined,
+        since,
+        limit: Number(p.get("limit") || 500),
+      };
+      const lines = logDir ? readLog(logDir, f) : [];
+      if (p.get("format") === "text") {
+        res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        return res.end(lines.map(logText).join("\n") + (lines.length ? "\n" : "")), true;
+      }
+      return send(200, lines), true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/log") {
+      const b = await body();
+      const level = LEVELS.includes(b.level) ? (b.level as Level) : "error";
+      if (typeof b.event !== "string" || !b.event) return send(400, { error: "missing event" }), true;
+      const { level: _l, source: _s, event, ts: _t, ...fields } = b;
+      log(level, "cli", String(event).slice(0, 100), fields);
+      return send(201, { ok: true }), true;
     }
 
     if (req.method === "GET" && url.pathname === "/api/cost") {

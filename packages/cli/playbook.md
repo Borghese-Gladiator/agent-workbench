@@ -56,6 +56,7 @@ The daemon keeps every task, attempt and gate result. Answer from it, not from m
 | Why did a task fail? | `awb show <id> --json`: the failure reason, the gate rows of each attempt, the cost and the transcripts |
 | Which PRs are still open? | `awb tasks --status done --json` (a merged PR shows as `merged`) |
 | What did it cost (this week)? | `awb cost --since 7d --json` |
+| What went wrong (today)? | `awb logs --level warn --since 1d`, then `awb logs --task <id>` for one task |
 | Retry it. | `awb retry <id> --wait` |
 | Drop these tasks. | `awb task rm <id...>` (waiting tasks only) |
 

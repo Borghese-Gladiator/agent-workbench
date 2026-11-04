@@ -100,3 +100,23 @@ export async function api(info: DaemonInfo, path: string, body?: unknown) {
   if (!res.ok) throw new Error(`${path}: ${json.error ?? res.status}`);
   return json;
 }
+
+export async function reportCliError(home: string, command: string, code: number, message: string, timeoutMs = 1000): Promise<"daemon" | "file"> {
+  const line = { level: "error", event: "error", command, code, error: message.slice(0, 2000) };
+  const d = readDaemonInfo(home);
+  if (d && pidAlive(d.pid)) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${d.port}/api/log`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(line),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.ok) return "daemon";
+    } catch {}
+  }
+  const { createLog } = await import("../../daemon/src/log.ts");
+  const { level: _l, event: _e, ...fields } = line;
+  createLog(join(home, "logs"))("error", "cli", "error", fields);
+  return "file";
+}
