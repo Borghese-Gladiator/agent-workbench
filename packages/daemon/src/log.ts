@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 export const SECRETS: [string, RegExp][] = [
@@ -20,16 +20,38 @@ export type Log = (level: Level, source: string, event: string, fields?: Record<
 
 export const LOG_FILE = "awb.jsonl";
 
-export function createLog(dir: string, opts: { maxBytes?: number; keep?: number; echo?: (line: string) => void } = {}): Log {
+const ROTATED = /^awb\.(\d{8}T\d{9}Z)(?:-\d+)?\.jsonl$/;
+
+export function rotatedFiles(dir: string): string[] {
+  return existsSync(dir) ? readdirSync(dir).filter((f) => ROTATED.test(f)).sort() : [];
+}
+
+export function keepDays(env = process.env): number | null {
+  const v = env.AWB_LOG_KEEP_DAYS;
+  if (!v || v === "none") return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export function expire(dir: string, days: number | null, now = Date.now()): string[] {
+  if (days === null) return [];
+  const cutoff = now - days * 86_400_000;
+  const gone = rotatedFiles(dir).filter((f) => statSync(join(dir, f)).mtimeMs < cutoff);
+  for (const f of gone) rmSync(join(dir, f), { force: true });
+  return gone;
+}
+
+export function createLog(dir: string, opts: { maxBytes?: number; keepDays?: number | null; echo?: (line: string) => void } = {}): Log {
   const maxBytes = opts.maxBytes ?? 50 * 1024 * 1024;
-  const keep = opts.keep ?? 10;
+  const days = opts.keepDays === undefined ? keepDays() : opts.keepDays;
   const file = join(dir, LOG_FILE);
   const rotate = () => {
     if (!existsSync(file) || statSync(file).size < maxBytes) return;
-    rmSync(`${file}.${keep - 1}`, { force: true });
-    for (let i = keep - 2; i >= 1; i--) if (existsSync(`${file}.${i}`)) renameSync(`${file}.${i}`, `${file}.${i + 1}`);
-    if (keep > 1) renameSync(file, `${file}.1`);
-    else rmSync(file, { force: true });
+    const stamp = new Date().toISOString().replace(/[-:.]/g, "");
+    let name = `awb.${stamp}.jsonl`;
+    for (let i = 1; existsSync(join(dir, name)); i++) name = `awb.${stamp}-${i}.jsonl`;
+    renameSync(file, join(dir, name));
+    expire(dir, days);
   };
   return (level, source, event, fields = {}) => {
     const clean = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined && v !== null));
@@ -57,8 +79,7 @@ export function matches(l: LogLine, f: LogFilter): boolean {
 }
 
 export function readLog(dir: string, f: LogFilter = {}): LogLine[] {
-  const files = [join(dir, LOG_FILE)];
-  for (let i = 1; existsSync(join(dir, `${LOG_FILE}.${i}`)); i++) files.unshift(join(dir, `${LOG_FILE}.${i}`));
+  const files = [...rotatedFiles(dir).map((f) => join(dir, f)), join(dir, LOG_FILE)];
   const out: LogLine[] = [];
   for (const file of files) {
     if (!existsSync(file)) continue;

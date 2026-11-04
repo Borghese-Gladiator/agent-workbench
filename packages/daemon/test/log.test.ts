@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createLog, logText, readLog, redact } from "../src/log.ts";
+import { createLog, expire, keepDays, logText, readLog, redact, rotatedFiles } from "../src/log.ts";
 import { reportCliError } from "../../cli/src/home.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "awb-log-"));
@@ -69,4 +69,37 @@ test("a CLI error goes to the log file when the daemon is down", async () => {
   assert.equal(line.level, "error");
   assert.equal(line.command, "prove");
   assert.equal(line.error, "no task on this branch");
+});
+
+test("rotation keeps every file by default: the expiration setting is none", () => {
+  const dir = tmp();
+  const log = createLog(dir, { maxBytes: 100, keepDays: null });
+  for (let i = 0; i < 30; i++) log("info", "runner", `e${i}`, { pad: "x".repeat(60) });
+  const files = rotatedFiles(dir);
+  assert.ok(files.length >= 20, `only ${files.length} rotated files`);
+  assert.ok(files.every((f) => /^awb\.\d{8}T\d{9}Z(-\d+)?\.jsonl$/.test(f)), "a rotated file keeps one fixed name");
+  assert.equal(readLog(dir).length, 30, "no line is lost");
+});
+
+test("AWB_LOG_KEEP_DAYS is none unless set, and only then deletes rotated files older than N days", () => {
+  assert.equal(keepDays({}), null);
+  assert.equal(keepDays({ AWB_LOG_KEEP_DAYS: "none" }), null);
+  assert.equal(keepDays({ AWB_LOG_KEEP_DAYS: "0" }), null);
+  assert.equal(keepDays({ AWB_LOG_KEEP_DAYS: "abc" }), null);
+  assert.equal(keepDays({ AWB_LOG_KEEP_DAYS: "90" }), 90);
+
+  const dir = tmp();
+  const old = join(dir, "awb.20250101T000000000Z.jsonl");
+  const recent = join(dir, "awb.20261101T000000000Z.jsonl");
+  writeFileSync(old, "{}\n");
+  writeFileSync(recent, "{}\n");
+  writeFileSync(join(dir, "awb.jsonl"), "{}\n");
+  const now = Date.parse("2026-11-04T00:00:00Z");
+  utimesSync(old, new Date("2025-01-01"), new Date("2025-01-01"));
+  utimesSync(recent, new Date("2026-11-01"), new Date("2026-11-01"));
+
+  assert.deepEqual(expire(dir, null, now), [], "none deletes nothing");
+  assert.equal(readdirSync(dir).length, 3);
+  assert.deepEqual(expire(dir, 30, now), ["awb.20250101T000000000Z.jsonl"]);
+  assert.deepEqual(readdirSync(dir).sort(), ["awb.20261101T000000000Z.jsonl", "awb.jsonl"], "the current file is never deleted");
 });

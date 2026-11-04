@@ -32,6 +32,8 @@ awb ui                           # opens the session list in the browser
 
 Time limits: `AWB_TASK_TIMEOUT_MIN` for a task session (default 45) and `AWB_WRITER_TIMEOUT_MIN` for the test writer (default 30). awb sets no spend limit. It records the cost of each session and test writer. `AWB_CLAUDE` replaces `claude` in the launcher and the task sessions, and `AWB_WRITER_CLAUDE` replaces it in the test writer.
 
+Logs: every part writes JSON lines to `AWB_HOME/logs/awb.jsonl`. At 50 MB the file becomes `awb.<time>.jsonl` and a new one starts. awb never deletes a log file unless you set `AWB_LOG_KEEP_DAYS` to a number of days (the default is `none`). `AWB_QUIET_MIN` (default 15) sets when a silent session shows `quiet`. A run that stops or finishes shows a desktop notice: `AWB_NOTIFY=0` turns it off, and `AWB_NOTIFY_CMD` runs your own command with the title and the text.
+
 `AWB_HOME` defaults to `~/.awb`. Each `AWB_HOME` has its own daemon, database and `daemon.json`. For a dev instance, use `AWB_HOME=~/.awb-dev`.
 
 A repo can replace the default playbook with `.awb/playbook.md`.
