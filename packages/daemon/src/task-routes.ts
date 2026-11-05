@@ -95,7 +95,8 @@ export function taskRoutes(
     const writerUsd = saved.length ? saved.reduce((n: number, v: number) => n + v, 0) : transcripts.filter((f) => f.endsWith("writer.jsonl")).reduce((n, f) => n + costOf(f), 0);
     const lines = logDir ? readLog(logDir, { task: t.id, limit: 200 }) : [];
     const writerEndFile = join(t.folder, "proof", "writer-end.txt");
-    const writer_end = existsSync(writerEndFile) ? readFileSync(writerEndFile, "utf8").trim() : null;
+    const lastWriter = lines.findLast((l) => l.source === "prove" && l.event === "gate" && typeof l.writer === "string");
+    const writer_end = existsSync(writerEndFile) ? readFileSync(writerEndFile, "utf8").trim() : ((lastWriter?.writer as string | undefined) ?? null);
     return { ...t, stack: stacks.get(t.stack_id), attempts, transcripts, specs, log: lines, writer_end, cost_usd: sessionUsd + writerUsd, writer_usd: writerUsd };
   }
 
