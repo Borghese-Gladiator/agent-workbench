@@ -1,6 +1,6 @@
 # TODO: logging, local first, viewable from another computer
 
-Status: plan only. Nothing here is built yet.
+Status: part 1 is built and tested (`e2e/logging.sh`). Part 2 is written in `infra/logging/` but has not run. Part 3 is not started.
 
 ## Goal
 

@@ -79,14 +79,15 @@ Manual:
 - `awb logs --level error --since 1h` shows the failure.
 - `awb logs --follow` prints new lines while a run goes on.
 
-# Handoff (state at the end of the session, 2026-11-04)
+# Handoff (state at the end of the session, 2026-11-05)
 
-The branch typechecks and 107 unit tests pass. Logging part 1 is done (`log.ts`, every daemon part logs, `awb logs`, CLI errors, no delete by default, `AWB_LOG_KEEP_DAYS`). `infra/logging/` exists but has not run.
+The branch typechecks and 108 unit tests pass. `bash e2e/logging.sh` passes (a stub run, no tokens, about 70 s). The archived phase 7 stub check also passes against this code (prove, gate, runner and UI).
+
+Done: logging part 1 (`log.ts`, every daemon part and the CLI log, `awb logs`, no delete by default, `AWB_LOG_KEEP_DAYS`), the session cost on `session.ended`, `infra/logging/` with its README, and the task time limit fix (the kill reaches the whole process group).
 
 Decisions from the user: Loki and Grafana run on this local machine. Other computers reach Grafana through Tailscale. Logs are never deleted by default. Docker is acceptable. Do not start Docker without asking the user first.
 
-Next steps, in order. Commit after each one.
-1. `main.ts`: set `RunOpts.sessionUsd` so that the runner `session.ended` line carries `usd`. Read the newest `session-N.jsonl` in the task folder with `costOf` from `task-routes.ts`. The dashboard panel "Estimated cost per day" uses it.
-2. `infra/logging/README.md`: install Tailscale, set `GRAFANA_PASSWORD` and `GRAFANA_BIND` (the Tailscale address) in `infra/logging/.env`, set `AWB_LOGS` if `AWB_HOME` is not `~/.awb`, then `docker compose up -d`. Add `.env` to `.gitignore`. Check the files with `docker compose config` (this starts no container).
-3. End-to-end check with a stub claude (no tokens): a stack with a task that times out (`AWB_TASK_TIMEOUT_MIN` small), `awb run --wait`, then `awb logs --task <id>`, `awb logs --level error --since 1h`, and `awb logs --follow` during a run.
-4. Ask the user, then run `docker compose up -d` in `infra/logging/`. Check that the lines reach Loki (`curl -s 127.0.0.1:3100/loki/api/v1/labels`) and that the awb dashboard shows them.
+Not done:
+1. `infra/logging/` has not run. Ask the user, then `docker compose -f infra/logging/docker-compose.yml up -d` with `infra/logging/.env` set. Check `curl -s 127.0.0.1:3100/ready`, the labels, and the awb dashboard.
+2. Tailscale is not installed on this machine. Remote access is not tested.
+3. The UI does not show the task log lines, `quiet` and `lost`, or USD yet (`docs/TODO.md` section 3).
