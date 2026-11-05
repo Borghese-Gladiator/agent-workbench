@@ -22,10 +22,13 @@ function fixture() {
   return { root, repo };
 }
 
-test("the root comes from the flag, then AWB_WORKTREES, then ~/LOCAL_worktrees", () => {
+test("the root comes from the flag, then AWB_WORKTREES, then the Klaviyo or home default", () => {
   assert.equal(wtRoot("/a", { AWB_WORKTREES: "/b" }), "/a");
   assert.equal(wtRoot(undefined, { AWB_WORKTREES: "/b" }), "/b");
-  assert.match(wtRoot(undefined, {}), /\/LOCAL_worktrees$/);
+  assert.equal(wtRoot(undefined, {}, "/h/Klaviyo/Repos/app/src", "/h"), "/h/Klaviyo/Repos/LOCAL_worktrees");
+  assert.equal(wtRoot(undefined, {}, "/h/Klaviyo/Repos", "/h"), "/h/Klaviyo/Repos/LOCAL_worktrees");
+  assert.equal(wtRoot(undefined, {}, "/h/Klaviyo/Reposx", "/h"), "/h/LOCAL_worktrees");
+  assert.equal(wtRoot(undefined, {}, "/h/GitHub/agent-workbench", "/h"), "/h/LOCAL_worktrees");
 });
 
 test("scan groups worktrees by repo and reads branch and dirty state", async () => {

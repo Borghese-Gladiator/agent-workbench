@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { on } from "node:events";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { emitKeypressEvents } from "node:readline";
 import { parseArgs, promisify } from "node:util";
 
@@ -11,8 +11,11 @@ const git = async (cwd: string, ...args: string[]) => (await run("git", args, { 
 
 export type Wt = { repo: string; name: string; path: string; branch: string; dirty: number; age: string };
 
-export function wtRoot(flag?: string, env = process.env): string {
-  return flag ?? env.AWB_WORKTREES ?? join(homedir(), "LOCAL_worktrees");
+export function wtRoot(flag?: string, env = process.env, cwd = process.cwd(), home = homedir()): string {
+  const set = flag ?? env.AWB_WORKTREES;
+  if (set) return set;
+  const klaviyo = join(home, "Klaviyo", "Repos");
+  return join((cwd + sep).startsWith(klaviyo + sep) ? klaviyo : home, "LOCAL_worktrees");
 }
 
 const dirs = (p: string) =>
