@@ -7,6 +7,7 @@ import { HOOK_EVENTS } from "./hook-send.ts";
 export const DEFAULT_PLAYBOOK = fileURLToPath(new URL("../playbook.md", import.meta.url));
 export const SKILLS_DIR = fileURLToPath(new URL("../skills", import.meta.url));
 export const HOOK_BIN = fileURLToPath(new URL("../bin/awb-hook", import.meta.url));
+export const PLUGIN_DIR = fileURLToPath(new URL("../plugin", import.meta.url));
 
 export function awbSettings(home: string, hookBin = HOOK_BIN) {
   const quoted = `'${hookBin.replaceAll("'", `'\\''`)}'`;
@@ -45,6 +46,8 @@ export function claudeArgs(passThrough: string[], playbook: string, settings: ob
     readFileSync(playbook, "utf8").replaceAll("{skills}", SKILLS_DIR),
     "--settings",
     JSON.stringify(settings),
+    "--plugin-dir",
+    PLUGIN_DIR,
     ...passThrough,
   ];
 }

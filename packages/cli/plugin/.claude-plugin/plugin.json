@@ -1,0 +1,5 @@
+{
+  "name": "awb",
+  "version": "0.1.0",
+  "description": "Agent Workbench skills: Sentry fixes with before and after proof, bug triage, and worktrees."
+}

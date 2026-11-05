@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { claudeArgs, awbSettings, DEFAULT_PLAYBOOK, SKILLS_DIR } from "../src/launch.ts";
+import { claudeArgs, awbSettings, DEFAULT_PLAYBOOK, SKILLS_DIR, PLUGIN_DIR } from "../src/launch.ts";
 import { HOOK_EVENTS } from "../src/hook-send.ts";
 
 test("settings register the hook sender for every hook type, with AWB_HOME", () => {
@@ -29,7 +29,9 @@ test("settings deny gh pr create and writes to the daemon files and the proof, n
 for (const passThrough of [["--resume"], ["--resume", "abc"], ["-p", "hello world"], []]) {
   test(`pass-through ${JSON.stringify(passThrough)} reaches claude unchanged and last`, () => {
     const args = claudeArgs(passThrough, DEFAULT_PLAYBOOK, { env: { AWB_HOME: "/h" } });
-    assert.deepEqual(args.slice(4), passThrough);
+    assert.deepEqual(args.slice(6), passThrough);
+    assert.deepEqual(args.slice(4, 6), ["--plugin-dir", PLUGIN_DIR]);
+    assert.ok(existsSync(join(PLUGIN_DIR, ".claude-plugin", "plugin.json")));
     assert.equal(args[0], "--append-system-prompt");
     assert.match(args[1], /awb playbook/);
     assert.equal(args[2], "--settings");
