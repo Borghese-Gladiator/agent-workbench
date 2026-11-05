@@ -81,13 +81,15 @@ Manual:
 
 # Handoff (state at the end of the session, 2026-11-05)
 
-The branch typechecks and 108 unit tests pass. `bash e2e/logging.sh` passes (a stub run, no tokens, about 70 s). The archived phase 7 stub check also passes against this code (prove, gate, runner and UI).
+The branch typechecks and 109 unit tests pass. `bash e2e/logging.sh` passes (a stub run, no tokens, about 70 s). The archived phase 7 stub check also passes against this code (prove, gate, runner and UI).
 
 Done: logging part 1 (`log.ts`, every daemon part and the CLI log, `awb logs`, no delete by default, `AWB_LOG_KEEP_DAYS`), the session cost on `session.ended`, `infra/logging/` with its README, and the task time limit fix (the kill reaches the whole process group).
 
-Decisions from the user: Loki and Grafana run on this local machine. Other computers reach Grafana through Tailscale. Logs are never deleted by default. Docker is acceptable. Do not start Docker without asking the user first.
+The logging stack runs in Docker (the user approved the start on 2026-11-05). `infra/logging/.env` has a random Grafana password; the deny rules block reading `.env`, so the user reads it. Alloy reads `~/.awb/logs`. Checked: Loki, Alloy and Grafana are ready; the lines reach Loki with the labels `host`, `job`, `level` and `source`; an outage test (Alloy stopped, 40 lines written, two new part files) delivers 50 of 50 lines, each once; every dashboard query runs. Log files are one per UTC day and are never renamed, because Alloy keys its read position by path (rename-based rotation lost 12 of 50 lines in the first outage test).
+
+Decisions from the user: Loki and Grafana run on this local machine. Other computers reach Grafana through Tailscale. Logs are never deleted by default. Docker is acceptable. Ask the user before a new Docker start.
 
 Not done:
-1. `infra/logging/` has not run. Ask the user, then `docker compose -f infra/logging/docker-compose.yml up -d` with `infra/logging/.env` set. Check `curl -s 127.0.0.1:3100/ready`, the labels, and the awb dashboard.
-2. Tailscale is not installed on this machine. Remote access is not tested.
+1. Tailscale is not installed on this machine. Remote access is not tested. To open it: install Tailscale, set `GRAFANA_BIND` in `infra/logging/.env` to the Tailscale address, and run `docker compose -f infra/logging/docker-compose.yml up -d`.
+2. The cost panel has no data until a real (not stub) session runs with this code.
 3. The UI does not show the task log lines, `quiet` and `lost`, or USD yet (`docs/TODO.md` section 3).
