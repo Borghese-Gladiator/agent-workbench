@@ -10,7 +10,10 @@ v6 is a proof of concept. The acceptance test passes (`e2e/acceptance.sh`), but 
 - [x] **The true failure reason when a limit stops a session.** A task session and the test writer report how they ended (`timeout after N min`, a result subtype, or `exit <code>`). It goes into `fail_reason` and into the "no test" reason of the gate.
 - [x] **No stuck `doing` task.** `awb prove` sets `doing`, and nothing resets it when the session ends. The planted-bug task in the acceptance run stayed `doing`. At the end of a proof run, and when the daemon starts, set each `doing` task with no live proof run back to `waiting` or `failed`.
 - [x] **A quiet-session check.** A session with no hook event for `AWB_QUIET_MIN` minutes (default 15) is `quiet`. A session whose `awb` process is dead is `lost`. (The Live view does not show them yet: see section 3.)
-- [ ] **One structured log, viewable from another computer.** See [TODO-logging.md](TODO-logging.md). It replaces the `events.log` file in each task folder.
+- [x] **One structured log.** Every part writes JSON lines to `AWB_HOME/logs/awb.<day>.jsonl`, and `awb logs` reads them. See [TODO-logging.md](TODO-logging.md).
+- [x] **The log in Grafana on this machine.** `infra/logging/` runs Loki, Alloy and Grafana in Docker, and the outage test delivers every line once.
+- [ ] **The log from another computer.** Install Tailscale, set `GRAFANA_BIND` in `infra/logging/.env` to the Tailscale address, and test from a second computer.
+- [ ] **Check the cost panel with a real session.** The "Estimated cost per day" panel reads `usd` on `runner.session.ended` and `writer_usd` on `prove.gate`. The stub tests write no cost.
 - [x] **A durable run state.** The runner keeps runs in memory, so a daemon restart loses a running stack. Store runs in SQLite, and on start mark a run that was `running` as `stopped` with the reason "daemon restart".
 
 ### Cost
@@ -46,7 +49,8 @@ Today the UI is mostly read-only. Add actions and the data from section 1.
 - [ ] **A run view.** The current run: `running`, `stopped` or `done`, the active task and how long it has run. A stopped run shows its reason at the top.
 - [ ] **Actions on a failed task.** Buttons for Retry, Rewrite test (a check box for each claim) and Drop. Each calls the same route as its CLI command.
 - [ ] **Cost.** A USD column in Live and Stacks, and the daily total in the header.
-- [ ] **Logs on the task page.** The setup log, the writer log and the limit reason, next to the claim videos.
+- [ ] **Logs on the task page.** The task's lines from the structured log (the task detail already returns them as `log`), the setup log, the writer log and the limit reason, next to the claim videos.
+- [ ] **`quiet` and `lost` in Live.** The feed already sends these states. Give them a color and a short note.
 - [ ] **A PR list.** All open draft PRs with their gate result and sync state.
 - [ ] Do not add a form to start a stack. The chat writes a stack better than a form can.
 

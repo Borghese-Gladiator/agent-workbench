@@ -54,7 +54,7 @@ EOF
   ;;
 single)
   git -C "$REPO" checkout -q main
-  chat single "Add an Undo button to Tic-Tac-Toe. It takes back the last move. It is disabled when there is no move to take back, and after a game ends."
+  chat single "Add a move history to Tic-Tac-Toe. Below the board, list each move in order, for example \"1. X top left\", \"2. O middle center\". The list is empty at the start, and \"Reset game\" clears it."
   ;;
 bug)
   T=$(awb tasks --json 2>/dev/null | node -e 'const t=JSON.parse(require("fs").readFileSync(0)).find((x)=>x.status==="done"); console.log(t.branch, t.base, t.id)')
@@ -64,7 +64,7 @@ bug)
   FILES=$(git -C "$REPO" diff --name-only "origin/$BASE...origin/$BR" -- games/ | grep -v '\.test\.' || true)
   echo "revert the feature code: $FILES"
   git -C "$REPO" checkout "origin/$BASE" -- $FILES
-  git -C "$REPO" commit -qm "planted bug: remove the Undo feature code"
+  git -C "$REPO" commit -qm "planted bug: remove the feature code"
   STACK=$(awb show "$TID" --json 2>/dev/null | node -e 'const t=JSON.parse(require("fs").readFileSync(0)); console.log(JSON.stringify({tasks:[{title:t.title+" (planted bug)",claims:t.claims}]}))')
   (cd "$REPO" && echo "$STACK" | awb stack set 2>/dev/null)
   NEW=$(cd "$REPO" && awb show --json 2>/dev/null | node -e 'console.log(JSON.parse(require("fs").readFileSync(0)).folder)')
@@ -81,7 +81,7 @@ stack)
   git -C "$REPO" checkout -q -b "$BASE"
   git -C "$REPO" push -q -u origin "$BASE"
   echo "stack base: $BASE"
-  chat stack "Add a match mode to Tic-Tac-Toe, built as a stack of three tasks with one PR each: (1) a \"Best of 3\" toggle that, when on, shows the match score as \"Match: X 0 - O 0\"; (2) when a player wins 2 games in best-of-3 mode, show the banner \"X wins the match!\" (or O) and disable the board until a new match starts; (3) a \"New match\" button that resets the match score and hides the banner. Run the stack and wait until awb run is no longer running, then report each task and its PR."
+  chat stack "Add a turn timer to Tic-Tac-Toe, built as a stack of three tasks with one PR each: (1) a \"Turn timer\" toggle that, when on, shows \"Time left: 10\" and counts down by 1 each second during a turn, and starts again at 10 after each move; (2) when the time reaches 0, the turn passes to the other player and the page shows \"X ran out of time\" (or O); (3) a \"Seconds per turn\" number field (3 to 30, default 10) that sets the start value of the timer. Run the stack and wait until awb run is no longer running, then report each task and its PR."
   ;;
 ask)
   (cd "$REPO" && echo "What did you do today, and what failed?" | awb -p --model haiku --allowedTools "Bash(awb:*)" --output-format stream-json --verbose) > "$WORK/ask.jsonl" 2>/dev/null || true
