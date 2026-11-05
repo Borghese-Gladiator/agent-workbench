@@ -198,11 +198,11 @@ async function streamNdjson(path: string, body: object, onResult: (r: any) => nu
     while ((i = buf.indexOf("\n")) >= 0) {
       const msg = JSON.parse(buf.slice(0, i));
       buf = buf.slice(i + 1);
-      if (msg.log) console.error(`awb: ${msg.log}`);
-      if (msg.error) {
-        console.error(`awb: ${msg.error}`);
-        if (msg.table) console.log(msg.table);
-      }
+      if (msg.log) printError(`awb: ${msg.log}`);
+      if (msg.error && msg.table) {
+        printError(`awb: ${msg.error}`);
+        console.log(msg.table);
+      } else if (msg.error) console.error(`awb: ${msg.error}`);
       if (msg.result) code = onResult(msg.result);
     }
   }

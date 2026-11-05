@@ -68,12 +68,15 @@ bug)
   STACK=$(awb show "$TID" --json 2>/dev/null | node -e 'const t=JSON.parse(require("fs").readFileSync(0)); console.log(JSON.stringify({tasks:[{title:t.title+" (planted bug)",claims:t.claims}]}))')
   (cd "$REPO" && echo "$STACK" | awb stack set 2>/dev/null)
   NEW=$(cd "$REPO" && awb show --json 2>/dev/null | node -e 'console.log(JSON.parse(require("fs").readFileSync(0)).folder)')
+  NEW_ID=$(cd "$REPO" && awb show --json 2>/dev/null | node -e 'console.log(JSON.parse(require("fs").readFileSync(0)).id)')
   OLD=$(awb show "$TID" --json 2>/dev/null | node -e 'console.log(JSON.parse(require("fs").readFileSync(0)).folder)')
   mkdir -p "$NEW/proof-tests"
   cp "$OLD"/proof-tests/*.spec.ts "$NEW/proof-tests/"
   echo "reused the proof tests of the shipped task"
   (cd "$REPO" && awb prove) && echo "UNEXPECTED: prove passed" || echo "prove failed, as expected"
   (cd "$REPO" && awb ship) && echo "UNEXPECTED: ship opened a PR" || echo "ship refused, as expected"
+  if awb logs --source cli --since 10m 2>/dev/null | grep -q "command=\(prove\|ship\)"; then echo "UNEXPECTED: a gate failure or a refusal was logged as a CLI error"; else echo "no cli.error for the gate failure or the refusal, as expected"; fi
+  awb logs --task "${NEW_ID:0:8}" --level warn --since 10m 2>/dev/null
   ;;
 stack)
   git -C "$REPO" checkout -q main
