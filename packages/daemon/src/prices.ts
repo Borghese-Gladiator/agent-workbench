@@ -26,9 +26,14 @@ export function usageCost(model: string, u: Record<string, unknown>): number | n
   const p = priceOf(model);
   if (!p) return null;
   const n = (v: unknown) => (typeof v === "number" ? v : 0);
+  const split = (u.cache_creation ?? {}) as Record<string, unknown>;
+  const write5m = n(split.ephemeral_5m_input_tokens);
+  const write1h = n(split.ephemeral_1h_input_tokens);
+  const unsplit = Math.max(0, n(u.cache_creation_input_tokens) - write5m - write1h);
   const usd =
     n(u.input_tokens) * p.input +
-    n(u.cache_creation_input_tokens) * p.input * 1.25 +
+    write5m * p.input * 1.25 +
+    (write1h + unsplit) * p.input * 2 +
     n(u.cache_read_input_tokens) * p.cacheRead +
     n(u.output_tokens) * p.output;
   return usd / 1_000_000;

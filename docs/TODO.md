@@ -20,6 +20,7 @@ v6 is a proof of concept. The acceptance test passes (`e2e/acceptance.sh`), but 
 
 - [x] **USD for each session.** An estimated cost from the tokens and a price table for each model (`prices.ts`). The writer cost of each attempt is saved. `GET /api/cost` gives the totals.
 - [x] **`awb cost [--since 7d] [--repo] [--json]`.** The CLI command for `GET /api/cost`: the total for each day, repo and task, split into the task session and the test writer.
+- [ ] **The cost of an interactive session is low.** A `-p` session (every task session, the test writer) has a `result` row with its exact `usage` and `total_cost_usd`, and awb uses it. An interactive session has no `result` row, and its saved transcript has only the output tokens from the start of each message (162 of 4,251 in one test). So its estimate leaves out most of the output cost. Fix: read the final usage from the `Stop` hook input if Claude Code adds it there, or from the statusline cost data.
 - [ ] **Keep the price table current.** `prices.ts` is a copy of the published prices. A new model has no price until someone adds it, and the cost report counts it as unpriced.
 
 awb tracks cost and sets no spend limit.

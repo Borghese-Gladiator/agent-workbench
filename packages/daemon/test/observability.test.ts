@@ -176,3 +176,16 @@ test("lastSessionUsd reads the newest session file by number, and the runner log
   const ended = readLog(dir, { task: task.id }).find((l) => l.event === "session.ended")!;
   assert.equal(ended.usd, 1.2);
 });
+
+test("a stream with a result row uses its usage and total_cost_usd, and a 1h cache write costs 2x input", () => {
+  const file = join(tmp(), "s.jsonl");
+  const partial = { input_tokens: 2, output_tokens: 16, cache_read_input_tokens: 0, cache_creation_input_tokens: 44541 };
+  const final = { input_tokens: 30, output_tokens: 4251, cache_read_input_tokens: 738580, cache_creation_input_tokens: 57153, cache_creation: { ephemeral_1h_input_tokens: 57153, ephemeral_5m_input_tokens: 0 } };
+  writeFileSync(file, [
+    JSON.stringify({ type: "assistant", message: { id: "m1", model: "claude-opus-5-5", usage: partial } }),
+    JSON.stringify({ type: "result", subtype: "success", total_cost_usd: 0.69008, usage: final }),
+  ].join("\n"));
+  assert.deepEqual(tokenTotals(file), { input: 30, output: 4251, cache_read: 738580, cache_creation: 57153, cost_usd: 0.69008 });
+  assert.equal(usageCost("claude-opus-5-5", final)!.toFixed(5), "0.69008", "the price table gives the same cost as claude");
+  assert.equal(usageCost("claude-opus-5-5", { ...final, cache_creation: { ephemeral_5m_input_tokens: 57153, ephemeral_1h_input_tokens: 0 } })!.toFixed(5), "0.51862", "a 5m cache write costs 1.25x input");
+});
