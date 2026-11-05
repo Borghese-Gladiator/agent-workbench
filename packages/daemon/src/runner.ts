@@ -39,6 +39,22 @@ export function taskPrompt(task: Task, below: Task[]): string {
   ].join("\n");
 }
 
+export function lastSessionUsd(folder: string): number | null {
+  if (!existsSync(folder)) return null;
+  const n = (f: string) => Number(f.match(/^session-(\d+)\.jsonl$/)![1]);
+  const newest = readdirSync(folder).filter((f) => /^session-\d+\.jsonl$/.test(f)).sort((a, b) => n(a) - n(b)).at(-1);
+  if (!newest) return null;
+  let usd: number | null = null;
+  for (const line of readFileSync(join(folder, newest), "utf8").split("\n")) {
+    if (!line.includes('"type":"result"')) continue;
+    try {
+      const r = JSON.parse(line);
+      if (typeof r.total_cost_usd === "number") usd = r.total_cost_usd;
+    } catch {}
+  }
+  return usd;
+}
+
 export function failReason(stacks: Stacks, taskId: string): string {
   const gate = stacks.history(taskId).flatMap((a) => a.gates).at(-1);
   if (!gate) return "the session ended without a PR and never ran awb prove";

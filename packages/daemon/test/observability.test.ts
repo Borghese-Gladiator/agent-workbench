@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { priceOf, usageCost } from "../src/prices.ts";
 import { tokenTotals } from "../src/usage.ts";
 import { openStore } from "../src/store.ts";
 import { createStacks, migrateStacks } from "../src/stacks.ts";
-import { runStack, sessionEnd, type RunState } from "../src/runner.ts";
+import { lastSessionUsd, runStack, sessionEnd, type RunState } from "../src/runner.ts";
 import { writerEnd } from "../src/prove.ts";
 import { runGate } from "../src/gate.ts";
 import { costReport, costText } from "../src/cost.ts";
@@ -156,4 +156,23 @@ test("the cost report filters by repo name or path, and the text form lists day,
   assert.match(text, new RegExp(`top tasks:\\n +1\\.75 USD {2}${stack.tasks[0].id.slice(0, 8)} {2}A`));
   assert.match(text, /1 session\(s\) have no price/);
   assert.match(costText(costReport(store.db, "2999-01-01")), /no cost in this period/);
+});
+
+test("lastSessionUsd reads the newest session file by number, and the runner logs it on session.ended", async () => {
+  const folder = tmp();
+  assert.equal(lastSessionUsd(join(folder, "nope")), null);
+  const result = (usd: number) => [JSON.stringify({ type: "assistant" }), JSON.stringify({ type: "result", subtype: "success", total_cost_usd: usd })].join("\n");
+  writeFileSync(join(folder, "session-9.jsonl"), result(9));
+  writeFileSync(join(folder, "session-10.jsonl"), result(0.5) + "\n" + result(0.75));
+  assert.equal(lastSessionUsd(folder), 0.75, "session-10 is newer than session-9, and its last running total counts");
+
+  const { stacks } = setup();
+  const { stack } = stacks.set({ ...where, tasks: two });
+  const task = stack.tasks[0];
+  mkdirSync(task.folder, { recursive: true });
+  writeFileSync(join(task.folder, "session-1.jsonl"), result(1.2));
+  const dir = tmp();
+  await runStack(stacks, stack.id, async () => "", state(stack.id), { log: createLog(dir), sessionUsd: (t) => lastSessionUsd(t.folder) });
+  const ended = readLog(dir, { task: task.id }).find((l) => l.event === "session.ended")!;
+  assert.equal(ended.usd, 1.2);
 });

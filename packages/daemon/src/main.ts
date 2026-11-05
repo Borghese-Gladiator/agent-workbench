@@ -5,7 +5,7 @@ import { openStore } from "./store.ts";
 import { createApp } from "./server.ts";
 import { createStacks, migrateStacks } from "./stacks.ts";
 import { taskRoutes } from "./task-routes.ts";
-import { claudeSession, createRunner } from "./runner.ts";
+import { claudeSession, createRunner, lastSessionUsd } from "./runner.ts";
 import { notify, runMessage } from "./notify.ts";
 import { createLog } from "./log.ts";
 
@@ -32,6 +32,7 @@ export async function startDaemon(home: string) {
       }),
     {
       log,
+      sessionUsd: (task) => lastSessionUsd(task.folder),
       onEnd: (r) => {
         const m = runMessage(stacks, r);
         notify(m.title, m.body, process.env, log);
