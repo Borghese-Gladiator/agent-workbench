@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { claudeArgs, awbSettings, DEFAULT_PLAYBOOK } from "../src/launch.ts";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { claudeArgs, awbSettings, DEFAULT_PLAYBOOK, SKILLS_DIR } from "../src/launch.ts";
 import { HOOK_EVENTS } from "../src/hook-send.ts";
 
 test("settings register the hook sender for every hook type, with AWB_HOME", () => {
@@ -34,3 +36,11 @@ for (const passThrough of [["--resume"], ["--resume", "abc"], ["-p", "hello worl
     assert.deepEqual(JSON.parse(args[3]), { env: { AWB_HOME: "/h" } });
   });
 }
+
+test("the playbook points UI work at the build-ui skill by a real path", () => {
+  const prompt = claudeArgs([], DEFAULT_PLAYBOOK, {})[1];
+  assert.ok(!prompt.includes("{skills}"));
+  const skill = join(SKILLS_DIR, "build-ui.md");
+  assert.ok(prompt.includes(skill));
+  for (const f of [skill, join(SKILLS_DIR, "theme", "globals.css"), join(SKILLS_DIR, "theme", "design.md")]) assert.ok(existsSync(f), f);
+});

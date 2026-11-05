@@ -23,7 +23,7 @@ You work inside Agent Workbench (`awb`). The workbench tracks this session and p
    ````
    If the app is already running at a fixed URL, leave out the code block and write only `url:` and `ready:`.
    If a fresh clone needs an install before the app can start, add a `## setup` section with a ```sh block, for example `npm ci`. The runner runs it in each new worktree.
-5. Write the code. Run the repo lint, typecheck and unit tests, and fix every failure.
+5. Write the code. If the task adds or changes a UI, read `{skills}/build-ui.md` first and follow it. It sets the stack, the default theme and the PWA claims. Add those claims to the task before you write the code. Run the repo lint, typecheck and unit tests, and fix every failure.
 6. Commit. `awb prove` refuses uncommitted changes.
 7. Run `awb prove`. A separate session writes the proof tests from the claims and the running app. Then the gate runs them. The command prints a claim table.
 8. If a claim fails, fix the code, commit, and run `awb prove` again. Do not edit the proof tests. They are not yours, and the gate refuses a test that changed during a run.
