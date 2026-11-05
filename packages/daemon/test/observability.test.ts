@@ -206,3 +206,14 @@ test("recover keeps a doing task whose session is still running, and fails one w
   store.end("live", 0);
   assert.deepEqual(stacks.recover((pid) => pid === 111), { runs: 0, tasks: [t1.id], alive: [] }, "an ended session does not count, even if its pid is reused");
 });
+
+test("a shipped task does not keep an old fail reason", () => {
+  const { stacks } = setup();
+  const { stack } = stacks.set({ ...where, tasks: two });
+  const t = stack.tasks[0];
+  stacks.fail(t.id, "the daemon restarted while the task ran");
+  stacks.setPr(t.id, 64, "https://github.com/o/r/pull/64");
+  const after = stacks.task(t.id)!;
+  assert.equal(after.status, "done");
+  assert.equal(after.fail_reason, null);
+});

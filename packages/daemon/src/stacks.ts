@@ -156,7 +156,7 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     updTask: db.prepare("UPDATE tasks SET position = ?, title = ?, claims = ? WHERE id = ?"),
     delTask: db.prepare("DELETE FROM tasks WHERE id = ?"),
     setStatus: db.prepare("UPDATE tasks SET status = ? WHERE id = ?"),
-    setPr: db.prepare("UPDATE tasks SET pr_number = ?, pr_url = ?, status = 'done' WHERE id = ?"),
+    setPr: db.prepare("UPDATE tasks SET pr_number = ?, pr_url = ?, status = 'done', fail_reason = NULL WHERE id = ?"),
     shipped: db.prepare("SELECT t.*, s.repo FROM tasks t JOIN stacks s ON s.id = t.stack_id WHERE t.status = 'done' AND t.pr_number IS NOT NULL"),
     addAttempt: db.prepare("INSERT INTO attempts (id, task_id, session_id, started_at) VALUES (?, ?, ?, ?)"),
     endAttempt: db.prepare("UPDATE attempts SET ended_at = ? WHERE id = ?"),
