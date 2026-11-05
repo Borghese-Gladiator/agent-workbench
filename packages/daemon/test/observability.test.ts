@@ -94,11 +94,11 @@ test("after a restart, recover stops a running run and fails a doing task", () =
   a.store.close();
 
   const b = setup(file);
-  assert.deepEqual(b.stacks.recover(), { runs: 1, tasks: [stack.tasks[0].id] });
+  assert.deepEqual(b.stacks.recover(), { runs: 1, tasks: [stack.tasks[0].id], alive: [] });
   assert.equal(b.stacks.run("run-1")!.state, "stopped");
   assert.equal(b.stacks.run("run-1")!.reason, "daemon restart");
   assert.equal(b.stacks.task(stack.tasks[0].id)!.status, "failed");
-  assert.deepEqual(b.stacks.recover(), { runs: 0, tasks: [] }, "a second recover changes nothing");
+  assert.deepEqual(b.stacks.recover(), { runs: 0, tasks: [], alive: [] }, "a second recover changes nothing");
 });
 
 test("the cost report adds sessions and writers by day, repo and task, and counts unpriced sessions", () => {
@@ -188,4 +188,21 @@ test("a stream with a result row uses its usage and total_cost_usd, and a 1h cac
   assert.deepEqual(tokenTotals(file), { input: 30, output: 4251, cache_read: 738580, cache_creation: 57153, cost_usd: 0.69008 });
   assert.equal(usageCost("claude-opus-5-5", final)!.toFixed(5), "0.69008", "the price table gives the same cost as claude");
   assert.equal(usageCost("claude-opus-5-5", { ...final, cache_creation: { ephemeral_5m_input_tokens: 57153, ephemeral_1h_input_tokens: 0 } })!.toFixed(5), "0.51862", "a 5m cache write costs 1.25x input");
+});
+
+test("recover keeps a doing task whose session is still running, and fails one whose session is gone", () => {
+  const { store, stacks } = setup();
+  const { stack } = stacks.set({ ...where, tasks: two });
+  const [t1, t2] = stack.tasks;
+  store.register({ id: "live", repo: "/r", worktree: "/w1", branch: t1.branch!, pid: 111 });
+  store.register({ id: "dead", repo: "/r", worktree: "/w2", branch: t2.branch!, pid: 222 });
+  stacks.startAttempt(t1.id, "live");
+  stacks.startAttempt(t2.id, "dead");
+  stacks.setStatus(t1.id, "doing");
+  stacks.setStatus(t2.id, "doing");
+  assert.deepEqual(stacks.recover((pid) => pid === 111), { runs: 0, tasks: [t2.id], alive: [t1.id] });
+  assert.equal(stacks.task(t1.id)!.status, "doing");
+  assert.equal(stacks.task(t2.id)!.status, "failed");
+  store.end("live", 0);
+  assert.deepEqual(stacks.recover((pid) => pid === 111), { runs: 0, tasks: [t1.id], alive: [] }, "an ended session does not count, even if its pid is reused");
 });

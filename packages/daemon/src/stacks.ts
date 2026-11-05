@@ -172,6 +172,10 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     getRun: db.prepare("SELECT id, stack_id AS stackId, state, current, reason FROM runs WHERE id = ?"),
     stopRuns: db.prepare("UPDATE runs SET state = 'stopped', reason = ?, ended_at = ? WHERE state = 'running'"),
     doingTasks: db.prepare("SELECT * FROM tasks WHERE status = 'doing'"),
+    openSessionPids: db.prepare(
+      `SELECT DISTINCT s.pid FROM attempts a JOIN sessions s ON s.id = a.session_id
+       WHERE a.task_id = ? AND s.ended_at IS NULL AND s.pid IS NOT NULL`,
+    ),
   };
 
   const get = (id: string): Stack | undefined => {
@@ -355,12 +359,15 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
       const r = q.getRun.get(id) as RunState | undefined;
       return r && { ...r };
     },
-    recover(): { runs: number; tasks: string[] } {
+    recover(isAlive: (pid: number) => boolean = () => false): { runs: number; tasks: string[]; alive: string[] } {
       const now = new Date().toISOString();
       const runs = Number(q.stopRuns.run("daemon restart", now).changes);
-      const tasks = (q.doingTasks.all() as any[]).map(row);
+      const doing = (q.doingTasks.all() as any[]).map(row);
+      const live = (t: Task) => (q.openSessionPids.all(t.id) as { pid: number }[]).some((s) => isAlive(s.pid));
+      const alive = doing.filter(live);
+      const tasks = doing.filter((t) => !alive.includes(t));
       for (const t of tasks) q.setFail.run("the daemon restarted while the task ran", t.id);
-      return { runs, tasks: tasks.map((t) => t.id) };
+      return { runs, tasks: tasks.map((t) => t.id), alive: alive.map((t) => t.id) };
     },
     saveGate(attemptId: string, g: GateResult) {
       q.addGate.run(attemptId, g.head, g.pass ? 1 : 0, JSON.stringify(g), new Date().toISOString());

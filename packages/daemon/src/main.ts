@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync, renameSync, rmSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import { openStore } from "./store.ts";
+import { alive, openStore } from "./store.ts";
 import { createApp } from "./server.ts";
 import { createStacks, migrateStacks } from "./stacks.ts";
 import { taskRoutes } from "./task-routes.ts";
@@ -16,7 +16,8 @@ export async function startDaemon(home: string) {
   const store = openStore(join(home, "awb.db"), { quietMs: Number(process.env.AWB_QUIET_MIN || 15) * 60_000 });
   migrateStacks(store.db);
   const stacks = createStacks(store.db, (id) => join(realpathSync(home), "tasks", id));
-  const recovered = stacks.recover();
+  const recovered = stacks.recover((pid) => alive(pid));
+  for (const task of recovered.alive) log("info", "daemon", "recover.alive", { task, reason: "its session is still running, so the task stays doing" });
   if (recovered.runs || recovered.tasks.length) {
     for (const task of recovered.tasks) log("warn", "daemon", "recover.task", { task, reason: "the daemon restarted while the task ran" });
     log("warn", "daemon", "recover", { runs: recovered.runs, tasks: recovered.tasks.length });

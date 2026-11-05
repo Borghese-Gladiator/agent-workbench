@@ -35,7 +35,7 @@ export type FeedRow = Session & {
 
 const BUSY_HOOKS = new Set(["UserPromptSubmit", "PreToolUse", "PostToolUse"]);
 
-const alive = (pid: number | null) => {
+export const alive = (pid: number | null) => {
   if (!pid) return true;
   try {
     process.kill(pid, 0);

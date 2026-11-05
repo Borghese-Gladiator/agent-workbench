@@ -1,4 +1,4 @@
-import { readFileSync, openSync, closeSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { readFileSync, openSync, closeSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -9,7 +9,12 @@ export type DaemonInfo = { pid: number; port: number; startedAt: string };
 const DAEMON_MAIN = fileURLToPath(new URL("../../daemon/src/main.ts", import.meta.url));
 
 export function awbHome(env = process.env): string {
-  return resolve(env.AWB_HOME || join(homedir(), ".awb"));
+  const home = resolve(env.AWB_HOME || join(homedir(), ".awb"));
+  try {
+    return realpathSync(home);
+  } catch {
+    return home;
+  }
 }
 
 export function readDaemonInfo(home: string): DaemonInfo | null {

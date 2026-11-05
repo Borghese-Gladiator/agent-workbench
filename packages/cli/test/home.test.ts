@@ -1,6 +1,6 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, realpathSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { awbHome, ensureDaemon, findDaemon, readDaemonInfo } from "../src/home.ts";
@@ -22,6 +22,15 @@ after(async () => {
 test("AWB_HOME defaults to ~/.awb", () => {
   assert.match(awbHome({}), /\/\.awb$/);
   assert.equal(awbHome({ AWB_HOME: "/tmp/x" }), "/tmp/x");
+});
+
+test("two names for one AWB_HOME give one path, so they share one daemon", () => {
+  const real = realpathSync(mkdtempSync(join(tmpdir(), "awb-real-")));
+  mkdirSync(join(real, "home"));
+  const link = join(realpathSync(mkdtempSync(join(tmpdir(), "awb-link-"))), "alias");
+  symlinkSync(real, link);
+  assert.equal(awbHome({ AWB_HOME: join(link, "home") }), join(real, "home"));
+  assert.equal(awbHome({ AWB_HOME: join(real, "home") }), join(real, "home"));
 });
 
 test("daemon.json is written by the daemon and read by the CLI", async () => {
