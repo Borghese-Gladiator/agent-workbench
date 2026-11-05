@@ -25,9 +25,9 @@ console.error = (...args: unknown[]) => {
 };
 process.on("beforeExit", async () => {
   const code = Number(process.exitCode ?? 0);
-  if (!COMMANDS.includes(cmd) || code === 0 || process.env.AWB_REPORTED) return;
+  if (!COMMANDS.includes(cmd) || code === 0 || !lastError || process.env.AWB_REPORTED) return;
   process.env.AWB_REPORTED = "1";
-  await reportCliError(home, [cmd, ...rest].join(" "), code, lastError || `exit ${code}`).catch(() => {});
+  await reportCliError(home, [cmd, ...rest].join(" "), code, lastError).catch(() => {});
 });
 
 switch (cmd) {

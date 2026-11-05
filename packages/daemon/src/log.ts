@@ -97,11 +97,13 @@ export function readLog(dir: string, f: LogFilter = {}): LogLine[] {
   return f.limit ? out.slice(-f.limit) : out;
 }
 
+const ID_FIELDS = ["task", "run", "session", "stack", "attempt"];
+
 export function logText(l: LogLine): string {
   const { ts, level, source, event, ...rest } = l;
-  const ids = ["task", "run", "session"].filter((k) => typeof rest[k] === "string").map((k) => `${k}=${String(rest[k]).slice(0, 8)}`);
+  const ids = ID_FIELDS.filter((k) => typeof rest[k] === "string").map((k) => `${k}=${String(rest[k]).slice(0, 8)}`);
   const other = Object.entries(rest)
-    .filter(([k]) => !["task", "run", "session"].includes(k))
+    .filter(([k]) => !ID_FIELDS.includes(k))
     .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`);
   return `${ts.slice(0, 19).replace("T", " ")} ${level.toUpperCase().padEnd(5)} ${source}.${event} ${[...ids, ...other].join(" ")}`.trimEnd();
 }

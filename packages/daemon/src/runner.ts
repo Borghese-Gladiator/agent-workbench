@@ -131,12 +131,19 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
       "--output-format", "stream-json", "--verbose",
     ];
     return new Promise<string>((resolve) => {
-      const child = spawn(AWB, args, { cwd: worktree, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, AWB_HOME: opts.home } });
+      const child = spawn(AWB, args, { cwd: worktree, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, AWB_HOME: opts.home }, detached: true });
       let timedOut = false;
       let tail = "";
+      const group = (sig: NodeJS.Signals) => {
+        try {
+          process.kill(-child.pid!, sig);
+        } catch {}
+      };
+      let hard: NodeJS.Timeout | undefined;
       const timer = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGTERM");
+        group("SIGTERM");
+        hard = setTimeout(() => group("SIGKILL"), 10_000);
       }, opts.timeoutMin * 60_000);
       child.stdout.on("data", (d) => (tail = (tail + d).slice(-20_000)));
       child.stdout.pipe(out);
@@ -144,6 +151,7 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
       child.on("error", (err) => resolve(`could not start: ${err.message}`));
       child.on("close", (code) => {
         clearTimeout(timer);
+        clearTimeout(hard);
         resolve(sessionEnd(tail, timedOut, code, opts.timeoutMin));
       });
       child.stdin.end(taskPrompt(task, below));
