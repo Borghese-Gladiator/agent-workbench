@@ -94,7 +94,7 @@ SECRET="sk-ant-$(printf 'a%.0s' $(seq 1 30))"
 awb logs --source cli 2>/dev/null | tee "$WORK/cli.txt"
 grep -q "ERROR cli.error.*command=retry" "$WORK/cli.txt" || fail "no cli.error line"
 if grep -rq "$SECRET" "$AWB_HOME/logs"; then fail "the secret is in the log file"; fi
-grep -q "Anthropic key removed" "$AWB_HOME/logs/awb.jsonl" || fail "the secret was not marked as removed"
+cat "$AWB_HOME"/logs/awb.*.jsonl | grep -q "Anthropic key removed" || fail "the secret was not marked as removed"
 
 echo
 echo "== 6. the notice and the daemon lines"
@@ -104,11 +104,11 @@ awb logs --source daemon 2>/dev/null | grep -q "daemon.start" || fail "no daemon
 
 echo
 echo "== 7. every line is valid JSON with ts, level, source and event"
-node -e '
-const lines = require("fs").readFileSync(process.argv[1], "utf8").trim().split("\n");
+cat "$AWB_HOME"/logs/awb.*.jsonl | node -e '
+const lines = require("fs").readFileSync(0, "utf8").trim().split("\n");
 for (const l of lines) { const j = JSON.parse(l); for (const k of ["ts","level","source","event"]) if (!j[k]) throw new Error("missing " + k + ": " + l); }
 console.log(lines.length + " lines, all valid");
-' "$AWB_HOME/logs/awb.jsonl"
+'
 
 echo
 echo "PASS"

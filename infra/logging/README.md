@@ -2,12 +2,12 @@
 
 Loki, Grafana and Alloy in Docker on the awb machine. Other computers open Grafana through Tailscale.
 
-awb does not need this stack. awb always writes its log to `AWB_HOME/logs/awb.jsonl` first, and `awb logs` reads that file. This stack only copies the lines to Loki, so that Grafana can show them from another computer.
+awb does not need this stack. awb always writes its log to `AWB_HOME/logs/awb.<day>.jsonl` first, and `awb logs` reads that file. This stack only copies the lines to Loki, so that Grafana can show them from another computer.
 
 | Service | Image | Port | Job |
 | --- | --- | --- | --- |
 | loki | `grafana/loki:3.7.9` | `127.0.0.1:3100` | Stores the logs. No retention: it never deletes a line. |
-| alloy | `grafana/alloy:v1.21.3` | `127.0.0.1:12345` | Reads `awb*.jsonl` and sends new lines to Loki. Its page on port 12345 shows its state. |
+| alloy | `grafana/alloy:v1.21.3` | `127.0.0.1:12345` | Reads `awb.*.jsonl` and sends new lines to Loki. Its page on port 12345 shows its state. |
 | grafana | `grafana/grafana:13.3.0` | `GRAFANA_BIND:3000` | The view, with the "awb" dashboard. |
 
 ## Start
@@ -26,7 +26,7 @@ awb does not need this stack. awb always writes its log to `AWB_HOME/logs/awb.js
    ```
    - `GRAFANA_PASSWORD`: the Grafana admin password. Grafana does not start without it.
    - `GRAFANA_BIND`: the Tailscale address from step 1, for example `100.101.102.103`. With the default `127.0.0.1`, only this machine can open Grafana.
-   - `AWB_LOGS`: the folder with `awb.jsonl`. Change it only if `AWB_HOME` is not `~/.awb`.
+   - `AWB_LOGS`: the folder with the `awb.*.jsonl` files. Change it only if `AWB_HOME` is not `~/.awb`.
    - `AWB_HOST`: a name for this machine in Grafana.
 3. Start the stack:
    ```sh
@@ -50,10 +50,11 @@ Loki answers `ready`, and the label list has `host`, `job`, `level` and `source`
 
 No log is lost. awb writes to the local file, and `awb logs` still works. From another computer, run `ssh <this machine> awb logs`. When Docker starts again, Alloy sends the lines that it missed:
 
-- Alloy keeps its read position in the `alloy-data` volume.
-- Alloy reads the rotated files (`awb.<time>.jsonl`) too.
+- Alloy keeps its read position for each file in the `alloy-data` volume.
+- awb never renames a log file. A new day or a full file starts a new file with a new name. Alloy keys its read position by the file path, so a renamed file would make it skip lines (this was tested and fixed).
+- Alloy reads every `awb.*.jsonl` file, so it also finds a file that started during the outage.
 - Loki accepts old lines (`reject_old_samples: false`).
-- Alloy sets each entry's time from its `ts` field and has no file name label. So if Alloy reads a line twice (for example, after a log file rotates), Loki drops the second copy.
+- Alloy sets each entry's time from its `ts` field and has no file name label. So if Alloy reads a line twice, Loki drops the second copy.
 
 ## Stop and remove
 
@@ -61,7 +62,7 @@ No log is lost. awb writes to the local file, and `awb logs` still works. From a
 docker compose -f infra/logging/docker-compose.yml down
 ```
 
-This keeps the data volumes. `down -v` also deletes them, which deletes the copy in Loki. The local `awb.jsonl` files are not touched.
+This keeps the data volumes. `down -v` also deletes them, which deletes the copy in Loki. The local `awb.*.jsonl` files are not touched.
 
 ## Queries
 

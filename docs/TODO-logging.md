@@ -27,7 +27,7 @@ Promtail is end of life since 2026-03-02. Grafana Alloy replaces it, and Alloy c
 
 | Part | Runs where | Job |
 | --- | --- | --- |
-| awb | the awb machine | Writes JSON lines to `AWB_HOME/logs/awb.jsonl` |
+| awb | the awb machine | Writes JSON lines to `AWB_HOME/logs/awb.<day>.jsonl` |
 | Alloy | the awb machine | Tails the file, adds labels, sends to Loki. If Loki is down, it keeps a buffer and sends later. |
 | Loki | a log server (the same machine, or another one) | Stores and indexes the logs |
 | Grafana | the log server | The view from any computer: search, filters, live tail, a dashboard |
@@ -46,11 +46,11 @@ awb itself knows nothing about Alloy or Loki. It only writes a local file. So th
 
 1. Add `packages/daemon/src/log.ts` with one function:
    `log(level, source, event, fields)`. The levels are `debug`, `info`, `warn` and `error`. The fields can be `task`, `run`, `session`, `repo`, `stack`, `attempt`, `ms` and `error`.
-2. Each call writes one JSON line to `AWB_HOME/logs/awb.jsonl`. Example:
+2. Each call writes one JSON line to `AWB_HOME/logs/awb.<YYYY-MM-DD>.jsonl`. Example:
    ```json
    {"ts":"2026-11-03T16:12:04.120Z","level":"error","source":"runner","event":"session.ended","task":"0e751a8c","run":"7f2c...","repo":"games","how":"timeout after 45 min"}
    ```
-3. Rotate the file: at 50 MB, rename it to `awb.<time>.jsonl` and start a new one. Keep every rotated file. The expiration setting `AWB_LOG_KEEP_DAYS` exists, but its default is "none". Use no new dependency. (Done.)
+3. One file for each UTC day, `awb.<day>.jsonl`. At 50 MB the day continues in `awb.<day>.1.jsonl`. No file is renamed. Keep every file. The expiration setting `AWB_LOG_KEEP_DAYS` exists, but its default is "none". Use no new dependency. (Done.)
 4. Replace `taskLog` and `events.log` with `log()`. The task folder keeps the raw evidence files only.
 5. Replace each `console.log` and `console.error` in the daemon with `log()`. `daemon.log` then holds only the crash output from Node.
 6. Change each of the 14 `catch {}` blocks to log a `warn` line, with the error message.
@@ -80,7 +80,7 @@ Tests:
    - `docker-compose.yml` with Loki and Grafana. Pin the image versions.
    - `loki.yaml`: one local storage, no retention period (logs are never deleted).
    - `grafana/provisioning/`: the Loki data source and one dashboard, "awb".
-   - `alloy/config.alloy`: tail `AWB_HOME/logs/awb*.jsonl`, read the JSON, and send to Loki.
+   - `alloy/config.alloy`: tail `AWB_HOME/logs/awb.*.jsonl`, read the JSON, and send to Loki.
 2. Labels must stay few, because each new label value makes a new Loki stream. Use these labels: `host`, `level` and `source`. Put `task`, `run`, `repo` and `session` in the JSON body, and filter them in LogQL with `| json`.
 3. The "awb" dashboard:
    - Errors and warnings over time, by source.
@@ -95,7 +95,7 @@ Tests:
 6. The Loki server can run on the awb machine or on another machine. If Loki runs on another machine, Alloy sends to it over Tailscale. When the link is down, Alloy buffers the logs and sends them later, and the local file is still complete.
 7. **When Docker is not running, no log is lost.** awb writes to the local file and never needs Docker. `awb logs` still works on this machine, and from another computer with `ssh <host> awb logs`. Only Grafana is not available. When Docker starts again, Alloy sends the lines that it missed. Three settings make this work:
    - **Alloy keeps its read position on a Docker volume.** Mount a named volume at the Alloy storage path (`--storage.path`). Without it, a restart loses the position, and Alloy sends every line again or skips the gap.
-   - **Alloy reads the rotated files too.** Tail `awb*.jsonl`, not only `awb.jsonl`. A rotated file gets a fixed name with a time (`awb.<time>.jsonl`) and is never renamed again, so Alloy reads each line once. Otherwise Alloy misses the lines of a file that rotated during the outage.
+   - **awb never renames a log file.** Each UTC day has its own file, `awb.<day>.jsonl`, and a full file continues in `awb.<day>.1.jsonl`. Alloy keys its read position by path. A test with rename-based rotation lost the newest 12 of 50 lines after an outage, because the old position was used for the new file at the same path. With one path for one file, the position is always right. Alloy reads `awb.*.jsonl`.
    - **Loki accepts old lines.** Set `limits_config.reject_old_samples: false` in `loki.yaml`. The default rejects lines older than about one week, so a long outage would leave a gap in Grafana.
 
 Tests:
@@ -104,7 +104,7 @@ Tests:
 
 ### Part 3 (later): the awb web UI reads the same logs
 
-- A "Logs" tab in the awb UI reads `awb.jsonl` through `GET /api/logs` (local view, no Loki).
+- A "Logs" tab in the awb UI reads the log through `GET /api/logs` (local view, no Loki).
 - The task page shows the log lines of that task.
 - Optional: a link from each task page to the same query in Grafana.
 

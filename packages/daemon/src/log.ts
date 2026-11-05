@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 export const SECRETS: [string, RegExp][] = [
@@ -18,12 +18,23 @@ export type Level = (typeof LEVELS)[number];
 export type LogLine = { ts: string; level: Level; source: string; event: string; [field: string]: unknown };
 export type Log = (level: Level, source: string, event: string, fields?: Record<string, unknown>) => void;
 
-export const LOG_FILE = "awb.jsonl";
+const LOG_NAME = /^awb\.(\d{4}-\d\d-\d\d)(?:\.(\d+))?\.jsonl$/;
 
-const ROTATED = /^awb\.(\d{8}T\d{9}Z)(?:-\d+)?\.jsonl$/;
+export const logName = (day: string, part = 0) => (part ? `awb.${day}.${part}.jsonl` : `awb.${day}.jsonl`);
 
-export function rotatedFiles(dir: string): string[] {
-  return existsSync(dir) ? readdirSync(dir).filter((f) => ROTATED.test(f)).sort() : [];
+export function logFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
+  const key = (f: string) => {
+    const m = f.match(LOG_NAME)!;
+    return [m[1], Number(m[2] ?? 0)] as const;
+  };
+  return readdirSync(dir)
+    .filter((f) => LOG_NAME.test(f))
+    .sort((a, b) => {
+      const [da, pa] = key(a);
+      const [db, pb] = key(b);
+      return da === db ? pa - pb : da < db ? -1 : 1;
+    });
 }
 
 export function keepDays(env = process.env): number | null {
@@ -33,34 +44,41 @@ export function keepDays(env = process.env): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-export function expire(dir: string, days: number | null, now = Date.now()): string[] {
+export function expire(dir: string, days: number | null, now = Date.now(), current?: string): string[] {
   if (days === null) return [];
   const cutoff = now - days * 86_400_000;
-  const gone = rotatedFiles(dir).filter((f) => statSync(join(dir, f)).mtimeMs < cutoff);
+  const gone = logFiles(dir).filter((f) => f !== current && statSync(join(dir, f)).mtimeMs < cutoff);
   for (const f of gone) rmSync(join(dir, f), { force: true });
   return gone;
+}
+
+export function currentFile(dir: string, maxBytes: number, now = new Date()): string {
+  const day = now.toISOString().slice(0, 10);
+  let part = 0;
+  for (const f of logFiles(dir)) {
+    const m = f.match(LOG_NAME)!;
+    if (m[1] === day) part = Math.max(part, Number(m[2] ?? 0));
+  }
+  const name = logName(day, part);
+  return existsSync(join(dir, name)) && statSync(join(dir, name)).size >= maxBytes ? logName(day, part + 1) : name;
 }
 
 export function createLog(dir: string, opts: { maxBytes?: number; keepDays?: number | null; echo?: (line: string) => void } = {}): Log {
   const maxBytes = opts.maxBytes ?? 50 * 1024 * 1024;
   const days = opts.keepDays === undefined ? keepDays() : opts.keepDays;
-  const file = join(dir, LOG_FILE);
-  const rotate = () => {
-    if (!existsSync(file) || statSync(file).size < maxBytes) return;
-    const stamp = new Date().toISOString().replace(/[-:.]/g, "");
-    let name = `awb.${stamp}.jsonl`;
-    for (let i = 1; existsSync(join(dir, name)); i++) name = `awb.${stamp}-${i}.jsonl`;
-    renameSync(file, join(dir, name));
-    expire(dir, days);
-  };
+  let last = "";
   return (level, source, event, fields = {}) => {
     const clean = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined && v !== null));
     if (clean.error instanceof Error) clean.error = clean.error.message;
     const line = redact(JSON.stringify({ ts: new Date().toISOString(), level, source, event, ...clean }));
     try {
       mkdirSync(dir, { recursive: true });
-      rotate();
-      appendFileSync(file, line + "\n");
+      const name = currentFile(dir, maxBytes);
+      if (name !== last) {
+        last = name;
+        expire(dir, days, Date.now(), name);
+      }
+      appendFileSync(join(dir, name), line + "\n");
     } catch (err) {
       process.stderr.write(`awb: could not write the log: ${(err as Error).message}\n${line}\n`);
     }
@@ -79,7 +97,7 @@ export function matches(l: LogLine, f: LogFilter): boolean {
 }
 
 export function readLog(dir: string, f: LogFilter = {}): LogLine[] {
-  const files = [...rotatedFiles(dir).map((f) => join(dir, f)), join(dir, LOG_FILE)];
+  const files = logFiles(dir).map((f) => join(dir, f));
   const out: LogLine[] = [];
   for (const file of files) {
     if (!existsSync(file)) continue;

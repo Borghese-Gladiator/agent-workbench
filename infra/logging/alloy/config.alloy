@@ -1,6 +1,6 @@
 local.file_match "awb" {
   path_targets = [{
-    "__path__" = "/awb-logs/awb*.jsonl",
+    "__path__" = "/awb-logs/awb.*.jsonl",
     "host"     = sys.env("AWB_HOST"),
     "job"      = "awb",
   }]
