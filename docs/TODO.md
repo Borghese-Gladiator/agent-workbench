@@ -21,9 +21,11 @@ v6 is a proof of concept. The acceptance test passes (`e2e/acceptance.sh`), but 
 
 ## 2. CLI and core, with awb on awb
 
-The first task makes the rest possible. Today the gate proves claims only with Playwright tests in a browser, and most of awb has no browser.
+The first task makes the rest possible. Repo-test claims are on branch `timothyshee/test-claims`.
 
-- [ ] **Claims proven by repo tests (first, and do it by hand).** A claim can say `"proof": "test"`. The writer then writes a unit test in the repo (for this repo: `node --test`), not a Playwright test. The gate runs it from a command in `.awb/run.md` (`## test`) and reads the result per claim. The same rules hold: the agent does not write the test, and the gate refuses a test that changed during the run.
+- [x] **Claims proven by repo tests.** A claim can say `"proof": "test"`. A separate writer session reads the worktree and writes an integration test in `.awb-proof/`. It cannot change the source: the daemon undoes a change and refuses. The gate runs the tests with `## test` in `.awb/run.md` and reads JUnit XML for each claim.
+- [ ] **Red on the base commit.** Run the test claims on the base commit too. A claim passes only if its test fails on the base and passes on the head. This refuses a test that passes on any code.
+- [ ] **Test claims carried forward in a stack.** Task N also runs the passing test claims of the tasks below it. A replan change must not break an earlier claim.
 - [ ] **A run file for a repo that cannot hold awb files.** A team repo (for example, every repo in `~/Klaviyo/Repos`) must not get `.awb/run.md`. Keep the file as the first choice, because it changes with the branch. If the worktree has no file, use a copy that the daemon keeps.
   - Add a `run_md TEXT` column and an `env_file TEXT` column to `repos`.
   - `awb repo set [--env-file <path>]` reads a run file on stdin, in the same format as `.awb/run.md`, and saves it for the current repo. `awb repo show` prints the run file that a run uses, and its source (`file` or `daemon`).

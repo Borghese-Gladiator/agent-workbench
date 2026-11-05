@@ -105,9 +105,15 @@ export function validateTasks(tasks: unknown): TaskInput[] {
       if (!c || typeof c.id !== "string" || !/^C\d+$/.test(c.id)) throw new StackError(`task ${i}: claim id must look like C1`, 400);
       if (typeof c.text !== "string" || !c.text.trim()) throw new StackError(`task ${i}: claim ${c.id} has no text`, 400);
       if (ids.has(c.id)) throw new StackError(`task ${i}: duplicate claim id ${c.id}`, 400);
+      if (c.proof !== undefined && c.proof !== "browser" && c.proof !== "test")
+        throw new StackError(`task ${i}: claim ${c.id} proof must be "browser" or "test"`, 400);
       ids.add(c.id);
     }
-    return { id: typeof t.id === "string" ? t.id : undefined, title: t.title.trim(), claims: t.claims.map((c: Claim) => ({ id: c.id, text: c.text.trim() })) };
+    return {
+      id: typeof t.id === "string" ? t.id : undefined,
+      title: t.title.trim(),
+      claims: t.claims.map((c: Claim) => ({ id: c.id, text: c.text.trim(), ...(c.proof === "test" ? { proof: "test" as const } : {}) })),
+    };
   });
 }
 

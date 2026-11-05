@@ -26,6 +26,7 @@ const body = (videoUrls: Record<string, string[]>) =>
     gate,
     videoUrls,
     start: "npx vite --port {port}",
+    tests: "`playwright test`",
     folder: "/h/tasks/t1",
     specs: [{ name: "c1.spec.ts", text: "test('C1: x', () => {});\n" }],
   });
@@ -36,7 +37,7 @@ test("PR body: a row and a video link for each claim, the run facts and the spec
   assert.match(b, /\| C2 \| Counts draws \| PASS \| \[video\]\(https:\/\/gh\/c2\.webm\) \|/);
   assert.match(b, /Commit: `3f9c2a1abcdef`/);
   assert.match(b, /Start: `npx vite --port \{port\}`/);
-  assert.match(b, /<details><summary>1 proof spec files[\s\S]*#### c1\.spec\.ts[\s\S]*C1: x[\s\S]*<\/details>/);
+  assert.match(b, /<details><summary>1 proof test files[\s\S]*#### c1\.spec\.ts[\s\S]*C1: x[\s\S]*<\/details>/);
   assert.match(b, /## Not proven\n\nNone\./);
   assert.match(b, /Generated with \[Claude Code\]/);
 });
@@ -122,4 +123,20 @@ test("removeTests deletes only the specs that name a listed claim, and never the
   assert.deepEqual(removeTests(["C1"], dir), ["c1.spec.ts"]);
   assert.deepEqual(readdirSync(dir).sort(), ["c12.spec.ts", "c3.spec.ts", "seed.spec.ts"]);
   assert.deepEqual(removeTests([], dir), []);
+});
+
+test("PR body: a test claim shows repo test, and no video is missing for it", () => {
+  const b = prBody({
+    title: "Engine",
+    commits: [],
+    claims: [{ id: "C1", text: "replans", proof: "test" }],
+    gate: { ...gate, rows: [{ id: "C1", tests: 1, status: "PASS", reasons: [], videos: [], traces: [] }] },
+    videoUrls: {},
+    start: "none (repo tests only)",
+    tests: "`npm test`",
+    folder: "/h/tasks/t1",
+    specs: [],
+  });
+  assert.match(b, /\| C1 \| replans \| PASS \| repo test \|/);
+  assert.match(b, /## Not proven\n\nNone\./);
 });

@@ -1,11 +1,12 @@
 # awb playbook
 
-You work inside Agent Workbench (`awb`). The workbench tracks this session and proves each feature with browser tests before it ships.
+You work inside Agent Workbench (`awb`). The workbench tracks this session and proves each feature with browser tests or repo tests before it ships.
 
 ## For a feature request
 
 1. Make a branch for the task: `git checkout -b awb/<short-name>`.
 2. Write the claims. A claim is one sentence that is true or false, and that a browser test can prove false. Name the labels that a user sees, for example "X wins" or "Reset scores".
+   If a claim is about logic that a page does not show (an engine, a rule, a calculation), add `"proof":"test"` to it. A separate session then proves it with an integration test in the repo test framework, not in a browser. Write the input and the result, for example "After the event B moves to 14:00, replan keeps the event A at 10:00 in every option".
 3. Create the task. Send the stack as JSON on stdin:
    ```sh
    awb stack set <<'EOF'
@@ -22,12 +23,20 @@ You work inside Agent Workbench (`awb`). The workbench tracks this session and p
    ready: <a path that answers when the app is up>
    ````
    If the app is already running at a fixed URL, leave out the code block and write only `url:` and `ready:`.
+   For `"proof":"test"` claims, add a `## test` section. Its ```sh block runs the given test files with a JUnit XML reporter. `{tests}` is the list of files, and `{report}` is the XML path. For `node --test`:
+   ````md
+   ## test
+   ```sh
+   node --test --test-reporter=junit --test-reporter-destination={report} {tests}
+   ```
+   ````
+   A task with only test claims does not need `## start`.
    If a fresh clone needs an install before the app can start, add a `## setup` section with a ```sh block, for example `npm ci`. The runner runs it in each new worktree.
 5. Write the code. Run the repo lint, typecheck and unit tests, and fix every failure.
 6. Commit. `awb prove` refuses uncommitted changes.
 7. Run `awb prove`. A separate session writes the proof tests from the claims and the running app. Then the gate runs them. The command prints a claim table.
 8. If a claim fails, fix the code, commit, and run `awb prove` again. Do not edit the proof tests. They are not yours, and the gate refuses a test that changed during a run.
-   If the video and the trace show that the test itself is wrong (it checks something that the claim does not say), run `awb prove --rewrite C1` (a comma list of claim ids). This deletes those tests, and the test writer writes them again. Do not use it to get past a real bug in your code.
+   If the video and the trace (or for a test claim, `proof/test.log` in the task folder) show that the test itself is wrong (it checks something that the claim does not say), run `awb prove --rewrite C1` (a comma list of claim ids). This deletes those tests, and the test writer writes them again. Do not use it to get past a real bug in your code.
 9. When every claim passes, run `awb ship`. It runs the gate again, pushes the branch, uploads the videos and opens a draft PR. Report the PR URL and the claim table.
 
 ## For a big feature

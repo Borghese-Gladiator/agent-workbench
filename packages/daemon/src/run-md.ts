@@ -1,8 +1,25 @@
 export type RunMd = { start: string | null; url: string; ready: string };
 
-export function parseSetup(text: string): string | null {
-  const section = text.match(/^##\s+setup\s*$([\s\S]*?)(?=^##\s|(?![\s\S]))/im)?.[1];
+function sectionCommand(text: string, name: string): string | null {
+  const section = text.match(new RegExp(`^##\\s+${name}\\s*$([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "im"))?.[1];
   return section?.match(/```(?:sh|bash|shell)?\n([\s\S]*?)```/)?.[1].trim() || null;
+}
+
+export function parseSetup(text: string): string | null {
+  return sectionCommand(text, "setup");
+}
+
+export function parseTest(text: string): string {
+  const cmd = sectionCommand(text, "test");
+  if (!cmd) throw new Error("run.md has no '## test' section with a ```sh block");
+  if (!cmd.includes("{tests}") || !cmd.includes("{report}")) throw new Error("run.md '## test' must use {tests} and {report}");
+  return cmd;
+}
+
+const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
+
+export function fillTest(cmd: string, tests: string[], report: string): string {
+  return cmd.replaceAll("{tests}", tests.map(quote).join(" ")).replaceAll("{report}", quote(report));
 }
 
 export function parseRunMd(text: string): RunMd {

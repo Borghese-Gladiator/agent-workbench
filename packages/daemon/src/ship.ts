@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { claimTable, type GateResult } from "./gate.ts";
+import { claimTable, type Claim, type GateResult } from "./gate.ts";
 import { gateFromDisk, run } from "./prove.ts";
-import { parseRunMd } from "./run-md.ts";
+import { parseRunMd, parseTest } from "./run-md.ts";
 import type { Task, TaskStatus } from "./stacks.ts";
 
 const SECRETS: [string, RegExp][] = [
@@ -21,10 +21,11 @@ export function findSecrets(files: { name: string; text: string }[]): string[] {
 export type BodyInput = {
   title: string;
   commits: string[];
-  claims: { id: string; text: string }[];
+  claims: Claim[];
   gate: GateResult;
   videoUrls: Record<string, string[]>;
   start: string;
+  tests: string;
   folder: string;
   specs: { name: string; text: string }[];
 };
@@ -35,9 +36,9 @@ export function prBody(b: BodyInput): string {
   const rows = b.claims.map((c) => {
     const row = b.gate.rows.find((r) => r.id === c.id);
     const links = (b.videoUrls[c.id] ?? []).map((u, i) => `[video${i ? ` ${i + 1}` : ""}](${u})`).join(" ");
-    return `| ${c.id} | ${cell(c.text)} | ${row?.status ?? "FAIL"} | ${links || "none"} |`;
+    return `| ${c.id} | ${cell(c.text)} | ${row?.status ?? "FAIL"} | ${c.proof === "test" ? "repo test" : links || "none"} |`;
   });
-  const notProven = b.claims.filter((c) => !b.videoUrls[c.id]?.length).map((c) => `- ${c.id}: no video uploaded.`);
+  const notProven = b.claims.filter((c) => c.proof !== "test" && !b.videoUrls[c.id]?.length).map((c) => `- ${c.id}: no video uploaded.`);
   const specs = b.specs.map((s) => `#### ${s.name}\n\n\`\`\`ts\n${s.text.trimEnd()}\n\`\`\``).join("\n\n");
   return `## Summary
 
@@ -55,7 +56,7 @@ ${rows.join("\n")}
 
 - Start: \`${b.start}\`
 - Commit: \`${b.gate.head}\`
-- Tests: \`playwright test\` in the task folder \`${b.folder}\`
+- Tests: ${b.tests}, from the task folder \`${b.folder}\`
 - Traces stay in \`${b.folder}/proof/results\`. They are not uploaded, because a trace can hold cookies.
 
 ## Not proven
@@ -64,7 +65,7 @@ ${notProven.join("\n") || "None."}
 
 ## Test code
 
-<details><summary>${b.specs.length} proof spec files (not in the diff)</summary>
+<details><summary>${b.specs.length} proof test files (not in the diff)</summary>
 
 ${specs}
 
@@ -138,17 +139,22 @@ export async function ship(task: Task, worktree: string, log: (l: string) => voi
 
   const tests = join(folder, "proof-tests");
   const specs = readdirSync(tests)
-    .filter((f) => /\.spec\.(ts|js)$/.test(f) && f !== "seed.spec.ts")
+    .filter((f) => /\.(spec|test)\.(ts|js|mjs)$/.test(f) && f !== "seed.spec.ts")
     .sort()
     .map((name) => ({ name, text: readFileSync(join(tests, name), "utf8") }));
-  const runMd = parseRunMd(readFileSync(join(worktree, ".awb", "run.md"), "utf8"));
+  const runMdText = readFileSync(join(worktree, ".awb", "run.md"), "utf8");
+  const hasBrowser = task.claims.some((c) => c.proof !== "test");
+  const hasTest = task.claims.some((c) => c.proof === "test");
+  const runMd = hasBrowser ? parseRunMd(runMdText) : null;
+  const start = runMd ? runMd.start ?? runMd.url : "none (repo tests only)";
+  const testsLine = [hasBrowser && "`playwright test`", hasTest && `\`${parseTest(runMdText)}\``].filter(Boolean).join(" and ");
   await run("git", ["fetch", "-q", "origin", `+refs/heads/${task.base}:refs/remotes/origin/${task.base}`], worktree);
   const commits = execFileSync("git", ["log", "--format=%h %s", `origin/${task.base}..HEAD`], { cwd: worktree, encoding: "utf8" })
     .trim()
     .split("\n")
     .filter(Boolean);
   const body = (videoUrls: Record<string, string[]>) =>
-    prBody({ title: task.title, commits, claims: task.claims, gate, videoUrls, start: runMd.start ?? runMd.url, folder, specs });
+    prBody({ title: task.title, commits, claims: task.claims, gate, videoUrls, start, tests: testsLine, folder, specs });
 
   const secrets = findSecrets([...specs, { name: "the PR body", text: body({}) }]);
   if (secrets.length) throw new ShipRefused(`secret scan: ${secrets.join("; ")}`, table);

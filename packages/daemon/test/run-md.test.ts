@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseSetup, parseRunMd, fill } from "../src/run-md.ts";
+import { parseSetup, parseRunMd, parseTest, fillTest, fill } from "../src/run-md.ts";
 
 const vite = `# Run
 
@@ -43,3 +43,16 @@ test("the setup section gives its command, and no section gives null", () => {
   assert.equal(parseSetup("## setup\n```sh\nnpm ci\n```\n\n## start\nurl: http://x\n"), "npm ci");
   assert.equal(parseSetup("## start\nurl: http://x\n"), null);
 });
+
+test("parses the test command and fills the files and the report path", () => {
+  const cmd = parseTest("## test\n```sh\nnode --test --test-reporter=junit --test-reporter-destination={report} {tests}\n```\n## start\nurl: http://x\n");
+  assert.equal(fillTest(cmd, [".awb-proof/c1.test.ts", "it's.test.ts"], "/h/junit.xml"),
+    "node --test --test-reporter=junit --test-reporter-destination='/h/junit.xml' '.awb-proof/c1.test.ts' 'it'\\''s.test.ts'");
+});
+
+for (const [name, text] of [
+  ["no test section", "## start\nurl: http://x\n"],
+  ["a test command with no {report}", "## test\n```sh\nnode --test {tests}\n```\n"],
+]) {
+  test(`parseTest refuses ${name}`, () => assert.throws(() => parseTest(text)));
+}

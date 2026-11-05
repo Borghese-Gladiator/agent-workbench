@@ -18,7 +18,7 @@ export function taskPrompt(task: Task, below: Task[]): string {
       : "This is the first task of the stack.",
     `You are on the branch ${task.branch}, and the task already exists in awb, so do not run awb stack set and do not make a branch.`,
     "The claims of this task:",
-    ...task.claims.map((c) => `- ${c.id}: ${c.text}`),
+    ...task.claims.map((c) => `- ${c.id}${c.proof === "test" ? " (proven by a repo test)" : ""}: ${c.text}`),
     "Follow the playbook from step 4: check .awb/run.md, write the code, commit, run awb prove until every claim passes, then run awb ship.",
   ].join("\n");
 }
