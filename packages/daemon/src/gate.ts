@@ -71,7 +71,12 @@ const unescape = (s: string) =>
 export function junitReport(xml: string): Report {
   const specs: ReportSpec[] = [];
   for (const m of xml.matchAll(/<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)) {
-    const title = unescape(m[1].match(/\bname="([^"]*)"/)?.[1] ?? "");
+    const attr = (k: string) => unescape(m[1].match(new RegExp(`\\b${k}="([^"]*)"`))?.[1] ?? "");
+    const name = attr("name");
+    const fromFile = [attr("file").split("/").pop() ?? "", attr("classname").split("/").pop() ?? ""]
+      .map((s) => s.match(/(?:^|\.)(c\d+)[._]/i)?.[1].toUpperCase())
+      .find(Boolean);
+    const title = /^C\d+\b/.test(name) || !fromFile ? name : `${fromFile}: ${name}`;
     const body = m[2] ?? "";
     if (/<skipped\b/.test(body)) {
       specs.push({ title, tests: [{ status: "skipped", results: [] }] });

@@ -30,6 +30,10 @@ You work inside Agent Workbench (`awb`). The workbench tracks this session and p
    node --test --test-reporter=junit --test-reporter-destination={report} {tests}
    ```
    ````
+   For other frameworks:
+   - vitest: `npx vitest run --reporter=junit --outputFile={report} {tests}`
+   - pytest: `python3 -m pytest -q -p no:cacheprovider --junitxml={report} {tests}` (add `pythonpath = .` in `pytest.ini` if the tests cannot import the code)
+   The test writer names each file for its claim: `c1.test.ts` or `c1_test.py`. The gate maps a test to a claim from the file name.
    A task with only test claims does not need `## start`.
    If a fresh clone needs an install before the app can start, add a `## setup` section with a ```sh block, for example `npm ci`. The runner runs it in each new worktree.
 5. Write the code. Run the repo lint, typecheck and unit tests, and fix every failure.

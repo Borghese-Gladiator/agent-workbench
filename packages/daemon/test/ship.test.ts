@@ -140,3 +140,19 @@ test("PR body: a test claim shows repo test, and no video is missing for it", ()
   assert.match(b, /\| C1 \| replans \| PASS \| repo test \|/);
   assert.match(b, /## Not proven\n\nNone\./);
 });
+
+test("test files: the claim comes from the file name, in each language", async () => {
+  const { testFileClaim, claimsWithoutTest, removeTests, testHash } = await import("../src/prove.ts");
+  assert.deepEqual(
+    ["c1.test.ts", "c2_test.py", "C3.test.mjs", "c12_pick_slot_test.py", "c1.spec.ts", "seed.spec.ts", "conftest.py", "c1.json"].map(testFileClaim),
+    ["C1", "C2", "C3", "C12", null, null, null, null],
+  );
+  const dir = mkdtempSync(join(tmpdir(), "awb-files-"));
+  writeFileSync(join(dir, "c1_test.py"), "def test_x():\n    assert True\n");
+  const claims = [{ id: "C1", text: "a", proof: "test" as const }, { id: "C2", text: "b", proof: "test" as const }];
+  assert.deepEqual(claimsWithoutTest(claims, dir).map((c) => c.id), ["C2"]);
+  const before = testHash(dir);
+  writeFileSync(join(dir, "c1_test.py"), "def test_x():\n    assert False\n");
+  assert.notEqual(testHash(dir), before);
+  assert.deepEqual(removeTests(["C1"], dir), ["c1_test.py"]);
+});

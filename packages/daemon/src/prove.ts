@@ -41,31 +41,41 @@ export function testHash(dir: string): string {
   const h = createHash("sha256");
   if (!existsSync(dir)) return h.digest("hex");
   for (const f of readdirSync(dir).sort()) {
-    if (!/\.(ts|js|mjs)$/.test(f)) continue;
+    if (!/\.(ts|js|mjs|cjs|py)$/.test(f)) continue;
     h.update(f).update("\0").update(readFileSync(join(dir, f))).update("\0");
   }
   return h.digest("hex");
 }
 
 const SPEC = /\.spec\.(ts|js)$/;
-const TEST = /\.test\.(ts|js|mjs)$/;
 export const PROOF_DIR = ".awb-proof";
 
-const readTests = (dir: string, re: RegExp) =>
-  existsSync(dir) ? readdirSync(dir).filter((f) => re.test(f)).map((f) => readFileSync(join(dir, f), "utf8")).join("\n") : "";
+export function testFileClaim(f: string): string | null {
+  if (SPEC.test(f) || !/^c\d+[._][\w.-]*\.(ts|js|mjs|cjs|py)$/i.test(f)) return null;
+  return f.match(/^c\d+/i)![0].toUpperCase();
+}
+
+const repoTests = (dir: string) => (existsSync(dir) ? readdirSync(dir).filter((f) => testFileClaim(f)).sort() : []);
+
+const specsText = (dir: string) =>
+  existsSync(dir) ? readdirSync(dir).filter((f) => SPEC.test(f)).map((f) => readFileSync(join(dir, f), "utf8")).join("\n") : "";
+
+const specHasClaim = (text: string, id: string) => new RegExp(`['"\`]${id}\\b`).test(text);
 
 export function claimsWithoutTest(claims: Claim[], dir: string): Claim[] {
-  const specs = readTests(dir, SPEC);
-  const tests = readTests(dir, TEST);
-  return claims.filter((c) => !new RegExp(`['"\`]${c.id}\\b`).test(c.proof === "test" ? tests : specs));
+  const specs = specsText(dir);
+  const tested = new Set(repoTests(dir).map(testFileClaim));
+  return claims.filter((c) => (c.proof === "test" ? !tested.has(c.id) : !specHasClaim(specs, c.id)));
 }
 
 export function removeTests(ids: string[], dir: string): string[] {
   if (!ids.length || !existsSync(dir)) return [];
   const removed = readdirSync(dir).filter((f) => {
-    if (f === "seed.spec.ts" || !(SPEC.test(f) || TEST.test(f))) return false;
+    const claim = testFileClaim(f);
+    if (claim) return ids.includes(claim);
+    if (f === "seed.spec.ts" || !SPEC.test(f)) return false;
     const text = readFileSync(join(dir, f), "utf8");
-    return ids.some((id) => new RegExp(`['"\`]${id}\\b`).test(text));
+    return ids.some((id) => specHasClaim(text, id));
   });
   for (const f of removed) rmSync(join(dir, f));
   return removed;
@@ -190,9 +200,9 @@ export function testWriterPrompt(claims: Claim[], script: string): string {
   return [
     "Write one integration test for each of these claims about the code in this repo:",
     ...claims.map((c) => `- ${c.id}: ${c.text}`),
-    `Save each test as ${PROOF_DIR}/<claim id in lower case>.test.ts (or .test.js in a JavaScript repo), for example ${PROOF_DIR}/c1.test.ts.`,
-    "Use the test framework and the style of the existing tests in this repo. Import the code with relative paths from that folder.",
-    "Start each test name with its claim id, for example 'C1: ...'.",
+    `Put the tests for each claim in one file in ${PROOF_DIR}, named for the claim id in lower case: c1.test.ts or c1.test.js for JavaScript and TypeScript, c1_test.py for Python.`,
+    "Use the test framework and the style of the existing tests in this repo. Import the code from that folder as the test command can load it.",
+    "In JavaScript and TypeScript, start each test name with its claim id, for example 'C1: ...'.",
     "Call the real code. Do not mock the logic that the claim is about.",
     `To run your tests, run exactly: sh ${script}`,
     `The folder ${PROOF_DIR} exists. You can use only Read, Glob, Grep, Edit and Write in it, and that one command. Other commands are refused.`,
@@ -210,7 +220,7 @@ async function runTestWriter(folder: string, worktree: string, claims: Claim[], 
   const script = join(folder, "writer-test.sh");
   const report = join(folder, "proof", "writer-junit.xml");
   const cmd = testCmd.replaceAll("{tests}", `${PROOF_DIR}/*`).replaceAll("{report}", JSON.stringify(report));
-  writeFileSync(script, `cd ${JSON.stringify(worktree)}\n${cmd}\ncode=$?\ncat ${JSON.stringify(report)} 2>/dev/null\nexit $code\n`);
+  writeFileSync(script, `cd ${JSON.stringify(worktree)}\nexport PYTHONDONTWRITEBYTECODE=1\n${cmd}\ncode=$?\ncat ${JSON.stringify(report)} 2>/dev/null\nexit $code\n`);
   deps.log(`test writer: ${claims.map((c) => c.id).join(", ")}`);
   try {
     await runClaude(
@@ -232,14 +242,14 @@ async function runTestWriter(folder: string, worktree: string, claims: Claim[], 
       git(worktree, "clean", "-qfd", "-e", PROOF_DIR);
       throw new Error("the test writer changed the source or the commit; the change is undone");
     }
-    for (const f of readdirSync(work).filter((f) => TEST.test(f))) copyFileSync(join(work, f), join(folder, "proof-tests", f));
+    for (const f of repoTests(work)) copyFileSync(join(work, f), join(folder, "proof-tests", f));
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
 }
 
 async function runRepoTests(folder: string, worktree: string, testCmd: string, log: (l: string) => void) {
-  const files = readdirSync(join(folder, "proof-tests")).filter((f) => TEST.test(f)).sort();
+  const files = repoTests(join(folder, "proof-tests"));
   const work = join(worktree, PROOF_DIR);
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work);
@@ -247,7 +257,7 @@ async function runRepoTests(folder: string, worktree: string, testCmd: string, l
     for (const f of files) copyFileSync(join(folder, "proof-tests", f), join(work, f));
     const cmd = fillTest(testCmd, files.map((f) => `${PROOF_DIR}/${f}`), join(folder, "proof", "junit.xml"));
     log(`proof run: ${cmd}`);
-    const r = await run("sh", ["-c", cmd], worktree);
+    const r = await run("sh", ["-c", `export PYTHONDONTWRITEBYTECODE=1\n${cmd}`], worktree);
     writeFileSync(join(folder, "proof", "test.log"), r.out);
   } finally {
     rmSync(work, { recursive: true, force: true });

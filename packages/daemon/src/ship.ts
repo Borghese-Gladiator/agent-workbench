@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { claimTable, type Claim, type GateResult } from "./gate.ts";
-import { gateFromDisk, run } from "./prove.ts";
+import { gateFromDisk, run, testFileClaim } from "./prove.ts";
 import { parseRunMd, parseTest } from "./run-md.ts";
 import type { Task, TaskStatus } from "./stacks.ts";
 
@@ -39,7 +39,9 @@ export function prBody(b: BodyInput): string {
     return `| ${c.id} | ${cell(c.text)} | ${row?.status ?? "FAIL"} | ${c.proof === "test" ? "repo test" : links || "none"} |`;
   });
   const notProven = b.claims.filter((c) => c.proof !== "test" && !b.videoUrls[c.id]?.length).map((c) => `- ${c.id}: no video uploaded.`);
-  const specs = b.specs.map((s) => `#### ${s.name}\n\n\`\`\`ts\n${s.text.trimEnd()}\n\`\`\``).join("\n\n");
+  const specs = b.specs
+    .map((s) => `#### ${s.name}\n\n\`\`\`${s.name.endsWith(".py") ? "python" : "ts"}\n${s.text.trimEnd()}\n\`\`\``)
+    .join("\n\n");
   return `## Summary
 
 ${b.title}
@@ -139,7 +141,7 @@ export async function ship(task: Task, worktree: string, log: (l: string) => voi
 
   const tests = join(folder, "proof-tests");
   const specs = readdirSync(tests)
-    .filter((f) => /\.(spec|test)\.(ts|js|mjs)$/.test(f) && f !== "seed.spec.ts")
+    .filter((f) => (/\.spec\.(ts|js)$/.test(f) && f !== "seed.spec.ts") || testFileClaim(f))
     .sort()
     .map((name) => ({ name, text: readFileSync(join(tests, name), "utf8") }));
   const runMdText = readFileSync(join(worktree, ".awb", "run.md"), "utf8");

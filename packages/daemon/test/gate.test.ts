@@ -79,3 +79,26 @@ test("JUnit: a browser claim still needs a video", () => {
   const g = runGate(base([], { claims: [{ id: "C1", text: "t" }], report: junitReport(junit) }));
   assert.deepEqual(g.rows[0].reasons, ["no video or trace"]);
 });
+
+const pytest = `<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" tests="3">
+<testcase classname=".awb-proof.c1_test" name="test_touching_events_do_not_overlap" time="0.01" />
+<testcase classname=".awb-proof.c2_test" name="test_pick_slot" time="0.01"><failure message="assert 5 == 6">E assert</failure></testcase>
+<testcase classname=".awb-proof.c3_test" name="test_later"><skipped type="pytest.skip" message="x" /></testcase>
+</testsuite></testsuites>`;
+
+const vitest = `<testsuites name="vitest tests"><testsuite name=".awb-proof/c2.test.js" tests="2">
+<testcase classname=".awb-proof/c1.test.js" name="C1: add sums" time="0.1"></testcase>
+<testcase classname=".awb-proof/c2.test.js" name="group &gt; inner" time="0.1"><failure message="x">x</failure></testcase>
+</testsuite></testsuites>`;
+
+const testClaims = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `C${i + 1}`, text: "t", proof: "test" as const }));
+
+for (const [name, xml, n, want] of [
+  ["pytest maps a claim from the file name", pytest, 3, [["C1", "PASS"], ["C2", "FAIL"], ["C3", "FAIL"]]],
+  ["vitest maps a claim from the test name, or else the file name", vitest, 2, [["C1", "PASS"], ["C2", "FAIL"]]],
+] as const) {
+  test(`JUnit: ${name}`, () => {
+    const g = runGate(base([], { claims: testClaims(n), report: junitReport(xml) }));
+    assert.deepEqual(g.rows.map((r) => [r.id, r.status]), want);
+  });
+}
