@@ -16,6 +16,8 @@ awb ui                           # opens the session list in the browser
 | `awb ui [--no-open]` | Prints the UI URL and opens it. The UI has four views: Live (every session), Session (its events and tokens), Stacks (each task with its status and PR; you can edit a waiting task) and the proof page of a task (the claim table, a video for each claim, the trace, the proof tests and the diff). |
 | `awb sessions [--json]` | Lists the sessions. |
 | `awb doctor` | Checks the setup and prints a fix for each problem. |
+| `awb wt [repo] [--root <dir>] [--json]` | Lists the worktrees in `<root>/<repo>/<branch>`, grouped by repo, with the branch, the number of changed files and the last commit age. The root is `--root`, else `AWB_WORKTREES`, else `~/LOCAL_worktrees`. A folder without a `.git` file shows as `not a worktree`. |
+| `awb wt pick [repo] [--root <dir>]` | Opens a picker. Arrow keys or `j`/`k` move, Space marks, `d` then `y` removes the marked worktrees with `git worktree remove` (it refuses a worktree with changes), Enter prints the path, `q` quits. The picker draws on stderr, so `cd "$(awb wt pick)"` works. |
 | `awb daemon start\|stop\|status` | Controls the daemon of the active `AWB_HOME`. |
 | `awb stack set [--json]` | Reads a stack as JSON on stdin and creates or replaces it. A stack of one binds to the current branch. In a stack of many, each task gets its own branch: task 1 starts from the current branch, and each later task starts from the task below. |
 | `awb run [stack] [--wait] [--json]` | Starts the runner on the stack (default: the newest stack of the repo). Without `--wait` it returns at once. With `--wait` it returns when the run is `done` or `stopped`, and exits 1 if it is not `done`. The runner makes a worktree in `AWB_HOME/worktrees/` for each task, runs the `## setup` block of `.awb/run.md` in it, and starts `awb -p` with the task prompt. If a task ends without a PR, the task is `failed` and the stack stops. |
@@ -43,5 +45,6 @@ To test:
 ```sh
 npm test
 npm run typecheck
+bash e2e/wt.sh                           # awb wt with real git worktrees and the picker in a pty (no cost)
 WORK=<dir> bash e2e/acceptance.sh setup   # then single, bug, stack, ask (real claude and GitHub, about 6 USD)
 ```

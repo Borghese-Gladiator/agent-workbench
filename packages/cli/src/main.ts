@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { awbHome, ensureDaemon, findDaemon, api } from "./home.ts";
 import { gitInfo, playbookPath, claudeArgs, awbSettings } from "./launch.ts";
 import { doctor } from "./doctor.ts";
+import { wtCmd } from "./wt.ts";
 
 const home = awbHome();
 const [cmd, ...rest] = process.argv.slice(2);
@@ -23,6 +24,9 @@ switch (cmd) {
   }
   case "doctor":
     process.exitCode = (await doctor(home)) ? 0 : 1;
+    break;
+  case "wt":
+    process.exitCode = await wtCmd(rest);
     break;
   case "daemon":
     await daemonCmd(rest[0]);
