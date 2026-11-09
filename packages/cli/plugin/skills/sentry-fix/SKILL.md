@@ -72,7 +72,9 @@ Save the command and its output. This is the **before** result.
 
 Make the smallest change at the root cause. Do not change the test. Commit: `fix: <what changed> (<SHORT-ID>)`.
 
-Do not put `Fixes <SHORT-ID>`, `Resolves <SHORT-ID>` or a similar line in a commit message or a PR body. Sentry reads these lines, and it resolves the issue when the commit merges. The short id in the title in parentheses is safe. Sentry ignores it.
+Do not put `Fixes <SHORT-ID>`, `Resolves <SHORT-ID>` or a similar line in a commit message. Sentry reads these lines, and it resolves the issue when the commit merges. The short id in the title in parentheses is safe. Sentry ignores it.
+
+The PR body follows the repo PR template. If the template asks for `Fixes <SENTRY-SHORT-ID>` (the `app` template does), put that line in the PR body only.
 
 ## 8. Get the "after" result
 
@@ -126,6 +128,6 @@ For an error in fender with a browser path, the fix also needs a browser claim. 
 
 ## Rules
 
-- Do not write to Sentry or Slack. Do not resolve, assign or comment on an issue. A `Fixes <SHORT-ID>` line in a commit is a write to Sentry, so do not add one.
+- Do not write to Sentry or Slack. Do not resolve, assign or comment on an issue. A `Fixes <SHORT-ID>` line in a commit is a write to Sentry, so do not add one. A `Fixes` line in a PR body is correct only when the repo PR template asks for it.
 - Do not weaken a test so that it passes.
 - Every number in the proof file comes from Sentry or from a command output.
