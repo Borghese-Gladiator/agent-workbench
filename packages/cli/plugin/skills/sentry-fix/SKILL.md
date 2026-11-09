@@ -63,6 +63,7 @@ Read the code at the fault frame and its callers. Use the local variables and th
 3. Commit only the test: `test: reproduce <SHORT-ID>`.
 4. Run only that test. For `app`, run the unit marker: `-m unit <test path>`.
 5. The test must fail with the match key: the same exception type, raised in the same file and function. Compare the traceback with step 2.
+   A log event (a Sentry issue from a `logger.error` call, with no exception) has no traceback. For a log event, the match key is the `logger` tag and the source logger. Capture the events with the real `sentry_sdk`: make a `sentry_sdk.Client` with a `transport` that appends each event to a list. The test then fails when the list has an event with the same `logger` tag as the Sentry issue.
 6. If the test passes, or fails in a different way, it does not reproduce the issue. Change the test and amend the test commit. After 3 tries, stop with "not reproduced". Report each try and its output.
 
 Save the command and its output. This is the **before** result.
@@ -70,6 +71,8 @@ Save the command and its output. This is the **before** result.
 ## 7. Fix
 
 Make the smallest change at the root cause. Do not change the test. Commit: `fix: <what changed> (<SHORT-ID>)`.
+
+Do not put `Fixes <SHORT-ID>`, `Resolves <SHORT-ID>` or a similar line in a commit message or a PR body. Sentry reads these lines, and it resolves the issue when the commit merges. The short id in the title in parentheses is safe. Sentry ignores it.
 
 ## 8. Get the "after" result
 
@@ -123,6 +126,6 @@ For an error in fender with a browser path, the fix also needs a browser claim. 
 
 ## Rules
 
-- Do not write to Sentry or Slack. Do not resolve, assign or comment on an issue.
+- Do not write to Sentry or Slack. Do not resolve, assign or comment on an issue. A `Fixes <SHORT-ID>` line in a commit is a write to Sentry, so do not add one.
 - Do not weaken a test so that it passes.
 - Every number in the proof file comes from Sentry or from a command output.
