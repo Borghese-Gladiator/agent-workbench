@@ -76,6 +76,19 @@ Do not put `Fixes <SHORT-ID>`, `Resolves <SHORT-ID>` or a similar line in a comm
 
 The PR body follows the repo PR template. If the template asks for `Fixes <SENTRY-SHORT-ID>` (the `app` template does), put that line in the PR body only.
 
+If the template has a `# Checklist` section, put only that section in a `<details>` element. The other sections stay open:
+
+```md
+<details>
+<summary>Checklist</summary>
+
+<the Checklist section of the template, with its heading and all its checkboxes>
+
+</details>
+```
+
+Keep a blank line after `<summary>` and before `</details>`, or GitHub does not render the Markdown inside.
+
 ## 8. Get the "after" result
 
 1. Run the same command as in step 6. It must pass. This is the **after** result.
@@ -136,11 +149,17 @@ If the repo PR template asks for a ticket link (the `app` template asks for a Li
 ## Resources
 ```
 
-## 11. Report
+## 11. After the PR opens
+
+Open the PR only as a draft (`gh pr create --draft`). Then confirm it: `gh pr view <number> --json isDraft` must give `true`.
+
+Find each ticket that the PR body links (for example `Fixes https://linear.app/klaviyo/issue/ADV2-896/...`). For each Linear ticket, set the status to "In Progress" with `mcp__linear-server__save_issue` (`id`, `state: "In Progress"`). Do not change a ticket that is already `started`, `completed` or `canceled`. Check the current status first with `mcp__linear-server__get_issue`. If the team has no "In Progress" status, tell the user, and do not pick a different status.
+
+## 12. Report
 
 Give the user: the result (fixed, skipped or not reproduced), the branch, the two commit SHAs, the proof file path, and the before and after output in short form.
 
-`awb ship` proves only browser claims today, so it cannot ship this branch, and `gh pr create` is denied in `awb`. Tell the user that the branch is ready for a PR, and that the PR body can come from the proof file.
+`awb ship` proves only browser claims today, so it cannot ship this branch, and `gh pr create` is denied in an `awb` session. If the user asks for a PR, push the branch and open a draft PR with `gh pr create --draft` outside `awb`, with the PR body from the proof file. Then do step 11. Never open a PR that is not a draft, never run `gh pr ready`, and never request reviewers.
 
 For an error in fender with a browser path, the fix also needs a browser claim. Follow the playbook feature flow: write a claim for the correct behavior, then run `awb prove` and `awb ship`.
 
