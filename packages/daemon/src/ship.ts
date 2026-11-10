@@ -4,15 +4,8 @@ import { join } from "node:path";
 import { claimTable, type Claim, type GateResult } from "./gate.ts";
 import { gateFromDisk, run, testFileClaim } from "./prove.ts";
 import { parseRunMd, parseTest } from "./run-md.ts";
+import { SECRETS } from "./log.ts";
 import type { Task, TaskStatus } from "./stacks.ts";
-
-const SECRETS: [string, RegExp][] = [
-  ["GitHub token", /\b(gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})/],
-  ["AWS access key", /\bAKIA[0-9A-Z]{16}\b/],
-  ["private key", /-----BEGIN [A-Z ]*PRIVATE KEY-----/],
-  ["Slack token", /\bxox[abprs]-[A-Za-z0-9-]{10,}/],
-  ["Anthropic key", /\bsk-ant-[A-Za-z0-9_-]{20,}/],
-];
 
 export function findSecrets(files: { name: string; text: string }[]): string[] {
   return files.flatMap((f) => SECRETS.filter(([, re]) => re.test(f.text)).map(([kind]) => `${kind} in ${f.name}`));

@@ -40,7 +40,7 @@ function setup(addBody: string, writerExtra = "") {
     claims: [{ id: "C1", text: "add sums two numbers", proof: "test" }],
     folder: join(root, "task"),
   } as Task;
-  return { repo, task, deps: { claude, writerBudgetUsd: 1, log: () => {} } };
+  return { repo, task, deps: { claude, log: () => {} } };
 }
 
 test("prove: a test claim passes on correct code, with no app and no browser", async () => {

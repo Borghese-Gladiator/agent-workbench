@@ -31,6 +31,8 @@ export function parseSince(v: string, now = Date.now()): string {
   return d.toISOString();
 }
 
+export type RunState = { id: string; stackId: string; state: "running" | "done" | "stopped"; current: string | null; reason: string | null };
+
 export type Stack = { id: string; repo: string; base: string | null; version: number; created_at: string; tasks: Task[] };
 
 export type TaskInput = { id?: string; title: string; claims: Claim[] };
@@ -88,6 +90,19 @@ export function migrateStacks(db: DatabaseSync) {
   const stackCols = (db.prepare("PRAGMA table_info(stacks)").all() as { name: string }[]).map((c) => c.name);
   if (!stackCols.includes("base")) db.exec("ALTER TABLE stacks ADD COLUMN base TEXT;");
   if (!cols.includes("fail_reason")) db.exec("ALTER TABLE tasks ADD COLUMN fail_reason TEXT;");
+  const attemptCols = (db.prepare("PRAGMA table_info(attempts)").all() as { name: string }[]).map((c) => c.name);
+  if (!attemptCols.includes("writer_usd")) db.exec("ALTER TABLE attempts ADD COLUMN writer_usd REAL;");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS runs (
+      id TEXT PRIMARY KEY,
+      stack_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      current TEXT,
+      reason TEXT,
+      started_at TEXT NOT NULL,
+      ended_at TEXT
+    );
+  `);
 }
 
 export function taskBranch(title: string, id: string): string {
@@ -147,13 +162,26 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     updTask: db.prepare("UPDATE tasks SET position = ?, title = ?, claims = ? WHERE id = ?"),
     delTask: db.prepare("DELETE FROM tasks WHERE id = ?"),
     setStatus: db.prepare("UPDATE tasks SET status = ? WHERE id = ?"),
-    setPr: db.prepare("UPDATE tasks SET pr_number = ?, pr_url = ?, status = 'done' WHERE id = ?"),
+    setPr: db.prepare("UPDATE tasks SET pr_number = ?, pr_url = ?, status = 'done', fail_reason = NULL WHERE id = ?"),
     shipped: db.prepare("SELECT t.*, s.repo FROM tasks t JOIN stacks s ON s.id = t.stack_id WHERE t.status = 'done' AND t.pr_number IS NOT NULL"),
     addAttempt: db.prepare("INSERT INTO attempts (id, task_id, session_id, started_at) VALUES (?, ?, ?, ?)"),
     endAttempt: db.prepare("UPDATE attempts SET ended_at = ? WHERE id = ?"),
     attempts: db.prepare("SELECT * FROM attempts WHERE task_id = ? ORDER BY started_at"),
     addGate: db.prepare("INSERT INTO gate_results (attempt_id, commit_sha, pass, result, at) VALUES (?, ?, ?, ?, ?)"),
     gates: db.prepare("SELECT * FROM gate_results WHERE attempt_id = ? ORDER BY id"),
+    setWriter: db.prepare("UPDATE attempts SET writer_usd = ? WHERE id = ?"),
+    saveRun: db.prepare(
+      `INSERT INTO runs (id, stack_id, state, current, reason, started_at) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET state = excluded.state, current = excluded.current, reason = excluded.reason,
+         ended_at = CASE WHEN excluded.state = 'running' THEN NULL ELSE ? END`,
+    ),
+    getRun: db.prepare("SELECT id, stack_id AS stackId, state, current, reason FROM runs WHERE id = ?"),
+    stopRuns: db.prepare("UPDATE runs SET state = 'stopped', reason = ?, ended_at = ? WHERE state = 'running'"),
+    doingTasks: db.prepare("SELECT * FROM tasks WHERE status = 'doing'"),
+    openSessionPids: db.prepare(
+      `SELECT DISTINCT s.pid FROM attempts a JOIN sessions s ON s.id = a.session_id
+       WHERE a.task_id = ? AND s.ended_at IS NULL AND s.pid IS NOT NULL`,
+    ),
   };
 
   const get = (id: string): Stack | undefined => {
@@ -325,6 +353,27 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     },
     endAttempt(attemptId: string) {
       q.endAttempt.run(new Date().toISOString(), attemptId);
+    },
+    setWriterCost(attemptId: string, usd: number) {
+      q.setWriter.run(usd, attemptId);
+    },
+    saveRun(r: RunState) {
+      const now = new Date().toISOString();
+      q.saveRun.run(r.id, r.stackId, r.state, r.current, r.reason, now, now);
+    },
+    run(id: string): RunState | undefined {
+      const r = q.getRun.get(id) as RunState | undefined;
+      return r && { ...r };
+    },
+    recover(isAlive: (pid: number) => boolean = () => false): { runs: number; tasks: string[]; alive: string[] } {
+      const now = new Date().toISOString();
+      const runs = Number(q.stopRuns.run("daemon restart", now).changes);
+      const doing = (q.doingTasks.all() as any[]).map(row);
+      const live = (t: Task) => (q.openSessionPids.all(t.id) as { pid: number }[]).some((s) => isAlive(s.pid));
+      const alive = doing.filter(live);
+      const tasks = doing.filter((t) => !alive.includes(t));
+      for (const t of tasks) q.setFail.run("the daemon restarted while the task ran", t.id);
+      return { runs, tasks: tasks.map((t) => t.id), alive: alive.map((t) => t.id) };
     },
     saveGate(attemptId: string, g: GateResult) {
       q.addGate.run(attemptId, g.head, g.pass ? 1 : 0, JSON.stringify(g), new Date().toISOString());

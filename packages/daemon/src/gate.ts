@@ -14,6 +14,7 @@ export type GateInput = {
   testHashAtStart: string;
   testHashNow: string;
   fileExists: (path: string) => boolean;
+  writerEnd?: string;
 };
 
 export type GateRow = { id: string; tests: number; status: "PASS" | "FAIL"; reasons: string[]; videos: string[]; traces: string[] };
@@ -41,7 +42,7 @@ export function runGate(input: GateInput): GateResult {
     const tests = mine.flatMap((s) => s.tests);
     const results = tests.flatMap((t) => t.results);
     const reasons: string[] = [];
-    if (mine.length === 0) reasons.push("no test");
+    if (mine.length === 0) reasons.push(input.writerEnd ? `no test (test writer: ${input.writerEnd})` : "no test");
     const skipped = tests.some(
       (t) => t.status === "skipped" || t.annotations?.some((a) => a.type === "skip" || a.type === "fixme"),
     );

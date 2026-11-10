@@ -1,0 +1,39 @@
+local.file_match "awb" {
+  path_targets = [{
+    "__path__" = "/awb-logs/awb.*.jsonl",
+    "host"     = sys.env("AWB_HOST"),
+    "job"      = "awb",
+  }]
+}
+
+loki.source.file "awb" {
+  targets    = local.file_match.awb.targets
+  forward_to = [loki.process.awb.receiver]
+}
+
+loki.process "awb" {
+  stage.json {
+    expressions = { ts = "ts", level = "level", source = "source" }
+  }
+
+  stage.timestamp {
+    source = "ts"
+    format = "RFC3339Nano"
+  }
+
+  stage.labels {
+    values = { level = "", source = "" }
+  }
+
+  stage.label_drop {
+    values = ["filename"]
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

@@ -3,7 +3,10 @@ import { execFileSync } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, sep } from "node:path";
 import { parseSince, StackError, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
+import { LEVELS, logText, readLog, type Level, type Log, type LogFilter } from "./log.ts";
 import { prove, run, type ProveDeps } from "./prove.ts";
+import { costReport, costText } from "./cost.ts";
+import type { DatabaseSync } from "node:sqlite";
 import { ship, ShipRefused, syncStatus } from "./ship.ts";
 import type { createRunner } from "./runner.ts";
 
@@ -55,15 +58,24 @@ export function taskRoutes(
   runner: ReturnType<typeof createRunner>,
   usageOf: (sessionId: string) => unknown = () => null,
   home = "",
+  db?: DatabaseSync,
+  log: Log = () => {},
+  logDir = "",
 ) {
   const proving = new Set<string>();
 
   async function syncPrs() {
     for (const t of stacks.shipped()) {
       const r = await run("gh", ["pr", "view", String(t.pr_number), "--json", "state"], t.repo);
-      if (r.code !== 0) continue;
+      if (r.code !== 0) {
+        log("warn", "sync", "pr.error", { task: t.id, pr: t.pr_number, repo: t.repo, error: r.out.trim().slice(0, 500) });
+        continue;
+      }
       const next = syncStatus(JSON.parse(r.out).state);
-      if (next) stacks.setStatus(t.id, next);
+      if (next) {
+        stacks.setStatus(t.id, next);
+        log("info", "sync", "pr.state", { task: t.id, pr: t.pr_number, state: next });
+      }
     }
   }
 
@@ -78,7 +90,14 @@ export function taskRoutes(
     const specs = existsSync(tests)
       ? readdirSync(tests).filter((f) => /\.spec\.(ts|js)$/.test(f) && f !== "seed.spec.ts").sort().map((name) => ({ name, text: readFileSync(join(tests, name), "utf8") }))
       : [];
-    return { ...t, stack: stacks.get(t.stack_id), attempts, transcripts, specs, cost_usd: transcripts.reduce((n, f) => n + costOf(f), 0) };
+    const sessionUsd = transcripts.filter((f) => !f.endsWith("writer.jsonl")).reduce((n, f) => n + costOf(f), 0);
+    const saved = attempts.map((a: any) => a.writer_usd).filter((v: unknown): v is number => typeof v === "number");
+    const writerUsd = saved.length ? saved.reduce((n: number, v: number) => n + v, 0) : transcripts.filter((f) => f.endsWith("writer.jsonl")).reduce((n, f) => n + costOf(f), 0);
+    const lines = logDir ? readLog(logDir, { task: t.id, limit: 200 }) : [];
+    const writerEndFile = join(t.folder, "proof", "writer-end.txt");
+    const lastWriter = lines.findLast((l) => l.source === "prove" && l.event === "gate" && typeof l.writer === "string");
+    const writer_end = existsSync(writerEndFile) ? readFileSync(writerEndFile, "utf8").trim() : ((lastWriter?.writer as string | undefined) ?? null);
+    return { ...t, stack: stacks.get(t.stack_id), attempts, transcripts, specs, log: lines, writer_end, cost_usd: sessionUsd + writerUsd, writer_usd: writerUsd };
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse, url: URL, body: () => Promise<Json>): Promise<boolean> {
@@ -123,16 +142,27 @@ export function taskRoutes(
       proving.add(t.id);
       res.writeHead(200, { "content-type": "application/x-ndjson" });
       const line = (o: Json) => res.write(JSON.stringify(o) + "\n");
+      const before = t.status;
+      const ownedByRun = runner.owns(t.id);
       stacks.setStatus(t.id, "doing");
       const attempt = stacks.startAttempt(t.id, typeof b.sessionId === "string" ? b.sessionId : null);
+      const ids = { task: t.id, attempt, session: typeof b.sessionId === "string" ? b.sessionId : undefined };
+      log("info", "prove", "start", { ...ids, rewrite: rewrite.length ? rewrite : undefined });
+      let after: TaskStatus = before === "failed" ? "failed" : "waiting";
       try {
-        const r = await prove(t, b.worktree, { ...proveDeps, log: (msg) => line({ log: msg }) }, rewrite);
+        const r = await prove(t, b.worktree, { ...proveDeps, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite);
         stacks.saveGate(attempt, r.gate);
-        line({ result: { pass: r.gate.pass, table: r.table, rows: r.gate.rows, folder: r.folder, taskId: t.id } });
+        if (r.writer?.usd != null) stacks.setWriterCost(attempt, r.writer.usd);
+        const failed = r.gate.rows.filter((x) => x.status === "FAIL").map((x) => `${x.id}: ${x.reasons.join(", ")}`);
+        log(r.gate.pass ? "info" : "warn", "prove", "gate", { ...ids, pass: r.gate.pass, sha: r.gate.head, failed: failed.length ? failed : undefined, writer: r.writer?.end, writer_usd: r.writer?.usd });
+        after = r.gate.pass ? "waiting" : after;
+        line({ result: { pass: r.gate.pass, table: r.table, rows: r.gate.rows, folder: r.folder, taskId: t.id, writer: r.writer } });
       } catch (err) {
+        log("error", "prove", "error", { ...ids, error: err });
         line({ error: (err as Error).message });
       } finally {
         stacks.endAttempt(attempt);
+        if (!ownedByRun) stacks.setStatus(t.id, after);
         proving.delete(t.id);
         res.end();
       }
@@ -150,10 +180,13 @@ export function taskRoutes(
       res.writeHead(200, { "content-type": "application/x-ndjson" });
       const line = (o: Json) => res.write(JSON.stringify(o) + "\n");
       try {
-        const r = await ship(t, b.worktree, (msg) => line({ log: msg }));
+        log("info", "ship", "start", { task: t.id, branch: t.branch });
+        const r = await ship(t, b.worktree, (msg) => (line({ log: msg }), log("info", "ship", "step", { task: t.id, msg })));
         stacks.setPr(t.id, r.number, r.url);
+        log("info", "ship", "pr", { task: t.id, pr: r.number, url: r.url });
         line({ result: { url: r.url, number: r.number, table: r.table, taskId: t.id } });
       } catch (err) {
+        log(err instanceof ShipRefused ? "warn" : "error", "ship", err instanceof ShipRefused ? "refused" : "error", { task: t.id, error: err });
         line({ error: (err as Error).message, table: err instanceof ShipRefused ? err.table : undefined });
       } finally {
         proving.delete(t.id);
@@ -167,6 +200,57 @@ export function taskRoutes(
       const stack = b.stackId ? stacks.get(b.stackId) : stacks.newestStack(b.repo ?? "");
       if (!stack) return send(404, { error: "no stack for this repo; run awb stack set first" }), true;
       return send(202, runner.start(stack.id)), true;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/logs") {
+      const p = url.searchParams;
+      const level = p.get("level") ?? undefined;
+      if (level && !LEVELS.includes(level as Level)) return send(400, { error: `bad level ${level}: use ${LEVELS.join(", ")}` }), true;
+      let since: string | undefined;
+      try {
+        since = p.get("since") ? parseSince(p.get("since")!) : undefined;
+      } catch (err) {
+        return fail(err), true;
+      }
+      const f: LogFilter = {
+        task: p.get("task") ?? undefined,
+        run: p.get("run") ?? undefined,
+        session: p.get("session") ?? undefined,
+        source: p.get("source") ?? undefined,
+        level: level as Level | undefined,
+        since,
+        limit: Number(p.get("limit") || 500),
+      };
+      const lines = logDir ? readLog(logDir, f) : [];
+      if (p.get("format") === "text") {
+        res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        return res.end(lines.map(logText).join("\n") + (lines.length ? "\n" : "")), true;
+      }
+      return send(200, lines), true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/log") {
+      const b = await body();
+      const level = LEVELS.includes(b.level) ? (b.level as Level) : "error";
+      if (typeof b.event !== "string" || !b.event) return send(400, { error: "missing event" }), true;
+      const { level: _l, source: _s, event, ts: _t, ...fields } = b;
+      log(level, "cli", String(event).slice(0, 100), fields);
+      return send(201, { ok: true }), true;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/cost") {
+      if (!db) return send(501, { error: "no database" }), true;
+      try {
+        const since = parseSince(url.searchParams.get("since") ?? "7d");
+        const report = costReport(db, since, url.searchParams.get("repo") ?? undefined);
+        if (url.searchParams.get("format") === "text") {
+          res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+          return res.end(costText(report)), true;
+        }
+        return send(200, report), true;
+      } catch (err) {
+        return fail(err), true;
+      }
     }
 
     if (req.method === "GET" && url.pathname === "/api/session-tasks") {

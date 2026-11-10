@@ -2,7 +2,7 @@ import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runGate, claimTable, junitReport, type Claim, type GateResult, type Report } from "./gate.ts";
 import { parseRunMd, parseTest, fill, fillTest, type RunMd } from "./run-md.ts";
@@ -15,10 +15,11 @@ const NODE_MODULES = join(PKG, "..", "..", "node_modules");
 
 export type ProveDeps = {
   claude: string;
-  writerBudgetUsd: number;
   writerTimeoutMin?: number;
   log: (line: string) => void;
 };
+
+export type WriterEnd = { end: string; usd: number | null };
 
 export function claimsMarkdown(task: Pick<Task, "title" | "claims">, url: string): string {
   return `# Claims: ${task.title}\n\nSite: ${url}\n\n${task.claims.map((c) => `- ${c.id}: ${c.text}`).join("\n")}\n`;
@@ -131,17 +132,23 @@ async function startApp(runMd: RunMd, cwd: string, log: (l: string) => void) {
   return { url, stop };
 }
 
-export function run(cmd: string, args: string[], cwd: string, input?: string, timeoutMs = 0): Promise<{ code: number; out: string }> {
+export function run(cmd: string, args: string[], cwd: string, input?: string, timeoutMs = 0): Promise<{ code: number; out: string; timedOut: boolean }> {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
-    const timer = timeoutMs ? setTimeout(() => child.kill("SIGTERM"), timeoutMs) : null;
+    let timedOut = false;
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          timedOut = true;
+          child.kill("SIGTERM");
+        }, timeoutMs)
+      : null;
     let out = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (out += d));
-    child.on("error", (e) => resolve({ code: 127, out: String(e) }));
+    child.on("error", (e) => resolve({ code: 127, out: String(e), timedOut }));
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
-      resolve({ code: code ?? 1, out });
+      resolve({ code: code ?? 1, out, timedOut });
     });
     child.stdin.end(input ?? "");
   });
@@ -158,25 +165,31 @@ export function writerPrompt(claims: Claim[], url: string, ready: string): strin
   ].join(" ");
 }
 
-async function runClaude(cwd: string, args: string[], prompt: string, deps: ProveDeps, logFile: string) {
-  const r = await run(
-    deps.claude,
-    ["-p", ...args, "--max-budget-usd", String(deps.writerBudgetUsd), "--output-format", "stream-json", "--verbose"],
-    cwd,
-    prompt,
-    (deps.writerTimeoutMin ?? 20) * 60_000,
-  );
-  writeFileSync(logFile, r.out);
-  const last = r.out.trim().split("\n").at(-1) ?? "";
-  try {
-    const res = JSON.parse(last);
-    deps.log(`test writer: ${res.subtype}, ${res.num_turns} turns, ${Number(res.total_cost_usd ?? 0).toFixed(2)} USD`);
-  } catch {
-    deps.log(`test writer exited with ${r.code}`);
+export function writerEnd(out: string, timedOut: boolean, code: number, timeoutMin: number): WriterEnd {
+  let res: any = null;
+  for (const line of out.split("\n")) {
+    if (!line.includes('"type":"result"')) continue;
+    try {
+      res = JSON.parse(line);
+    } catch {}
   }
+  const usd = res && typeof res.total_cost_usd === "number" ? res.total_cost_usd : null;
+  if (timedOut) return { end: `timeout after ${timeoutMin} min`, usd };
+  if (res) return { end: res.subtype === "success" ? `success, ${res.num_turns} turns` : String(res.subtype), usd };
+  return { end: `exit ${code}`, usd };
 }
 
-async function runWriter(folder: string, claims: Claim[], url: string, ready: string, deps: ProveDeps) {
+async function runClaude(cwd: string, args: string[], prompt: string, deps: ProveDeps, logFile: string): Promise<WriterEnd> {
+  const timeoutMin = deps.writerTimeoutMin ?? 30;
+  const r = await run(deps.claude, ["-p", ...args, "--output-format", "stream-json", "--verbose"], cwd, prompt, timeoutMin * 60_000);
+  writeFileSync(logFile, r.out);
+  const w = writerEnd(r.out, r.timedOut, r.code, timeoutMin);
+  writeFileSync(join(dirname(logFile), "writer-end.txt"), w.end + "\n");
+  deps.log(`test writer: ${w.end}${w.usd === null ? "" : `, ${w.usd.toFixed(2)} USD`}`);
+  return w;
+}
+
+async function runWriter(folder: string, claims: Claim[], url: string, ready: string, deps: ProveDeps): Promise<WriterEnd> {
   const mcp = join(folder, "mcp.json");
   writeFileSync(
     mcp,
@@ -187,7 +200,7 @@ async function runWriter(folder: string, claims: Claim[], url: string, ready: st
     }),
   );
   deps.log(`test writer: ${claims.map((c) => c.id).join(", ")}`);
-  await runClaude(
+  return runClaude(
     folder,
     ["--agents", AGENTS, "--mcp-config", mcp, "--strict-mcp-config", "--allowedTools", "Task", "Agent", "Read", "Glob", "Grep", "LS", "mcp__playwright-test__*"],
     writerPrompt(claims, url, ready),
@@ -211,7 +224,7 @@ export function testWriterPrompt(claims: Claim[], script: string): string {
   ].join("\n");
 }
 
-async function runTestWriter(folder: string, worktree: string, claims: Claim[], testCmd: string, deps: ProveDeps) {
+async function runTestWriter(folder: string, worktree: string, claims: Claim[], testCmd: string, deps: ProveDeps): Promise<WriterEnd> {
   const head = git(worktree, "rev-parse", "HEAD");
   if (git(worktree, "status", "--porcelain") !== "") throw new Error("commit your changes first: the test writer needs a clean worktree");
   const work = join(worktree, PROOF_DIR);
@@ -223,7 +236,7 @@ async function runTestWriter(folder: string, worktree: string, claims: Claim[], 
   writeFileSync(script, `cd ${JSON.stringify(worktree)}\nexport PYTHONDONTWRITEBYTECODE=1\n${cmd}\ncode=$?\ncat ${JSON.stringify(report)} 2>/dev/null\nexit $code\n`);
   deps.log(`test writer: ${claims.map((c) => c.id).join(", ")}`);
   try {
-    await runClaude(
+    const w = await runClaude(
       worktree,
       [
         "--strict-mcp-config",
@@ -243,6 +256,7 @@ async function runTestWriter(folder: string, worktree: string, claims: Claim[], 
       throw new Error("the test writer changed the source or the commit; the change is undone");
     }
     for (const f of repoTests(work)) copyFileSync(join(work, f), join(folder, "proof-tests", f));
+    return w;
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -278,10 +292,11 @@ export function gateFromDisk(claims: Claim[], folder: string, worktree: string):
     testHashAtStart: read("test-hash.txt"),
     testHashNow: testHash(join(folder, "proof-tests")),
     fileExists: existsSync,
+    writerEnd: read("writer-end.txt") || undefined,
   });
 }
 
-export type ProveResult = { gate: GateResult; table: string; folder: string };
+export type ProveResult = { gate: GateResult; table: string; folder: string; writer: WriterEnd | null };
 
 export async function prove(task: Task, worktree: string, deps: ProveDeps, rewrite: string[] = []): Promise<ProveResult> {
   const runMdFile = join(worktree, ".awb", "run.md");
@@ -308,9 +323,10 @@ export async function prove(task: Task, worktree: string, deps: ProveDeps, rewri
   const removed = removeTests(rewrite, tests);
   if (removed.length) deps.log(`removed for a rewrite: ${removed.join(", ")}`);
 
+  let writer: WriterEnd | null = null;
   if (testCmd) {
     const missing = claimsWithoutTest(testClaims, tests);
-    if (missing.length) await runTestWriter(folder, worktree, missing, testCmd, deps);
+    if (missing.length) writer = await runTestWriter(folder, worktree, missing, testCmd, deps);
   }
 
   const app = runMd ? await startApp(runMd, worktree, deps.log) : null;
@@ -325,7 +341,7 @@ export async function prove(task: Task, worktree: string, deps: ProveDeps, rewri
         );
       }
       const missing = claimsWithoutTest(browserClaims, tests);
-      if (missing.length) await runWriter(folder, missing, app.url, runMd.ready, deps);
+      if (missing.length) writer = await runWriter(folder, missing, app.url, runMd.ready, deps);
     }
 
     writeFileSync(join(proof, "test-hash.txt"), testHash(tests) + "\n");
@@ -338,7 +354,7 @@ export async function prove(task: Task, worktree: string, deps: ProveDeps, rewri
 
     const gate = gateFromDisk(task.claims, folder, worktree);
     writeFileSync(join(proof, "gate.json"), JSON.stringify(gate, null, 2));
-    return { gate, table: claimTable(gate), folder };
+    return { gate, table: claimTable(gate), folder, writer };
   } finally {
     app?.stop();
   }

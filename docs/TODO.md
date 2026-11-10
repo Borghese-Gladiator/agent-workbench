@@ -6,18 +6,24 @@ v6 is a proof of concept. The acceptance test passes (`e2e/acceptance.sh`), but 
 
 ### When things go wrong
 
-- [ ] **A notice when a run stops.** A stopped stack reports nothing today. Send a desktop notice (`osascript` on macOS) when a run goes to `stopped` or `done`. Add Slack later, as an optional webhook.
-- [ ] **The true failure reason when a limit stops a session.** When the test writer reaches its time limit, the gate says "no test". When a task session reaches its budget or time limit, the reason says "ended without a PR". Record the limit (`timeout`, `budget`, `exit <code>`) on the attempt, and put it in `fail_reason`.
-- [ ] **No stuck `doing` task.** `awb prove` sets `doing`, and nothing resets it when the session ends. The planted-bug task in the acceptance run stayed `doing`. At the end of a proof run, and when the daemon starts, set each `doing` task with no live proof run back to `waiting` or `failed`.
-- [ ] **A quiet-session check.** Flag a session with no hook event for N minutes (default 15) as `quiet` in the feed.
-- [ ] **Logs where the task is.** Keep `setup.log`, `writer.jsonl`, `run.log` and the session transcript as they are now. Add the daemon errors for a task to its folder, as `daemon.log` is only one file for all tasks.
-- [ ] **A durable run state.** The runner keeps runs in memory, so a daemon restart loses a running stack. Store runs in SQLite, and on start mark a run that was `running` as `stopped` with the reason "daemon restart".
+- [x] **A notice when a run stops.** A stopped stack reports nothing today. Send a desktop notice (`osascript` on macOS) when a run goes to `stopped` or `done`. Add Slack later, as an optional webhook.
+- [x] **The true failure reason when a limit stops a session.** A task session and the test writer report how they ended (`timeout after N min`, a result subtype, or `exit <code>`). It goes into `fail_reason` and into the "no test" reason of the gate.
+- [x] **No stuck `doing` task.** `awb prove` sets `doing`, and nothing resets it when the session ends. The planted-bug task in the acceptance run stayed `doing`. At the end of a proof run, and when the daemon starts, set each `doing` task with no live proof run back to `waiting` or `failed`.
+- [x] **A quiet-session check.** A session with no hook event for `AWB_QUIET_MIN` minutes (default 15) is `quiet`. A session whose `awb` process is dead is `lost`. (The Live view does not show them yet: see section 3.)
+- [x] **One structured log.** Every part writes JSON lines to `AWB_HOME/logs/awb.<day>.jsonl`, and `awb logs` reads them. See [TODO-logging.md](TODO-logging.md).
+- [x] **The log in Grafana on this machine.** `infra/logging/` runs Loki, Alloy and Grafana in Docker, and the outage test delivers every line once.
+- [ ] **The log from another computer.** Install Tailscale, set `GRAFANA_BIND` in `infra/logging/.env` to the Tailscale address, and test from a second computer.
+- [ ] **Check the cost panel with a real session.** The "Estimated cost per day" panel reads `usd` on `runner.session.ended` and `writer_usd` on `prove.gate`. The stub tests write no cost.
+- [x] **A durable run state.** The runner keeps runs in memory, so a daemon restart loses a running stack. Store runs in SQLite, and on start mark a run that was `running` as `stopped` with the reason "daemon restart".
 
 ### Cost
 
-- [ ] **USD for each session.** The Live view shows tokens. The result row of a `-p` session has `total_cost_usd`. For an interactive session, compute USD from the tokens and a price table for each model.
-- [ ] **Totals.** `awb cost [--since 7d] [--repo] [--json]`: the total for each day, repo, stack and task. Split it into the task session and the test writer.
-- [ ] **A total budget.** `AWB_DAILY_BUDGET_USD`. The runner and `awb prove` refuse to start a new session when today's total is above it. Each session has a limit already, but nothing stops the tenth retry.
+- [x] **USD for each session.** An estimated cost from the tokens and a price table for each model (`prices.ts`). The writer cost of each attempt is saved. `GET /api/cost` gives the totals.
+- [x] **`awb cost [--since 7d] [--repo] [--json]`.** The CLI command for `GET /api/cost`: the total for each day, repo and task, split into the task session and the test writer.
+- [ ] **The cost of an interactive session is low.** A `-p` session (every task session, the test writer) has a `result` row with its exact `usage` and `total_cost_usd`, and awb uses it. An interactive session has no `result` row, and its saved transcript has only the output tokens from the start of each message (162 of 4,251 in one test). So its estimate leaves out most of the output cost. Fix: read the final usage from the `Stop` hook input if Claude Code adds it there, or from the statusline cost data.
+- [ ] **Keep the price table current.** `prices.ts` is a copy of the published prices. A new model has no price until someone adds it, and the cost report counts it as unpriced.
+
+awb tracks cost and sets no spend limit.
 
 ## 2. CLI and core, with awb on awb
 
@@ -46,12 +52,16 @@ Today the UI is mostly read-only. Add actions and the data from section 1.
 - [ ] **A run view.** The current run: `running`, `stopped` or `done`, the active task and how long it has run. A stopped run shows its reason at the top.
 - [ ] **Actions on a failed task.** Buttons for Retry, Rewrite test (a check box for each claim) and Drop. Each calls the same route as its CLI command.
 - [ ] **Cost.** A USD column in Live and Stacks, and the daily total in the header.
-- [ ] **Logs on the task page.** The setup log, the writer log and the limit reason, next to the claim videos.
+- [ ] **Logs on the task page.** The task's lines from the structured log (the task detail already returns them as `log`), the setup log, the writer log and the limit reason, next to the claim videos.
+- [ ] **`quiet` and `lost` in Live.** The feed already sends these states. Give them a color and a short note.
 - [ ] **A PR list.** All open draft PRs with their gate result and sync state.
 - [ ] Do not add a form to start a stack. The chat writes a stack better than a form can.
 
 ## Known facts from the acceptance run
 
-- A full run (single, bug, stack, ask) costs about 6 USD and takes about 75 minutes.
+- A full run (single, bug, stack, ask) cost about 6 USD and took about 75 minutes on 2026-11-03. On 2026-11-05 it cost about 16 USD, mostly the test writer (9.55 USD), because the turn timer claims are slow for the writer (one writer: 4.56 USD). The stack part passed only with `AWB_WRITER_TIMEOUT_MIN=45 AWB_TASK_TIMEOUT_MIN=120`.
 - The writer needs more than 20 minutes for a claim that takes many moves. The stack run passed with `AWB_WRITER_TIMEOUT_MIN=30`. Make 30 the default.
+- The time limits do not fit together. A task session (45 min) can start the test writer (30 min) more than once, for example after `awb prove --rewrite`. In the 2026-11-05 stack run, the writer timed out on a claim about a live countdown, the rewrite started a second writer, and the session reached 45 min while it worked. Fix: give the writer the time that is left in the session, or do not count writer time in the session limit. A retry with `AWB_WRITER_TIMEOUT_MIN=45 AWB_TASK_TIMEOUT_MIN=120` checks if the limits are the only cause.
+- `awb prove` can run longer than the agent's Bash call may wait. In the 2026-11-05 stack run, the writer ran more than 5 minutes, the agent's call gave up, and its next `awb prove` was refused with "a proof run for task ... is already running". The proof went on, but the agent lost its result. Fix: let `awb prove` attach to a running proof and wait for its result, and tell the playbook to run `awb prove` in the background.
+- A writer that times out writes no result row, so its cost is not recorded. The 2026-11-05 stack task shows 1.52 USD, which is the task session only.
 - Each stack run leaves a base branch on GitHub. The acceptance script must delete it after the PRs are retargeted or closed.

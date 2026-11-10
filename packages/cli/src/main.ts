@@ -1,8 +1,10 @@
 import { spawn, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { awbHome, ensureDaemon, findDaemon, api } from "./home.ts";
+import { awbHome, ensureDaemon, findDaemon, api, reportCliError } from "./home.ts";
 import { gitInfo, playbookPath, claudeArgs, awbSettings } from "./launch.ts";
 import { doctor } from "./doctor.ts";
+import { wtCmd } from "./wt.ts";
+import { logText, type LogLine } from "../../daemon/src/log.ts";
 
 const home = awbHome();
 const [cmd, ...rest] = process.argv.slice(2);
@@ -12,6 +14,21 @@ const flag = (name: string) => {
 };
 
 console.error(`awb: AWB_HOME=${home}`);
+
+const COMMANDS = ["ui", "doctor", "daemon", "stack", "prove", "ship", "run", "retry", "show", "tasks", "cost", "logs", "task", "sessions", "wt"];
+let lastError = "";
+const printError = console.error;
+console.error = (...args: unknown[]) => {
+  const text = args.map(String).join(" ");
+  if (text.startsWith("awb: ") && !text.startsWith("awb: AWB_HOME=")) lastError = text.slice(5);
+  printError(...args);
+};
+process.on("beforeExit", async () => {
+  const code = Number(process.exitCode ?? 0);
+  if (!COMMANDS.includes(cmd) || code === 0 || !lastError || process.env.AWB_REPORTED) return;
+  process.env.AWB_REPORTED = "1";
+  await reportCliError(home, [cmd, ...rest].join(" "), code, lastError).catch(() => {});
+});
 
 switch (cmd) {
   case "ui": {
@@ -23,6 +40,9 @@ switch (cmd) {
   }
   case "doctor":
     process.exitCode = (await doctor(home)) ? 0 : 1;
+    break;
+  case "wt":
+    process.exitCode = await wtCmd(rest);
     break;
   case "daemon":
     await daemonCmd(rest[0]);
@@ -52,6 +72,12 @@ switch (cmd) {
     break;
   case "tasks":
     process.exitCode = await tasksCmd(rest);
+    break;
+  case "cost":
+    process.exitCode = await costCmd(rest.includes("--json"));
+    break;
+  case "logs":
+    process.exitCode = await logsCmd(rest.includes("--json"), rest.includes("--follow") || rest.includes("-f"));
     break;
   case "task":
     if (rest[0] !== "rm" || rest.length < 2) {
@@ -172,11 +198,11 @@ async function streamNdjson(path: string, body: object, onResult: (r: any) => nu
     while ((i = buf.indexOf("\n")) >= 0) {
       const msg = JSON.parse(buf.slice(0, i));
       buf = buf.slice(i + 1);
-      if (msg.log) console.error(`awb: ${msg.log}`);
-      if (msg.error) {
-        console.error(`awb: ${msg.error}`);
-        if (msg.table) console.log(msg.table);
-      }
+      if (msg.log) printError(`awb: ${msg.log}`);
+      if (msg.error && msg.table) {
+        printError(`awb: ${msg.error}`);
+        console.log(msg.table);
+      } else if (msg.error) console.error(`awb: ${msg.error}`);
       if (msg.result) code = onResult(msg.result);
     }
   }
@@ -289,6 +315,58 @@ async function tasksCmd(args: string[]): Promise<number> {
     console.error(`awb: ${(err as Error).message}`);
     return 1;
   }
+}
+
+async function logsCmd(json: boolean, follow: boolean): Promise<number> {
+  const q = new URLSearchParams({ since: flag("--since") ?? "1d", limit: flag("--limit") ?? "200" });
+  for (const k of ["task", "run", "session", "level", "source"]) {
+    const v = flag(`--${k}`);
+    if (v) q.set(k, v);
+  }
+  const d = await ensureDaemon(home);
+  const get = async (since?: string) => {
+    if (since) q.set("since", since);
+    const res = await fetch(`http://127.0.0.1:${d.port}/api/logs?${q}`);
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error ?? String(res.status));
+    return body as LogLine[];
+  };
+  const print = (l: LogLine) => console.log(json ? JSON.stringify(l) : logText(l));
+  try {
+    let lines = await get();
+    if (!lines.length && !follow) console.error("awb: no log lines match");
+    lines.forEach(print);
+    let last = lines.at(-1)?.ts;
+    let seen = new Set(lines.filter((l) => l.ts === last).map((l) => JSON.stringify(l)));
+    while (follow) {
+      await new Promise((ok) => setTimeout(ok, 1000));
+      lines = (await get(last)).filter((l) => !seen.has(JSON.stringify(l)));
+      lines.forEach(print);
+      if (lines.length) {
+        last = lines.at(-1)!.ts;
+        seen = new Set(lines.filter((l) => l.ts === last).map((l) => JSON.stringify(l)));
+      }
+    }
+    return 0;
+  } catch (err) {
+    console.error(`awb: ${(err as Error).message}`);
+    return 1;
+  }
+}
+
+async function costCmd(json: boolean): Promise<number> {
+  const q = new URLSearchParams({ since: flag("--since") ?? "7d" });
+  const repo = flag("--repo");
+  if (repo) q.set("repo", repo);
+  if (!json) q.set("format", "text");
+  const d = await ensureDaemon(home);
+  const res = await fetch(`http://127.0.0.1:${d.port}/api/cost?${q}`);
+  if (!res.ok) {
+    console.error(`awb: ${(await res.json()).error ?? res.status}`);
+    return 1;
+  }
+  console.log(json ? JSON.stringify(await res.json(), null, 2) : await res.text());
+  return 0;
 }
 
 async function taskRm(ids: string[], json: boolean): Promise<number> {

@@ -1,4 +1,4 @@
-import { readFileSync, openSync, closeSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { readFileSync, openSync, closeSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
@@ -9,7 +9,12 @@ export type DaemonInfo = { pid: number; port: number; startedAt: string };
 const DAEMON_MAIN = fileURLToPath(new URL("../../daemon/src/main.ts", import.meta.url));
 
 export function awbHome(env = process.env): string {
-  return resolve(env.AWB_HOME || join(homedir(), ".awb"));
+  const home = resolve(env.AWB_HOME || join(homedir(), ".awb"));
+  try {
+    return realpathSync(home);
+  } catch {
+    return home;
+  }
 }
 
 export function readDaemonInfo(home: string): DaemonInfo | null {
@@ -99,4 +104,24 @@ export async function api(info: DaemonInfo, path: string, body?: unknown) {
   const json = await res.json();
   if (!res.ok) throw new Error(`${path}: ${json.error ?? res.status}`);
   return json;
+}
+
+export async function reportCliError(home: string, command: string, code: number, message: string, timeoutMs = 1000): Promise<"daemon" | "file"> {
+  const line = { level: "error", event: "error", command, code, error: message.slice(0, 2000) };
+  const d = readDaemonInfo(home);
+  if (d && pidAlive(d.pid)) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${d.port}/api/log`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(line),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.ok) return "daemon";
+    } catch {}
+  }
+  const { createLog } = await import("../../daemon/src/log.ts");
+  const { level: _l, event: _e, ...fields } = line;
+  createLog(join(home, "logs"))("error", "cli", "error", fields);
+  return "file";
 }
