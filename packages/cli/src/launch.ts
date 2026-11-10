@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOOK_EVENTS } from "./hook-send.ts";
 
@@ -40,10 +40,20 @@ export function playbookPath(worktree: string): string {
   return existsSync(own) ? own : DEFAULT_PLAYBOOK;
 }
 
-export function claudeArgs(passThrough: string[], playbook: string, settings: object): string[] {
+export function repoRulesPath(home: string, repo: string): string {
+  return join(home, "repos", `${basename(repo)}.md`);
+}
+
+export function systemPrompt(playbook: string, rules?: string): string {
+  const text = readFileSync(playbook, "utf8").replaceAll("{skills}", SKILLS_DIR);
+  if (!rules || !existsSync(rules)) return text;
+  return `${text}\n\n## Rules for this repo\n\nFrom ${rules}. These rules win over the playbook.\n\n${readFileSync(rules, "utf8").trim()}\n`;
+}
+
+export function claudeArgs(passThrough: string[], playbook: string, settings: object, rules?: string): string[] {
   return [
     "--append-system-prompt",
-    readFileSync(playbook, "utf8").replaceAll("{skills}", SKILLS_DIR),
+    systemPrompt(playbook, rules),
     "--settings",
     JSON.stringify(settings),
     "--plugin-dir",
