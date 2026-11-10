@@ -27,7 +27,7 @@ awb tracks cost and sets no spend limit.
 
 ## 2. CLI and core, with awb on awb
 
-The first task makes the rest possible. Repo-test claims are on branch `timothyshee/test-claims`.
+The gate proves a claim in a browser, or with a repo test for logic that no page shows.
 
 - [x] **Claims proven by repo tests.** A claim can say `"proof": "test"`. A separate writer session reads the worktree and writes an integration test in `.awb-proof/`. It cannot change the source: the daemon undoes a change and refuses. The gate runs the tests with `## test` in `.awb/run.md` and reads JUnit XML for each claim.
 - [ ] **Red on the base commit.** Run the test claims on the base commit too. A claim passes only if its test fails on the base and passes on the head. This refuses a test that passes on any code.
