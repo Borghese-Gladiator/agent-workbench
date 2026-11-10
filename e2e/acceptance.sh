@@ -107,7 +107,9 @@ let bad = 0;
 for (const c of content) {
   if (c.type !== "tool_use") continue;
   const line = c.name + " " + (c.input.command ?? c.input.file_path ?? c.input.pattern ?? "");
-  const tag = refused.has(c.id) ? "  REFUSED " : c.name !== "Bash" || c.input.command.trim() === "sh " + script ? "  " : "  OTHER ";
+  const cmd = c.name === "Bash" ? c.input.command.trim() : "";
+  const readOnly = /^(ls|cat|head|tail|pwd|wc|git (ls-files|status|log|show|diff))(\s[^;&|>]*)?$/.test(cmd);
+  const tag = refused.has(c.id) ? "  REFUSED " : c.name !== "Bash" || cmd === "sh " + script ? "  " : readOnly ? "  READ " : "  OTHER ";
   if (tag === "  OTHER ") bad++;
   console.log(tag + line.slice(0, 150));
 }
