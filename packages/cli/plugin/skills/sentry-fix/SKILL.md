@@ -118,7 +118,25 @@ git checkout <test sha>   # the test fails
 git checkout <fix sha>    # the test passes
 ```
 
-## 10. Report
+## 10. Draft a ticket
+
+If the repo PR template asks for a ticket link (the `app` template asks for a Linear link), draft a ticket with this template. Fill each section from the proof file. Show the draft to the user, and ask for the team and the project. Do not create the ticket until the user says to.
+
+```md
+## Description
+
+## Acceptance Criteria
+
+## Implementation/Design
+
+## Monitoring
+
+## Other
+
+## Resources
+```
+
+## 11. Report
 
 Give the user: the result (fixed, skipped or not reproduced), the branch, the two commit SHAs, the proof file path, and the before and after output in short form.
 
