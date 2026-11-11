@@ -36,7 +36,15 @@ export function branchDiff(repo: string, base: string, branch: string): string {
   return execFileSync("git", ["diff", `${b}...${h}`], { cwd: repo, encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
 }
 
-const TYPES: Record<string, string> = { ".webm": "video/webm", ".zip": "application/zip", ".png": "image/png", ".json": "application/json" };
+const TYPES: Record<string, string> = {
+  ".webm": "video/webm",
+  ".zip": "application/zip",
+  ".png": "image/png",
+  ".json": "application/json",
+  ".log": "text/plain; charset=utf-8",
+  ".jsonl": "text/plain; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+};
 
 export function costOf(transcript: string): number {
   let cost = 0;
@@ -97,7 +105,12 @@ export function taskRoutes(
     const writerEndFile = join(t.folder, "proof", "writer-end.txt");
     const lastWriter = lines.findLast((l) => l.source === "prove" && l.event === "gate" && typeof l.writer === "string");
     const writer_end = existsSync(writerEndFile) ? readFileSync(writerEndFile, "utf8").trim() : ((lastWriter?.writer as string | undefined) ?? null);
-    return { ...t, stack: stacks.get(t.stack_id), attempts, transcripts, specs, log: lines, writer_end, cost_usd: sessionUsd + writerUsd, writer_usd: writerUsd };
+    const own = home ? join(realpathSync(home), "worktrees", t.id) : "";
+    const last = db?.prepare("SELECT s.worktree FROM attempts a JOIN sessions s ON s.id = a.session_id WHERE a.task_id = ? ORDER BY a.started_at DESC LIMIT 1").get(t.id) as
+      | { worktree: string }
+      | undefined;
+    const worktree = own && existsSync(own) ? own : (last?.worktree ?? null);
+    return { ...t, stack: stacks.get(t.stack_id), attempts, transcripts, specs, log: lines, writer_end, worktree, cost_usd: sessionUsd + writerUsd, writer_usd: writerUsd };
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse, url: URL, body: () => Promise<Json>): Promise<boolean> {
@@ -309,6 +322,10 @@ export function taskRoutes(
       } catch (err) {
         return fail(err), true;
       }
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/runs") {
+      return send(200, stacks.runs(Number(url.searchParams.get("limit") || 10))), true;
     }
 
     const runMatch = url.pathname.match(/^\/api\/runs\/([\w-]+)$/);

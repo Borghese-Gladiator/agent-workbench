@@ -58,7 +58,7 @@ The daemon keeps every task, attempt and gate result. Answer from it, not from m
 | What did it cost (this week)? | `awb cost --since 7d --json` |
 | What went wrong (today)? | `awb logs --level warn --since 1d`, then `awb logs --task <id>` for one task |
 | Retry it. | `awb retry <id> --wait` |
-| Drop these tasks. | `awb task rm <id...>` (waiting tasks only) |
+| Drop these tasks. | `awb task rm <id...>` (waiting or failed tasks only) |
 
 A task id prefix of 8 characters, as `awb tasks` prints it, works in every command.
 

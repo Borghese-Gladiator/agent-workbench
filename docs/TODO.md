@@ -47,12 +47,12 @@ The first task makes the rest possible. Today the gate proves claims only with P
 
 Today the UI is mostly read-only. Add actions and the data from section 1.
 
-- [ ] **A run view.** The current run: `running`, `stopped` or `done`, the active task and how long it has run. A stopped run shows its reason at the top.
-- [ ] **Actions on a failed task.** Buttons for Retry, Rewrite test (a check box for each claim) and Drop. Each calls the same route as its CLI command.
-- [ ] **Cost.** A USD column in Live and Stacks, and the daily total in the header.
-- [ ] **Logs on the task page.** The task's lines from the structured log (the task detail already returns them as `log`), the setup log, the writer log and the limit reason, next to the claim videos.
-- [ ] **`quiet` and `lost` in Live.** The feed already sends these states. Give them a color and a short note.
-- [ ] **A PR list.** All open draft PRs with their gate result and sync state.
+- [x] **A run view.** The current run: `running`, `stopped` or `done`, the active task and how long it has run. A stopped run shows its reason at the top.
+- [x] **Actions on a failed task.** Buttons for Retry, Rewrite test (a check box for each claim) and Drop. Each calls the same route as its CLI command.
+- [x] **Cost.** A USD column in Live and Stacks, and the daily total in the header.
+- [x] **Logs on the task page.** The task's lines from the structured log (the task detail already returns them as `log`), the setup log, the writer log and the limit reason, next to the claim videos.
+- [x] **`quiet` and `lost` in Live.** The feed already sends these states. Give them a color and a short note.
+- [x] **A PR list.** All open draft PRs with their gate result and sync state.
 - [ ] Do not add a form to start a stack. The chat writes a stack better than a form can.
 
 ## Known facts from the acceptance run

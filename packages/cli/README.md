@@ -13,7 +13,7 @@ awb ui                           # opens the session list in the browser
 | Command | What it does |
 |---|---|
 | `awb [claude args]` | Starts the daemon if it is not up, registers a session, and starts `claude` with the playbook and `AWB_HOME`. Every argument goes to `claude`. |
-| `awb ui [--no-open]` | Prints the UI URL and opens it. The UI has four views: Live (every session), Session (its events and tokens), Stacks (each task with its status and PR; you can edit a waiting task) and the proof page of a task (the claim table, a video for each claim, the trace, the proof tests and the diff). |
+| `awb ui [--no-open]` | Prints the UI URL and opens it. The header shows the cost of today. The UI has five views: Live (the current run, and every session with its state and cost), Session (its events and tokens), Stacks (each task with its status, cost and PR; you can edit a waiting task), PRs (each open PR with its gate result and state) and the proof page of a task (the claim table, a video for each claim, the trace, the logs, the proof tests and the diff). On the page of a failed task, Retry, Rewrite test and Drop call the same routes as `awb retry`, `awb prove --rewrite` and `awb task rm`. |
 | `awb sessions [--json]` | Lists the sessions. |
 | `awb doctor` | Checks the setup and prints a fix for each problem. |
 | `awb wt [repo] [--root <dir>] [--json]` | Lists the worktrees in `<root>/<repo>/<branch>`, grouped by repo, with the branch, the number of changed files and the last commit age. The root is `--root`, else `AWB_WORKTREES`, else `~/Klaviyo/Repos/LOCAL_worktrees` when the current folder is in `~/Klaviyo/Repos`, else `~/LOCAL_worktrees`. A folder without a `.git` file shows as `not a worktree`. |
@@ -28,7 +28,7 @@ awb ui                           # opens the session list in the browser
 | `awb tasks [--repo <path>] [--status a,b] [--since 7d\|12h\|30m\|date] [--json]` | Lists the tasks of all repos, newest first, with the failed claims of the last gate. |
 | `awb cost [--since 7d] [--repo <name or path>] [--json]` | The estimated cost for each day, repo and task, split into sessions and the test writer. The estimate comes from the token counts and the price table in `prices.ts`. A session with a model that is not in the table counts as unpriced. |
 | `awb logs [--task <id>] [--run <id>] [--session <id>] [--level debug\|info\|warn\|error] [--source <name>] [--since 1d] [--limit 200] [--follow] [--json]` | Reads the structured log of every awb part from `AWB_HOME/logs/`. `--level warn` shows warnings and errors. `--follow` (or `-f`) prints new lines as they come. A CLI command that fails also writes a `cli.error` line. |
-| `awb task rm <id...> [--json]` | Removes waiting tasks in one transaction. If one id has started or does not exist, nothing is removed. |
+| `awb task rm <id...> [--json]` | Removes waiting or failed tasks in one transaction, with the attempts and gate results of each. If one id is doing, is shipped or does not exist, nothing is removed. |
 
 Time limits: `AWB_TASK_TIMEOUT_MIN` for a task session (default 45) and `AWB_WRITER_TIMEOUT_MIN` for the test writer (default 30). awb sets no spend limit. It records the cost of each session and test writer. `AWB_CLAUDE` replaces `claude` in the launcher and the task sessions, and `AWB_WRITER_CLAUDE` replaces it in the test writer.
 

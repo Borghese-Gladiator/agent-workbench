@@ -52,3 +52,10 @@ test("costOf takes the last running total, not the sum of the result rows", asyn
   writeFileSync(f, [row(0.5), '{"type":"assistant"}', row(1.5), row(1.5)].join("\n"));
   assert.equal(costOf(f), 1.5);
 });
+
+test("the page script parses", async () => {
+  const { page } = await import("../src/ui.ts");
+  const html = page("/home");
+  const script = html.slice(html.indexOf("<script>") + 8, html.lastIndexOf("</script>"));
+  assert.doesNotThrow(() => new Function(script));
+});

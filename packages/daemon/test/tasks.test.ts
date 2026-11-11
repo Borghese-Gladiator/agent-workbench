@@ -70,9 +70,30 @@ test("task rm refuses all when one task has started", () => {
   const { stack } = s.set({ repo: "/r", branch: "feat", base: "main", tasks: [t("A"), t("B")] });
   const [a, b] = stack.tasks;
   s.setStatus(a.id, "doing");
-  assert.throws(() => s.remove([b.id, a.id]), /only waiting tasks can be removed/);
+  assert.throws(() => s.remove([b.id, a.id]), /only waiting or failed tasks can be removed/);
   assert.equal(s.get(stack.id)!.tasks.length, 2);
   assert.equal(s.get(stack.id)!.version, 1);
+});
+
+test("task rm removes a failed task with its attempts and gates", () => {
+  const s = setup();
+  const { stack } = s.set({ repo: "/r", branch: "feat", base: "main", tasks: [t("A"), t("B")] });
+  const [a, b] = stack.tasks;
+  s.saveGate(s.startAttempt(a.id, null), gate(false));
+  s.fail(a.id, "the gate failed");
+  assert.deepEqual(s.remove([a.id]), [a.id]);
+  assert.deepEqual(s.get(stack.id)!.tasks.map((x) => [x.id, x.base]), [[b.id, "main"]]);
+  assert.equal(s.history(a.id).length, 0);
+});
+
+test("runs lists the newest runs with the title of the current task", () => {
+  const s = setup();
+  const { stack } = s.set({ repo: "/r", branch: "feat", base: "main", tasks: [t("A")] });
+  s.saveRun({ id: "r1", stackId: stack.id, state: "running", current: stack.tasks[0].id, reason: null });
+  assert.equal(s.runs()[0].ended_at, null);
+  s.saveRun({ id: "r1", stackId: stack.id, state: "stopped", current: stack.tasks[0].id, reason: "gate failed" });
+  const [r] = s.runs();
+  assert.deepEqual([r.id, r.state, r.title, r.repo, r.reason, typeof r.ended_at], ["r1", "stopped", "A", "/r", "gate failed", "string"]);
 });
 
 test("the runner saves the gate failure as the reason, and a retry clears it", async () => {

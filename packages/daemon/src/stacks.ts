@@ -155,6 +155,8 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     ),
     updTask: db.prepare("UPDATE tasks SET position = ?, title = ?, claims = ? WHERE id = ?"),
     delTask: db.prepare("DELETE FROM tasks WHERE id = ?"),
+    delGates: db.prepare("DELETE FROM gate_results WHERE attempt_id IN (SELECT id FROM attempts WHERE task_id = ?)"),
+    delAttempts: db.prepare("DELETE FROM attempts WHERE task_id = ?"),
     setStatus: db.prepare("UPDATE tasks SET status = ? WHERE id = ?"),
     setPr: db.prepare("UPDATE tasks SET pr_number = ?, pr_url = ?, status = 'done', fail_reason = NULL WHERE id = ?"),
     shipped: db.prepare("SELECT t.*, s.repo FROM tasks t JOIN stacks s ON s.id = t.stack_id WHERE t.status = 'done' AND t.pr_number IS NOT NULL"),
@@ -170,6 +172,10 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
          ended_at = CASE WHEN excluded.state = 'running' THEN NULL ELSE ? END`,
     ),
     getRun: db.prepare("SELECT id, stack_id AS stackId, state, current, reason FROM runs WHERE id = ?"),
+    runs: db.prepare(
+      `SELECT r.id, r.stack_id AS stackId, r.state, r.current, r.reason, r.started_at, r.ended_at, t.title, s.repo
+       FROM runs r LEFT JOIN tasks t ON t.id = r.current LEFT JOIN stacks s ON s.id = r.stack_id ORDER BY r.started_at DESC, r.rowid DESC LIMIT ?`,
+    ),
     stopRuns: db.prepare("UPDATE runs SET state = 'stopped', reason = ?, ended_at = ? WHERE state = 'running'"),
     doingTasks: db.prepare("SELECT * FROM tasks WHERE status = 'doing'"),
     openSessionPids: db.prepare(
@@ -316,11 +322,15 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
         const tasks = ids.map((id) => {
           const t = this.find(id);
           if (!t) throw new StackError(`no task ${id}`, 404);
-          if (t.status !== "waiting") throw new StackError(`task ${t.id} is ${t.status}; only waiting tasks can be removed`);
+          if (!["waiting", "failed"].includes(t.status)) throw new StackError(`task ${t.id} is ${t.status}; only waiting or failed tasks can be removed`);
           return t;
         });
         const stacksTouched = new Set(tasks.map((t) => t.stack_id));
-        for (const t of tasks) q.delTask.run(t.id);
+        for (const t of tasks) {
+          q.delGates.run(t.id);
+          q.delAttempts.run(t.id);
+          q.delTask.run(t.id);
+        }
         for (const id of stacksTouched) {
           q.bump.run(id);
           rebase(id);
@@ -354,6 +364,9 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     saveRun(r: RunState) {
       const now = new Date().toISOString();
       q.saveRun.run(r.id, r.stackId, r.state, r.current, r.reason, now, now);
+    },
+    runs(limit = 10) {
+      return (q.runs.all(limit) as any[]).map((r) => ({ ...r })) as (RunState & { started_at: string; ended_at: string | null; title: string | null; repo: string | null })[];
     },
     run(id: string): RunState | undefined {
       const r = q.getRun.get(id) as RunState | undefined;
