@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
+
 export type RunMd = { start: string | null; url: string; ready: string };
 
 function sectionCommand(text: string, name: string): string | null {
@@ -34,4 +37,21 @@ export function parseRunMd(text: string): RunMd {
 
 export function fill(s: string, port: number): string {
   return s.replaceAll("{port}", String(port));
+}
+
+export function runFilePath(home: string, repo: string): string {
+  return join(home, "repos", `${basename(repo)}.run.md`);
+}
+
+export function findRunFile(home: string, repo: string, worktree: string): string | null {
+  const own = join(worktree, ".awb", "run.md");
+  if (existsSync(own)) return own;
+  const shared = runFilePath(home, repo);
+  return existsSync(shared) ? shared : null;
+}
+
+export function readRunFile(home: string, repo: string, worktree: string): string {
+  const file = findRunFile(home, repo, worktree);
+  if (!file) throw new Error(`no run file: write ${runFilePath(home, repo)} with a '## start' or '## test' section`);
+  return readFileSync(file, "utf8");
 }

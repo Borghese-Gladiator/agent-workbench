@@ -15,6 +15,7 @@ export function awbSettings(home: string, hookBin = HOOK_BIN) {
   return {
     env: { AWB_HOME: home },
     permissions: {
+      additionalDirectories: [join(home, "repos")],
       deny: [
         "Bash(gh pr create:*)",
         ...["awb.db*", "daemon.json", "tasks/**"].map((p) => `Edit(/${home}/${p})`),
@@ -44,16 +45,16 @@ export function repoRulesPath(home: string, repo: string): string {
   return join(home, "repos", `${basename(repo)}.md`);
 }
 
-export function systemPrompt(playbook: string, rules?: string): string {
-  const text = readFileSync(playbook, "utf8").replaceAll("{skills}", SKILLS_DIR);
+export function systemPrompt(playbook: string, rules?: string, runFile = ""): string {
+  const text = readFileSync(playbook, "utf8").replaceAll("{skills}", SKILLS_DIR).replaceAll("{run_file}", runFile);
   if (!rules || !existsSync(rules)) return text;
   return `${text}\n\n## Rules for this repo\n\nFrom ${rules}. These rules win over the playbook.\n\n${readFileSync(rules, "utf8").trim()}\n`;
 }
 
-export function claudeArgs(passThrough: string[], playbook: string, settings: object, rules?: string): string[] {
+export function claudeArgs(passThrough: string[], playbook: string, settings: object, rules?: string, runFile = ""): string[] {
   return [
     "--append-system-prompt",
-    systemPrompt(playbook, rules),
+    systemPrompt(playbook, rules, runFile),
     "--settings",
     JSON.stringify(settings),
     "--plugin-dir",

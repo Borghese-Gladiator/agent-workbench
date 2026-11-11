@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseSetup, parseRunMd, parseTest, fillTest, fill } from "../src/run-md.ts";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseSetup, parseRunMd, parseTest, fillTest, fill, findRunFile, readRunFile, runFilePath } from "../src/run-md.ts";
 
 const vite = `# Run
 
@@ -56,3 +59,23 @@ for (const [name, text] of [
 ]) {
   test(`parseTest refuses ${name}`, () => assert.throws(() => parseTest(text)));
 }
+
+test("the run file in the worktree wins, the file in AWB_HOME is the fallback, and no file names the AWB_HOME path", () => {
+  const root = mkdtempSync(join(tmpdir(), "awb-run-md-"));
+  const home = join(root, "home");
+  const repo = join(root, "games");
+  const worktree = join(root, "wt");
+  mkdirSync(join(home, "repos"), { recursive: true });
+  mkdirSync(join(worktree, ".awb"), { recursive: true });
+  const shared = runFilePath(home, repo);
+  assert.equal(shared, join(home, "repos", "games.run.md"));
+
+  assert.equal(findRunFile(home, repo, worktree), null);
+  assert.throws(() => readRunFile(home, repo, worktree), new RegExp(shared));
+
+  writeFileSync(shared, "## start\nurl: http://shared\n");
+  assert.equal(readRunFile(home, repo, worktree), "## start\nurl: http://shared\n");
+
+  writeFileSync(join(worktree, ".awb", "run.md"), "## start\nurl: http://own\n");
+  assert.equal(readRunFile(home, repo, worktree), "## start\nurl: http://own\n");
+});

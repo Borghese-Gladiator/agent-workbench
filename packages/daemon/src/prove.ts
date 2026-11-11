@@ -298,10 +298,7 @@ export function gateFromDisk(claims: Claim[], folder: string, worktree: string):
 
 export type ProveResult = { gate: GateResult; table: string; folder: string; writer: WriterEnd | null };
 
-export async function prove(task: Task, worktree: string, deps: ProveDeps, rewrite: string[] = []): Promise<ProveResult> {
-  const runMdFile = join(worktree, ".awb", "run.md");
-  if (!existsSync(runMdFile)) throw new Error(`no run file: write ${runMdFile} with a '## start' or '## test' section`);
-  const runMdText = readFileSync(runMdFile, "utf8");
+export async function prove(task: Task, worktree: string, runMdText: string, deps: ProveDeps, rewrite: string[] = []): Promise<ProveResult> {
   const browserClaims = task.claims.filter((c) => c.proof !== "test");
   const testClaims = task.claims.filter((c) => c.proof === "test");
   const runMd = browserClaims.length ? parseRunMd(runMdText) : null;

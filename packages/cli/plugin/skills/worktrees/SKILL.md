@@ -36,7 +36,7 @@ The daemon keeps its own task worktrees in `$AWB_HOME/worktrees/`. Do not touch 
 4. Enter it with `EnterWorktree({path: "<path>"})`. Do not use `cd`: the shell goes back to the launch folder after a `cd` outside it, and later commands then run in the wrong repo. If you are in a worktree already, run `ExitWorktree({action: "keep"})` first.
    `EnterWorktree` refuses a worktree of a repo that is not the launch repo or inside it. In that case, do not enter it. Use absolute paths: `git -C <path> ...` for git, and the full path for each file and command.
 5. Run the setup:
-   - If `.awb/run.md` has a `## setup` block, run it.
+   - If the run file has a `## setup` block, run it. The run file is `.awb/run.md` in the worktree, else `$AWB_HOME/repos/<repo name>.run.md`.
    - Else, if the repo has a worktree target (for example `make worktree-setup` in `app`), run it.
    - Else, find it from the repo: `package-lock.json` → `npm ci`; `yarn.lock` → `yarn install`; `pnpm-lock.yaml` → `pnpm install`; a Python repo → make a venv in the worktree and run its documented install.
    A worktree needs its own dependencies. Do not use the `node_modules` or the venv of the main checkout: the main checkout can be on an older commit, and its packages then do not match the branch.

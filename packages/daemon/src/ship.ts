@@ -122,7 +122,7 @@ async function uploadVideos(worktree: string, folder: string, pr: number, gate: 
 
 export type ShipResult = { url: string; number: number; gate: GateResult; table: string };
 
-export async function ship(task: Task, worktree: string, log: (l: string) => void): Promise<ShipResult> {
+export async function ship(task: Task, worktree: string, runMdText: string, log: (l: string) => void): Promise<ShipResult> {
   if (!task.branch || !task.base) throw new ShipRefused(`task ${task.id} has no branch or base`);
   if (!existsSync(task.folder)) throw new ShipRefused("no proof yet: run awb prove first");
   const folder = realpathSync(task.folder);
@@ -137,7 +137,6 @@ export async function ship(task: Task, worktree: string, log: (l: string) => voi
     .filter((f) => (/\.spec\.(ts|js)$/.test(f) && f !== "seed.spec.ts") || testFileClaim(f))
     .sort()
     .map((name) => ({ name, text: readFileSync(join(tests, name), "utf8") }));
-  const runMdText = readFileSync(join(worktree, ".awb", "run.md"), "utf8");
   const hasBrowser = task.claims.some((c) => c.proof !== "test");
   const hasTest = task.claims.some((c) => c.proof === "test");
   const runMd = hasBrowser ? parseRunMd(runMdText) : null;

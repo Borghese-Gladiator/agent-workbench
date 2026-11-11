@@ -6,6 +6,7 @@ import { parseSince, StackError, validateTasks, type Stacks, type Task, type Tas
 import { LEVELS, logText, readLog, type Level, type Log, type LogFilter } from "./log.ts";
 import { prove, run, type ProveDeps } from "./prove.ts";
 import { costReport, costText } from "./cost.ts";
+import { readRunFile } from "./run-md.ts";
 import type { DatabaseSync } from "node:sqlite";
 import { ship, ShipRefused, syncStatus } from "./ship.ts";
 import type { createRunner } from "./runner.ts";
@@ -150,7 +151,7 @@ export function taskRoutes(
       log("info", "prove", "start", { ...ids, rewrite: rewrite.length ? rewrite : undefined });
       let after: TaskStatus = before === "failed" ? "failed" : "waiting";
       try {
-        const r = await prove(t, b.worktree, { ...proveDeps, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite);
+        const r = await prove(t, b.worktree, readRunFile(home, b.repo, b.worktree), { ...proveDeps, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite);
         stacks.saveGate(attempt, r.gate);
         if (r.writer?.usd != null) stacks.setWriterCost(attempt, r.writer.usd);
         const failed = r.gate.rows.filter((x) => x.status === "FAIL").map((x) => `${x.id}: ${x.reasons.join(", ")}`);
@@ -181,7 +182,7 @@ export function taskRoutes(
       const line = (o: Json) => res.write(JSON.stringify(o) + "\n");
       try {
         log("info", "ship", "start", { task: t.id, branch: t.branch });
-        const r = await ship(t, b.worktree, (msg) => (line({ log: msg }), log("info", "ship", "step", { task: t.id, msg })));
+        const r = await ship(t, b.worktree, readRunFile(home, b.repo, b.worktree), (msg) => (line({ log: msg }), log("info", "ship", "step", { task: t.id, msg })));
         stacks.setPr(t.id, r.number, r.url);
         log("info", "ship", "pr", { task: t.id, pr: r.number, url: r.url });
         line({ result: { url: r.url, number: r.number, table: r.table, taskId: t.id } });

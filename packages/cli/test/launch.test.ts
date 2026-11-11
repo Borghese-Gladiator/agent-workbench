@@ -18,7 +18,9 @@ test("settings register the hook sender for every hook type, with AWB_HOME", () 
 });
 
 test("settings deny gh pr create and writes to the daemon files and the proof, not to the worktrees", () => {
-  const deny = awbSettings("/h/.awb").permissions.deny;
+  const s = awbSettings("/h/.awb");
+  assert.deepEqual(s.permissions.additionalDirectories, ["/h/.awb/repos"]);
+  const deny = s.permissions.deny;
   assert.deepEqual(deny, [
     "Bash(gh pr create:*)",
     "Edit(//h/.awb/awb.db*)",
@@ -42,7 +44,9 @@ for (const passThrough of [["--resume"], ["--resume", "abc"], ["-p", "hello worl
 }
 
 test("the playbook points UI work at the build-ui skill by a real path", () => {
-  const prompt = claudeArgs([], DEFAULT_PLAYBOOK, {})[1];
+  const prompt = claudeArgs([], DEFAULT_PLAYBOOK, {}, undefined, "/h/repos/games.run.md")[1];
+  assert.ok(!prompt.includes("{run_file}"));
+  assert.ok(prompt.includes("/h/repos/games.run.md"));
   assert.ok(!prompt.includes("{skills}"));
   const skill = join(SKILLS_DIR, "build-ui.md");
   assert.ok(prompt.includes(skill));
@@ -63,7 +67,7 @@ test("a worktree gets the rules of its main repo, and a repo with no rules file 
 
   const rules = repoRulesPath(home, gitInfo(wt).repo);
   assert.equal(rules, join(home, "repos", "app.md"));
-  assert.equal(claudeArgs([], DEFAULT_PLAYBOOK, {}, rules)[1], readFileSync(DEFAULT_PLAYBOOK, "utf8").replaceAll("{skills}", SKILLS_DIR));
+  assert.equal(claudeArgs([], DEFAULT_PLAYBOOK, {}, rules)[1], readFileSync(DEFAULT_PLAYBOOK, "utf8").replaceAll("{skills}", SKILLS_DIR).replaceAll("{run_file}", ""));
 
   mkdirSync(join(home, "repos"), { recursive: true });
   writeFileSync(rules, "Commit with --no-verify.\n");

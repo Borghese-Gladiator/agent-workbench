@@ -1,5 +1,7 @@
 import { spawn, execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { runFilePath } from "../../daemon/src/run-md.ts";
 import { awbHome, ensureDaemon, findDaemon, api, reportCliError } from "./home.ts";
 import { gitInfo, playbookPath, claudeArgs, awbSettings, repoRulesPath } from "./launch.ts";
 import { doctor } from "./doctor.ts";
@@ -394,7 +396,8 @@ async function launch(passThrough: string[]): Promise<number> {
   console.error(`awb: session ${session.id} on ${git.branch}, daemon port ${daemon.port}`);
 
   const claude = process.env.AWB_CLAUDE || "claude";
-  const args = claudeArgs(passThrough, playbookPath(git.worktree), awbSettings(home), repoRulesPath(home, git.repo));
+  mkdirSync(join(home, "repos"), { recursive: true });
+  const args = claudeArgs(passThrough, playbookPath(git.worktree), awbSettings(home), repoRulesPath(home, git.repo), runFilePath(home, git.repo));
   const child = spawn(claude, args, { stdio: "inherit", env: { ...process.env, AWB_HOME: home, AWB_SESSION_ID: session.id } });
 
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(sig, () => child.kill(sig));

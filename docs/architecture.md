@@ -31,8 +31,8 @@ flowchart TB
 
   subgraph outside["Files and services"]
     home["$AWB_HOME/tasks/&lt;id&gt;/<br/>claims.md, proof-tests/,<br/>proof/, playwright.config.ts"]
-    repo["Repo and worktrees<br/>feature code only,<br/>.awb/playbook.md, .awb/run.md"]
-    app["App under test<br/>started from .awb/run.md"]
+    repo["Repo and worktrees<br/>feature code only"]
+    app["App under test<br/>started from the run file<br/>AWB_HOME/repos/repo.run.md"]
     gh["GitHub<br/>branches, draft PRs,<br/>video assets"]
   end
 
@@ -78,7 +78,7 @@ sequenceDiagram
   participant G as GitHub
 
   S->>D: awb prove
-  D->>A: start clean app at the commit (.awb/run.md)
+  D->>A: start clean app at the commit (run file)
   alt no proof tests yet
     D->>W: claude -p --agents --mcp-config (headless)
     W->>F: read claims.md

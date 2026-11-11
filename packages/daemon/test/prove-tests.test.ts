@@ -22,8 +22,7 @@ test("C1: add sums two numbers", () => assert.equal(add(2, 3), 5));
 function setup(addBody: string, writerExtra = "") {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "awb-prove-")));
   const repo = join(root, "repo");
-  mkdirSync(join(repo, ".awb"), { recursive: true });
-  writeFileSync(join(repo, ".awb", "run.md"), RUN_MD);
+  mkdirSync(repo, { recursive: true });
   writeFileSync(join(repo, "add.mjs"), `export const add = (a, b) => ${addBody};\n`);
   git(repo, "init", "-q");
   git(repo, "add", ".");
@@ -45,7 +44,7 @@ function setup(addBody: string, writerExtra = "") {
 
 test("prove: a test claim passes on correct code, with no app and no browser", async () => {
   const { repo, task, deps } = setup("a + b");
-  const r = await prove(task, repo, deps);
+  const r = await prove(task, repo, RUN_MD, deps);
   assert.equal(r.table.split("\n")[0].trim(), "C1    PASS  tests=1");
   assert.equal(r.gate.pass, true);
   assert.deepEqual(readdirSync(join(task.folder, "proof-tests")), ["c1.test.mjs"]);
@@ -55,14 +54,14 @@ test("prove: a test claim passes on correct code, with no app and no browser", a
 
 test("prove: a test claim fails on wrong code", async () => {
   const { repo, task, deps } = setup("a - b");
-  const r = await prove(task, repo, deps);
+  const r = await prove(task, repo, RUN_MD, deps);
   assert.equal(r.gate.pass, false);
   assert.deepEqual(r.gate.rows[0].reasons, ["not passed"]);
 });
 
 test("prove: a writer that edits the source is refused, and the edit is undone", async () => {
   const { repo, task, deps } = setup("a - b", `echo 'export const add = (a, b) => a + b;' > add.mjs`);
-  await assert.rejects(prove(task, repo, deps), /changed the source/);
+  await assert.rejects(prove(task, repo, RUN_MD, deps), /changed the source/);
   assert.equal(git(repo, "status", "--porcelain"), "");
   assert.match(git(repo, "show", "HEAD:add.mjs"), /a - b/);
 });

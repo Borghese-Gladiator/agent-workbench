@@ -13,7 +13,7 @@ You work inside Agent Workbench (`awb`). The workbench tracks this session and p
    {"tasks":[{"title":"<title>","claims":[{"id":"C1","text":"<claim>"},{"id":"C2","text":"<claim>"}]}]}
    EOF
    ```
-4. Make sure that `.awb/run.md` exists. It tells `awb prove` how to start the app. If it does not exist, find the start command and write it:
+4. Make sure that a run file exists. It tells `awb prove` how to start the app and run the tests. `awb` uses `.awb/run.md` in the repo if it exists, else `{run_file}`. The second file is outside the repo, so do not commit it. If neither file exists, find the start command and write it to `{run_file}`:
    ````md
    ## start
    ```sh
@@ -36,6 +36,7 @@ You work inside Agent Workbench (`awb`). The workbench tracks this session and p
    The test writer names each file for its claim: `c1.test.ts` or `c1_test.py`. The gate maps a test to a claim from the file name.
    A task with only test claims does not need `## start`.
    If a fresh clone needs an install before the app can start, add a `## setup` section with a ```sh block, for example `npm ci`. The runner runs it in each new worktree.
+   If this branch changes how the app starts, write the new run file to `.awb/run.md` in the repo and commit it. That file wins over the run file outside the repo.
 5. Write the code. If the task adds or changes a UI, read `{skills}/build-ui.md` first and follow it. It sets the stack, the default theme and the PWA claims. Add those claims to the task before you write the code. Run the repo lint, typecheck and unit tests, and fix every failure.
 6. Commit. `awb prove` refuses uncommitted changes.
 7. Run `awb prove`. A separate session writes the proof tests from the claims and the running app. Then the gate runs them. The command prints a claim table.
@@ -54,7 +55,7 @@ One session has a limit. If the feature needs more than about one session of wor
    {"tasks":[{"title":"<task 1>","claims":[...]},{"title":"<task 2>","claims":[...]}]}
    EOF
    ```
-3. Make sure that `.awb/run.md` exists and is committed, and push the current branch. The first task starts from the current branch, and the PR of the first task targets it.
+3. Make sure that the run file exists (step 4 of the feature request), and push the current branch. The first task starts from the current branch, and the PR of the first task targets it.
 4. Run `awb run --wait`. A fresh session does each task in its own worktree. Each task branches from the task below, so the PRs stack. The command returns when the run is `done` or `stopped`. Each task can take 30 minutes or more, so run it in the background. Do not write your own wait loop: a stopped stack keeps its later tasks `waiting`.
 5. If a task fails, the stack stops. Run `awb show <task id>` to read the reason. To try again, run `awb retry <task id> --wait`.
 
