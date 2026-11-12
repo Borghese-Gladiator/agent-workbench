@@ -38,6 +38,8 @@ Logs: every part writes JSON lines to `AWB_HOME/logs/awb.<YYYY-MM-DD>.jsonl`, on
 
 A repo can replace the default playbook with `.awb/playbook.md`.
 
+A repo that cannot hold awb files can have its own rules in `$AWB_HOME/repos/<repo name>.md`, for example `~/.awb/repos/app.md`. `awb` adds the file to the end of the playbook when it starts in that repo or in one of its worktrees, because the name comes from the main repo. The runner starts task sessions with `awb -p`, so they get the rules too.
+
 `awb` also loads the plugin in `packages/cli/plugin` with `--plugin-dir`. It has three skills: `awb:sentry-fix` (reproduce one Sentry issue with a test that fails with the same exception and frame, fix it, and write the before and after output to `$AWB_HOME/sentry/<id>/proof.md`), `awb:bug-triage` (a channel or a list of links becomes fix and skip verdicts, at most 5 fixes, and a report in `$AWB_HOME/triage/`), and `awb:worktrees` (worktrees in `~/LOCAL_worktrees/<repo>/<branch>`). The skills use the Slack and Sentry MCP servers in your `claude` settings. `awb ship` cannot ship a Sentry fix yet, because the gate proves only browser claims.
 
 `awb` passes hooks to `claude` with `--settings`. Each hook runs `bin/awb-hook`, which sends the hook JSON to the daemon of `AWB_HOME` for the session in `AWB_SESSION_ID`. The sender prints nothing, waits at most 1 s, and always exits 0. If the daemon is down, the event is dropped and the chat continues. On `Stop` and `SessionEnd`, the daemon reads the token totals from the transcript file that the hook names. The UI page gets live updates from `/api/feed` (server-sent events).

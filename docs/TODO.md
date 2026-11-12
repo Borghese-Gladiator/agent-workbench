@@ -1,31 +1,8 @@
 # TODO
 
-v6 is a proof of concept. The acceptance test passes (`e2e/acceptance.sh`), but these items stand between it and an MVP. Do the sections in order: observability, then the CLI (with awb on awb), then the UI.
+v6 is a proof of concept. The acceptance test passes (`e2e/acceptance.sh`), but these items stand between it and an MVP. Do the sections in order: the CLI (with awb on awb), then the UI.
 
-## 1. Observability
-
-### When things go wrong
-
-- [x] **A notice when a run stops.** A stopped stack reports nothing today. Send a desktop notice (`osascript` on macOS) when a run goes to `stopped` or `done`. Add Slack later, as an optional webhook.
-- [x] **The true failure reason when a limit stops a session.** A task session and the test writer report how they ended (`timeout after N min`, a result subtype, or `exit <code>`). It goes into `fail_reason` and into the "no test" reason of the gate.
-- [x] **No stuck `doing` task.** `awb prove` sets `doing`, and nothing resets it when the session ends. The planted-bug task in the acceptance run stayed `doing`. At the end of a proof run, and when the daemon starts, set each `doing` task with no live proof run back to `waiting` or `failed`.
-- [x] **A quiet-session check.** A session with no hook event for `AWB_QUIET_MIN` minutes (default 15) is `quiet`. A session whose `awb` process is dead is `lost`. (The Live view does not show them yet: see section 3.)
-- [x] **One structured log.** Every part writes JSON lines to `AWB_HOME/logs/awb.<day>.jsonl`, and `awb logs` reads them. See [TODO-logging.md](TODO-logging.md).
-- [x] **The log in Grafana on this machine.** `infra/logging/` runs Loki, Alloy and Grafana in Docker, and the outage test delivers every line once.
-- [ ] **The log from another computer.** Install Tailscale, set `GRAFANA_BIND` in `infra/logging/.env` to the Tailscale address, and test from a second computer.
-- [ ] **Check the cost panel with a real session.** The "Estimated cost per day" panel reads `usd` on `runner.session.ended` and `writer_usd` on `prove.gate`. The stub tests write no cost.
-- [x] **A durable run state.** The runner keeps runs in memory, so a daemon restart loses a running stack. Store runs in SQLite, and on start mark a run that was `running` as `stopped` with the reason "daemon restart".
-
-### Cost
-
-- [x] **USD for each session.** An estimated cost from the tokens and a price table for each model (`prices.ts`). The writer cost of each attempt is saved. `GET /api/cost` gives the totals.
-- [x] **`awb cost [--since 7d] [--repo] [--json]`.** The CLI command for `GET /api/cost`: the total for each day, repo and task, split into the task session and the test writer.
-- [ ] **The cost of an interactive session is low.** A `-p` session (every task session, the test writer) has a `result` row with its exact `usage` and `total_cost_usd`, and awb uses it. An interactive session has no `result` row, and its saved transcript has only the output tokens from the start of each message (162 of 4,251 in one test). So its estimate leaves out most of the output cost. Fix: read the final usage from the `Stop` hook input if Claude Code adds it there, or from the statusline cost data.
-- [ ] **Keep the price table current.** `prices.ts` is a copy of the published prices. A new model has no price until someone adds it, and the cost report counts it as unpriced.
-
-awb tracks cost and sets no spend limit.
-
-## 2. CLI and core, with awb on awb
+## 1. CLI and core, with awb on awb
 
 The gate proves a claim in a browser, or with a repo test for logic that no page shows.
 
@@ -45,9 +22,9 @@ The gate proves a claim in a browser, or with a repo test for logic that no page
 - [ ] **An install.** Publish `awb` as an npm package with a `bin`, so that a user does not need an alias to a clone.
 - [ ] **A test-writer report.** Show the writer's cost, turns and time limit in `awb prove` output, so that a missing test has a clear cause.
 
-## 3. Web UI
+## 2. Web UI
 
-Today the UI is mostly read-only. Add actions and the data from section 1.
+Today the UI is mostly read-only. Add actions and the observability data.
 
 - [ ] **A run view.** The current run: `running`, `stopped` or `done`, the active task and how long it has run. A stopped run shows its reason at the top.
 - [ ] **Actions on a failed task.** Buttons for Retry, Rewrite test (a check box for each claim) and Drop. Each calls the same route as its CLI command.

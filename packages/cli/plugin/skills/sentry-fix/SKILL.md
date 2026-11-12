@@ -63,6 +63,7 @@ Read the code at the fault frame and its callers. Use the local variables and th
 3. Commit only the test: `test: reproduce <SHORT-ID>`.
 4. Run only that test. For `app`, run the unit marker: `-m unit <test path>`.
 5. The test must fail with the match key: the same exception type, raised in the same file and function. Compare the traceback with step 2.
+   A log event (a Sentry issue from a `logger.error` call, with no exception) has no traceback. For a log event, the match key is the `logger` tag and the source logger. Capture the events with the real `sentry_sdk`: make a `sentry_sdk.Client` with a `transport` that appends each event to a list. The test then fails when the list has an event with the same `logger` tag as the Sentry issue.
 6. If the test passes, or fails in a different way, it does not reproduce the issue. Change the test and amend the test commit. After 3 tries, stop with "not reproduced". Report each try and its output.
 
 Save the command and its output. This is the **before** result.
@@ -70,6 +71,23 @@ Save the command and its output. This is the **before** result.
 ## 7. Fix
 
 Make the smallest change at the root cause. Do not change the test. Commit: `fix: <what changed> (<SHORT-ID>)`.
+
+Do not put `Fixes <SHORT-ID>`, `Resolves <SHORT-ID>` or a similar line in a commit message. Sentry reads these lines, and it resolves the issue when the commit merges. The short id in the title in parentheses is safe. Sentry ignores it.
+
+The PR body follows the repo PR template. If the template asks for `Fixes <SENTRY-SHORT-ID>` (the `app` template does), put that line in the PR body only.
+
+If the template has a `# Checklist` section, put only that section in a `<details>` element. The other sections stay open:
+
+```md
+<details>
+<summary>Checklist</summary>
+
+<the Checklist section of the template, with its heading and all its checkboxes>
+
+</details>
+```
+
+Keep a blank line after `<summary>` and before `</details>`, or GitHub does not render the Markdown inside.
 
 ## 8. Get the "after" result
 
@@ -113,16 +131,40 @@ git checkout <test sha>   # the test fails
 git checkout <fix sha>    # the test passes
 ```
 
-## 10. Report
+## 10. Draft a ticket
+
+If the repo PR template asks for a ticket link (the `app` template asks for a Linear link), draft a ticket with this template. Fill each section from the proof file. Show the draft to the user, and ask for the team and the project. Do not create the ticket until the user says to.
+
+```md
+## Description
+
+## Acceptance Criteria
+
+## Implementation/Design
+
+## Monitoring
+
+## Other
+
+## Resources
+```
+
+## 11. After the PR opens
+
+Open the PR only as a draft (`gh pr create --draft`). Then confirm it: `gh pr view <number> --json isDraft` must give `true`.
+
+Find each ticket that the PR body links (for example `Fixes https://linear.app/klaviyo/issue/ADV2-896/...`). For each Linear ticket, set the status to "In Progress" with `mcp__linear-server__save_issue` (`id`, `state: "In Progress"`). Do not change a ticket that is already `started`, `completed` or `canceled`. Check the current status first with `mcp__linear-server__get_issue`. If the team has no "In Progress" status, tell the user, and do not pick a different status.
+
+## 12. Report
 
 Give the user: the result (fixed, skipped or not reproduced), the branch, the two commit SHAs, the proof file path, and the before and after output in short form.
 
-`awb ship` proves only browser claims today, so it cannot ship this branch, and `gh pr create` is denied in `awb`. Tell the user that the branch is ready for a PR, and that the PR body can come from the proof file.
+`awb ship` proves only browser claims today, so it cannot ship this branch, and `gh pr create` is denied in an `awb` session. If the user asks for a PR, push the branch and open a draft PR with `gh pr create --draft` outside `awb`, with the PR body from the proof file. Then do step 11. Never open a PR that is not a draft, never run `gh pr ready`, and never request reviewers.
 
 For an error in fender with a browser path, the fix also needs a browser claim. Follow the playbook feature flow: write a claim for the correct behavior, then run `awb prove` and `awb ship`.
 
 ## Rules
 
-- Do not write to Sentry or Slack. Do not resolve, assign or comment on an issue.
+- Do not write to Sentry or Slack. Do not resolve, assign or comment on an issue. A `Fixes <SHORT-ID>` line in a commit is a write to Sentry, so do not add one. A `Fixes` line in a PR body is correct only when the repo PR template asks for it.
 - Do not weaken a test so that it passes.
 - Every number in the proof file comes from Sentry or from a command output.
