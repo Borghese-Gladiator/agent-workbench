@@ -89,7 +89,7 @@ With Vite:
    })
    ```
 4. In `index.html`: `<meta name="theme-color">`, `<link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png">`, and the viewport meta.
-5. The service worker runs only in a build. Start the app in `.awb/run.md` with `npm run build && npx vite preview --port {port} --strictPort`.
+5. The service worker runs only in a build. Start the app in the run file with `npm run build && npx vite preview --port {port} --strictPort`.
 
 With Next.js (only when specified): use `app/manifest.ts` and `@serwist/next`.
 

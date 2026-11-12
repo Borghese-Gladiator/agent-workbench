@@ -1,4 +1,4 @@
-export type Claim = { id: string; text: string };
+export type Claim = { id: string; text: string; proof?: "test" };
 
 export type ReportResult = { status: string; attachments: { name: string; path?: string }[] };
 export type ReportSpec = { title: string; tests: { status?: string; annotations?: { type: string }[]; results: ReportResult[] }[] };
@@ -52,7 +52,7 @@ export function runGate(input: GateInput): GateResult {
       results.map((r) => r.attachments.find((a) => a.name === name && a.path && input.fileExists(a.path))?.path);
     const videos = files("video");
     const traces = files("trace");
-    if (videos.some((v) => !v) || traces.some((t) => !t)) reasons.push("no video or trace");
+    if (c.proof !== "test" && (videos.some((v) => !v) || traces.some((t) => !t))) reasons.push("no video or trace");
     reasons.push(...global);
     return {
       id: c.id,
@@ -64,6 +64,29 @@ export function runGate(input: GateInput): GateResult {
     };
   });
   return { pass: rows.length > 0 && rows.every((r) => r.status === "PASS"), rows, head: input.head, reasons: global };
+}
+
+const unescape = (s: string) =>
+  s.replace(/&(lt|gt|quot|apos|amp);/g, (_, e: "lt" | "gt" | "quot" | "apos" | "amp") => ({ lt: "<", gt: ">", quot: '"', apos: "'", amp: "&" })[e]);
+
+export function junitReport(xml: string): Report {
+  const specs: ReportSpec[] = [];
+  for (const m of xml.matchAll(/<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)) {
+    const attr = (k: string) => unescape(m[1].match(new RegExp(`\\b${k}="([^"]*)"`))?.[1] ?? "");
+    const name = attr("name");
+    const fromFile = [attr("file").split("/").pop() ?? "", attr("classname").split("/").pop() ?? ""]
+      .map((s) => s.match(/(?:^|\.)(c\d+)[._]/i)?.[1].toUpperCase())
+      .find(Boolean);
+    const title = /^C\d+\b/.test(name) || !fromFile ? name : `${fromFile}: ${name}`;
+    const body = m[2] ?? "";
+    if (/<skipped\b/.test(body)) {
+      specs.push({ title, tests: [{ status: "skipped", results: [] }] });
+      continue;
+    }
+    const status = /<(failure|error)\b/.test(body) ? "failed" : "passed";
+    specs.push({ title, tests: [{ status: "expected", results: [{ status, attachments: [] }] }] });
+  }
+  return { suites: [{ specs }] };
 }
 
 export function claimTable(g: GateResult): string {

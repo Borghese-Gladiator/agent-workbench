@@ -26,6 +26,7 @@ const body = (videoUrls: Record<string, string[]>) =>
     gate,
     videoUrls,
     start: "npx vite --port {port}",
+    tests: "`playwright test`",
     folder: "/h/tasks/t1",
     specs: [{ name: "c1.spec.ts", text: "test('C1: x', () => {});\n" }],
   });
@@ -36,7 +37,7 @@ test("PR body: a row and a video link for each claim, the run facts and the spec
   assert.match(b, /\| C2 \| Counts draws \| PASS \| \[video\]\(https:\/\/gh\/c2\.webm\) \|/);
   assert.match(b, /Commit: `3f9c2a1abcdef`/);
   assert.match(b, /Start: `npx vite --port \{port\}`/);
-  assert.match(b, /<details><summary>1 proof spec files[\s\S]*#### c1\.spec\.ts[\s\S]*C1: x[\s\S]*<\/details>/);
+  assert.match(b, /<details><summary>1 proof test files[\s\S]*#### c1\.spec\.ts[\s\S]*C1: x[\s\S]*<\/details>/);
   assert.match(b, /## Not proven\n\nNone\./);
   assert.match(b, /Generated with \[Claude Code\]/);
 });
@@ -122,4 +123,36 @@ test("removeTests deletes only the specs that name a listed claim, and never the
   assert.deepEqual(removeTests(["C1"], dir), ["c1.spec.ts"]);
   assert.deepEqual(readdirSync(dir).sort(), ["c12.spec.ts", "c3.spec.ts", "seed.spec.ts"]);
   assert.deepEqual(removeTests([], dir), []);
+});
+
+test("PR body: a test claim shows repo test, and no video is missing for it", () => {
+  const b = prBody({
+    title: "Engine",
+    commits: [],
+    claims: [{ id: "C1", text: "replans", proof: "test" }],
+    gate: { ...gate, rows: [{ id: "C1", tests: 1, status: "PASS", reasons: [], videos: [], traces: [] }] },
+    videoUrls: {},
+    start: "none (repo tests only)",
+    tests: "`npm test`",
+    folder: "/h/tasks/t1",
+    specs: [],
+  });
+  assert.match(b, /\| C1 \| replans \| PASS \| repo test \|/);
+  assert.match(b, /## Not proven\n\nNone\./);
+});
+
+test("test files: the claim comes from the file name, in each language", async () => {
+  const { testFileClaim, claimsWithoutTest, removeTests, testHash } = await import("../src/prove.ts");
+  assert.deepEqual(
+    ["c1.test.ts", "c2_test.py", "C3.test.mjs", "c12_pick_slot_test.py", "c1.spec.ts", "seed.spec.ts", "conftest.py", "c1.json"].map(testFileClaim),
+    ["C1", "C2", "C3", "C12", null, null, null, null],
+  );
+  const dir = mkdtempSync(join(tmpdir(), "awb-files-"));
+  writeFileSync(join(dir, "c1_test.py"), "def test_x():\n    assert True\n");
+  const claims = [{ id: "C1", text: "a", proof: "test" as const }, { id: "C2", text: "b", proof: "test" as const }];
+  assert.deepEqual(claimsWithoutTest(claims, dir).map((c) => c.id), ["C2"]);
+  const before = testHash(dir);
+  writeFileSync(join(dir, "c1_test.py"), "def test_x():\n    assert False\n");
+  assert.notEqual(testHash(dir), before);
+  assert.deepEqual(removeTests(["C1"], dir), ["c1_test.py"]);
 });

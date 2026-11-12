@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runGate, type GateInput, type ReportSpec } from "../src/gate.ts";
+import { runGate, junitReport, type GateInput, type ReportSpec } from "../src/gate.ts";
 
 const spec = (title: string, over: Partial<ReportSpec["tests"][0]> = {}, attachments = ["video", "trace"]): ReportSpec => ({
   title,
@@ -58,3 +58,47 @@ for (const [name, input, reason, failed] of [
 test("a task with no claims never passes", () => {
   assert.equal(runGate(base(good, { claims: [] })).pass, false);
 });
+
+const junit = `<?xml version="1.0"?><testsuites><testsuite name="x">
+<testcase name="C1: replan keeps &quot;Dentist&quot;" time="0.1"/>
+<testcase name="C2: no conflict" time="0.1"><failure message="boom">x</failure></testcase>
+<testcase name="C3: skip me"><skipped/></testcase>
+</testsuite></testsuites>`;
+
+test("JUnit: a test claim passes with no video, and a failure or skip fails it", () => {
+  const claims = [1, 2, 3].map((n) => ({ id: `C${n}`, text: "t", proof: "test" as const }));
+  const g = runGate(base([], { claims, report: junitReport(junit) }));
+  assert.deepEqual(g.rows.map((r) => [r.id, r.status, r.reasons]), [
+    ["C1", "PASS", []],
+    ["C2", "FAIL", ["not passed"]],
+    ["C3", "FAIL", ["skipped"]],
+  ]);
+});
+
+test("JUnit: a browser claim still needs a video", () => {
+  const g = runGate(base([], { claims: [{ id: "C1", text: "t" }], report: junitReport(junit) }));
+  assert.deepEqual(g.rows[0].reasons, ["no video or trace"]);
+});
+
+const pytest = `<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" tests="3">
+<testcase classname=".awb-proof.c1_test" name="test_touching_events_do_not_overlap" time="0.01" />
+<testcase classname=".awb-proof.c2_test" name="test_pick_slot" time="0.01"><failure message="assert 5 == 6">E assert</failure></testcase>
+<testcase classname=".awb-proof.c3_test" name="test_later"><skipped type="pytest.skip" message="x" /></testcase>
+</testsuite></testsuites>`;
+
+const vitest = `<testsuites name="vitest tests"><testsuite name=".awb-proof/c2.test.js" tests="2">
+<testcase classname=".awb-proof/c1.test.js" name="C1: add sums" time="0.1"></testcase>
+<testcase classname=".awb-proof/c2.test.js" name="group &gt; inner" time="0.1"><failure message="x">x</failure></testcase>
+</testsuite></testsuites>`;
+
+const testClaims = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `C${i + 1}`, text: "t", proof: "test" as const }));
+
+for (const [name, xml, n, want] of [
+  ["pytest maps a claim from the file name", pytest, 3, [["C1", "PASS"], ["C2", "FAIL"], ["C3", "FAIL"]]],
+  ["vitest maps a claim from the test name, or else the file name", vitest, 2, [["C1", "PASS"], ["C2", "FAIL"]]],
+] as const) {
+  test(`JUnit: ${name}`, () => {
+    const g = runGate(base([], { claims: testClaims(n), report: junitReport(xml) }));
+    assert.deepEqual(g.rows.map((r) => [r.id, r.status]), want);
+  });
+}

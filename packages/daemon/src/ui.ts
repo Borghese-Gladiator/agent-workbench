@@ -107,7 +107,9 @@ async function stacksView() {
 async function saveTask(f, st) {
   const claims = f.claims.value.split("\\n").map((l) => l.match(/^\\s*(C\\d+)\\s*:\\s*(.+)$/)).filter(Boolean).map((m) => ({ id: m[1], text: m[2] }));
   const body = { stackId: st.id, version: Number(f.dataset.version), repo: st.repo, branch: st.tasks[0].branch, base: st.base,
-    tasks: st.tasks.map((t) => t.id === f.dataset.task ? { id: t.id, title: f.title.value, claims } : { id: t.id, title: t.title, claims: t.claims }) };
+    tasks: st.tasks.map((t) => t.id === f.dataset.task
+      ? { id: t.id, title: f.title.value, claims: claims.map((c) => ({ ...c, proof: t.claims.find((o) => o.id === c.id)?.proof })) }
+      : { id: t.id, title: t.title, claims: t.claims }) };
   const r = await fetch("/api/stacks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const j = await r.json();
   if (!r.ok) return (f.querySelector(".msg").textContent = j.error);

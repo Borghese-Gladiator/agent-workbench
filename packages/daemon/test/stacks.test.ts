@@ -76,6 +76,7 @@ for (const [name, tasks] of [
   ["no claims", [{ title: "t", claims: [] }]],
   ["a bad claim id", [{ title: "t", claims: [{ id: "one", text: "x" }] }]],
   ["a duplicate claim id", [{ title: "t", claims: [{ id: "C1", text: "x" }, { id: "C1", text: "y" }] }]],
+  ["an unknown proof", [{ title: "t", claims: [{ id: "C1", text: "x", proof: "unit" }] }]],
 ] as const) {
   test(`validation refuses ${name}`, () => {
     assert.throws(() => validateTasks(tasks), StackError);
@@ -107,4 +108,9 @@ test("ship saves the PR and sets done; a closed task still shows, and the branch
   assert.equal(s.taskForBranch("/r", "awb/x")?.status, "closed");
   const next = s.set({ ...where, tasks: [task("Again")] });
   assert.equal(s.taskForBranch("/r", "awb/x")?.id, next.stack.tasks[0].id);
+});
+
+test("validation keeps proof test and drops proof browser, the default", () => {
+  const [t] = validateTasks([{ title: "t", claims: [{ id: "C1", text: "x", proof: "test" }, { id: "C2", text: "y", proof: "browser" }] }]);
+  assert.deepEqual(t.claims, [{ id: "C1", text: "x", proof: "test" }, { id: "C2", text: "y" }]);
 });

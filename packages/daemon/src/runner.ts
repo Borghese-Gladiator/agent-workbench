@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { run } from "./prove.ts";
-import { parseSetup } from "./run-md.ts";
+import { findRunFile, parseSetup } from "./run-md.ts";
 import type { RunState, Stacks, Task } from "./stacks.ts";
 import type { Log } from "./log.ts";
 
@@ -34,8 +34,8 @@ export function taskPrompt(task: Task, below: Task[]): string {
       : "This is the first task of the stack.",
     `You are on the branch ${task.branch}, and the task already exists in awb, so do not run awb stack set and do not make a branch.`,
     "The claims of this task:",
-    ...task.claims.map((c) => `- ${c.id}: ${c.text}`),
-    "Follow the playbook from step 4: check .awb/run.md, write the code, commit, run awb prove until every claim passes, then run awb ship.",
+    ...task.claims.map((c) => `- ${c.id}${c.proof === "test" ? " (proven by a repo test)" : ""}: ${c.text}`),
+    "Follow the playbook from step 4: check the run file, write the code, commit, run awb prove until every claim passes, then run awb ship.",
   ].join("\n");
 }
 
@@ -112,13 +112,13 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
       const base = (await run("git", ["rev-parse", "--verify", "-q", task.base!], opts.repo)).code === 0 ? task.base! : `origin/${task.base}`;
       const add = await run("git", ["worktree", "add", "-b", task.branch!, worktree, base], opts.repo);
       if (add.code !== 0) throw new Error(`git worktree add failed: ${add.out.trim()}`);
-      const runMdFile = join(worktree, ".awb", "run.md");
-      const setup = existsSync(runMdFile) ? parseSetup(readFileSync(runMdFile, "utf8")) : null;
+      const runMdFile = findRunFile(opts.home, opts.repo, worktree);
+      const setup = runMdFile ? parseSetup(readFileSync(runMdFile, "utf8")) : null;
       if (setup) {
         const r = await run("sh", ["-c", setup], worktree);
         mkdirSync(task.folder, { recursive: true });
         writeFileSync(join(task.folder, "setup.log"), r.out);
-        if (r.code !== 0) throw new Error(`the setup in .awb/run.md failed; see ${join(task.folder, "setup.log")}`);
+        if (r.code !== 0) throw new Error(`the setup in ${runMdFile} failed; see ${join(task.folder, "setup.log")}`);
       }
     }
     mkdirSync(task.folder, { recursive: true });
