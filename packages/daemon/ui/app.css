@@ -32,3 +32,5 @@ video{width:100%;border-radius:6px;background:#000}pre{overflow:auto;background:
 details summary{cursor:pointer;margin:6px 0}textarea,input{width:100%;font:inherit;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:6px}
 button{font:inherit;padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--accent);color:#fff;cursor:pointer}
 .add{color:var(--pass)}.del{color:var(--fail)}h2{font-size:17px;margin:4px 0 12px}h3{font-size:14px;margin:0 0 8px}
+.head{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.head h2{margin:4px 0}
+.banner{border-color:var(--fail)}.stats{display:flex;gap:32px;flex-wrap:wrap}.stats div{display:flex;flex-direction:column}
