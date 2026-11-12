@@ -3,9 +3,21 @@
 @media (prefers-color-scheme:dark){:root{--bg:oklch(0.0692 0.008 284.1);--fg:oklch(0.9784 0.0011 197.1);--card:oklch(0.1723 0.0026 248);
 --muted:oklch(0.65 0.01 286);--border:oklch(0.26 0.004 286);--pass:oklch(0.72 0.17 150);--fail:oklch(0.7 0.19 25);--warn:oklch(0.78 0.15 75)}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif}
-header{display:flex;gap:18px;align-items:center;padding:12px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap}
-header b{font-size:15px}header a{color:var(--muted);text-decoration:none}header a.on{color:var(--fg);font-weight:600}
-#status{margin-left:auto;color:var(--muted);font-size:12px}main{padding:20px;max-width:1200px}
+#root{display:flex;min-height:100vh}
+aside{position:sticky;top:0;height:100vh;width:220px;flex:none;display:flex;flex-direction:column;gap:16px;padding:16px 12px;border-right:1px solid var(--border);background:var(--card)}
+aside b{font-size:16px;padding:0 8px}nav{display:flex;flex-direction:column;gap:4px}
+nav a{display:flex;justify-content:space-between;padding:8px;border-radius:6px;color:var(--muted);text-decoration:none;font-weight:500}
+nav a:hover{background:var(--bg)}nav a[aria-current=page]{color:var(--fg);background:var(--bg);font-weight:600}
+.count{font-size:12px;font-variant-numeric:tabular-nums;color:var(--muted)}
+.foot{margin-top:auto;display:flex;flex-direction:column;gap:4px;font-size:12px;padding:0 8px}.foot .home{overflow-wrap:anywhere}
+#status.live{color:var(--pass);font-weight:600}
+main{flex:1;min-width:0;overflow-x:auto;padding:20px;max-width:1200px}
+button.menu{display:none}
+@media (max-width:720px){
+#root{display:block}main{padding:56px 12px 12px}
+button.menu{display:block;position:fixed;top:8px;left:8px;z-index:4;min-height:44px}
+aside{display:none;position:fixed;inset:0 auto 0 0;z-index:3;width:260px;max-width:85vw;padding-top:64px}aside.open{display:flex}}
+.badge{display:inline-block;padding:1px 8px;border-radius:999px;border:1px solid currentColor;font-size:12px;line-height:18px}
 table{border-collapse:collapse;width:100%}td,th{padding:6px 10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
 th{color:var(--muted);font-weight:500;font-size:12px}tr.click{cursor:pointer}tr.click:hover{background:var(--card)}
 a{color:var(--accent)}.muted{color:var(--muted)}.mono,pre,code{font-family:ui-monospace,Menlo,monospace;font-size:12px}

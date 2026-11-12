@@ -1,5 +1,5 @@
 import { html } from "./vendor/htm-preact.js";
-import { ago, repoName, TaskLink, taskOf, time, tok, usd, type Data, type Json } from "./components.ts";
+import { ago, repoName, State, TaskLink, taskOf, time, tok, usd, type Data, type Json } from "./components.ts";
 
 const NOTE: Record<string, string> = { quiet: "no event in the quiet time", lost: "its awb process is gone" };
 
@@ -22,7 +22,7 @@ export function Live({ d }: { d: Data }) {
       <tbody>
         ${list.map(
           (s) => html`<tr class="click" onClick=${(e: MouseEvent) => !(e.target as Element).closest("a") && (location.hash = "#/session/" + s.id)}>
-            <td class=${s.state}>${s.state}${NOTE[s.state] ? html`<span class="note">${NOTE[s.state]}</span>` : null}</td>
+            <td><${State} s=${s.state} />${NOTE[s.state] ? html`<span class="note">${NOTE[s.state]}</span>` : null}</td>
             <td>${repoName(s.repo)}</td>
             <td class="mono">${s.branch}</td>
             <td><${TaskLink} t=${taskOf(d, s)} /></td>

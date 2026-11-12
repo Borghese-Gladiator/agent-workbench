@@ -38,6 +38,6 @@ export async function post(u: string, body: unknown): Promise<any> {
 export const taskOf = (d: Data, s: Session) =>
   d.tasks.find((t) => t.id === d.bySession[s.id]) ?? d.tasks.find((t) => t.repo === s.repo && t.branch === s.branch);
 
-export const State = ({ s }: { s: string }) => html`<span class=${s}>${s}</span>`;
+export const State = ({ s }: { s: string }) => html`<span class=${"badge " + s}>${s}</span>`;
 export const Pass = ({ pass }: { pass: boolean }) => html`<span class=${pass ? "PASS" : "FAIL"}>${pass ? "PASS" : "FAIL"}</span>`;
 export const TaskLink = ({ t }: { t?: Json }) => (t ? html`<a href=${"#/task/" + t.id}>${t.title}</a>` : null);

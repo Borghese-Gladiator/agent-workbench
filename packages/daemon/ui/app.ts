@@ -17,6 +17,8 @@ function App() {
   const [status, setStatus] = useState("connecting…");
   const [home, setHome] = useState("");
   const [today, setToday] = useState<number | null>(null);
+  const [stackCount, setStackCount] = useState<number | null>(null);
+  const [menu, setMenu] = useState(false);
   const [sessions, setSessions] = useState(new Map<string, Session>());
   const [d, setD] = useState({ tasks: [] as Json[], bySession: {} as Record<string, string>, runs: [] as Json[], taskUsd: {} as Record<string, number> });
 
@@ -24,14 +26,16 @@ function App() {
     const midnight = new Date();
     midnight.setHours(0, 0, 0, 0);
     try {
-      const [all, day, runs, tasks, bySession] = await Promise.all([
+      const [all, day, runs, tasks, bySession, stacks] = await Promise.all([
         get("/api/cost?since=3650d"),
         get("/api/cost?since=" + encodeURIComponent(midnight.toISOString())),
         get("/api/runs"),
         get("/api/tasks"),
         get("/api/session-tasks"),
+        get("/api/stacks"),
       ]);
       setD({ tasks, bySession, runs, taskUsd: Object.fromEntries(all.by_task.map((x: Json) => [x.task_id, x.usd])) });
+      setStackCount(stacks.length);
       setToday(day.total_usd);
     } catch {}
   };
@@ -46,7 +50,7 @@ function App() {
     });
     es.onopen = () => setStatus("live");
     es.onerror = () => setStatus("disconnected, retrying…");
-    const onHash = () => setHash(location.hash);
+    const onHash = () => (setHash(location.hash), setMenu(false));
     window.addEventListener("hashchange", onHash);
     const timer = setInterval(() => location.hash.split("/")[1] || reload(), 30000);
     return () => (es.close(), window.removeEventListener("hashchange", onHash), clearInterval(timer));
@@ -62,13 +66,24 @@ function App() {
     : view === "prs" ? html`<${Prs} d=${data} />`
     : view === "task" ? html`<${TaskView} key=${id} d=${data} id=${id} />`
     : html`<${Live} d=${data} />`;
-  return html`<header>
+  const current = view === "session" ? "live" : view === "task" ? "stacks" : view;
+  const count: Record<string, number | null> = { stacks: stackCount, prs: d.tasks.filter((t) => t.pr_number && t.status === "done").length };
+  return html`<button class="plain menu" aria-expanded=${menu} aria-controls="sidebar" onClick=${() => setMenu(!menu)}>Menu</button>
+    <aside id="sidebar" class=${menu ? "open" : ""}>
       <b>awb</b>
-      ${NAV.map(([k, href, label]) => html`<a href=${href} class=${view === k ? "on" : ""}>${label}</a>`)}
-      <span class="muted mono">${home}</span>
-      <span class="muted">${today === null ? "" : "today " + usd(today) + " USD"}</span>
-      <span id="status">${status}</span>
-    </header>
+      <nav>
+        ${NAV.map(
+          ([k, href, label]) => html`<a href=${href} aria-current=${current === k ? "page" : undefined}>
+            <span>${label}</span>${count[k] == null ? null : html`<span class="count">${count[k]}</span>`}
+          </a>`,
+        )}
+      </nav>
+      <div class="foot">
+        <div class="muted mono home">${home}</div>
+        <div><span class="muted">Daemon</span> <span id="status" class=${status === "live" ? "live" : ""}>${status}</span></div>
+        <div><span class="muted">Today</span> <span class="mono">${today === null ? "" : usd(today) + " USD"}</span></div>
+      </div>
+    </aside>
     <main>${body}</main>`;
 }
 
