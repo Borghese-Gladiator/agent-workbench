@@ -16,6 +16,7 @@ The gate proves a claim in a browser, or with a repo test for logic that no page
 - [x] **Linux.** `acceptance.sh` falls back to `cp -R`, and `awb ui` uses `xdg-open`.
 - [x] **An install.** `npm install -g .` from the clone links `awb` onto the PATH. A package on the npm registry cannot run, because Node does not strip types under `node_modules`; that needs a build step.
 - [x] **A test-writer report.** `awb prove` prints how the writer ended (with its turns), its cost and its time limit.
+- [x] **`awb --resume [id]`.** Resumes a Claude Code session in the worktree where it ran: by awb session id, by task id, or with no id the newest session of the current branch. Built by awb on awb (`GET /api/resume`, then the CLI flag).
 
 ## 2. Web UI
 

@@ -13,6 +13,7 @@ awb ui                           # opens the session list in the browser
 | Command | What it does |
 |---|---|
 | `awb [claude args]` | Starts the daemon if it is not up, registers a session, and starts `claude` with the playbook and `AWB_HOME`. Every argument goes to `claude`. |
+| `awb --resume [id] [claude args]` | Resumes a Claude Code session with `claude --resume`, in the worktree where it ran. The id is an awb session id or a task id (a prefix of 6 or more characters works); for a task, the newest attempt with a session wins. With no id, it resumes the newest session of the current branch. Exits 1 when no session matches. |
 | `awb ui [--no-open]` | Prints the UI URL and opens it. The header shows the cost of today. The UI has five views: Live (the current run, and every session with its state and cost), Session (its events and tokens), Stacks (each task with its status, cost and PR; you can edit a waiting task), PRs (each open PR with its gate result and state) and the proof page of a task (the claim table, a video for each claim, the trace, the logs, the proof tests and the diff). On the page of a failed task, Retry, Rewrite test and Drop call the same routes as `awb retry`, `awb prove --rewrite` and `awb task rm`. |
 | `awb sessions [--json]` | Lists the sessions. |
 | `awb doctor` | Checks the setup and prints a fix for each problem. |

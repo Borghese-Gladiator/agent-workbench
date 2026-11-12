@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeArgs, awbSettings, gitInfo, repoRulesPath, DEFAULT_PLAYBOOK, SKILLS_DIR, PLUGIN_DIR } from "../src/launch.ts";
+import { claudeArgs, awbSettings, gitInfo, repoRulesPath, resumeArgs, splitResume, DEFAULT_PLAYBOOK, SKILLS_DIR, PLUGIN_DIR } from "../src/launch.ts";
 import { HOOK_EVENTS } from "../src/hook-send.ts";
 
 test("settings register the hook sender for every hook type, with AWB_HOME", () => {
@@ -74,4 +74,11 @@ test("a worktree gets the rules of its main repo, and a repo with no rules file 
   const prompt = claudeArgs([], DEFAULT_PLAYBOOK, {}, rules)[1];
   assert.match(prompt, /awb playbook/);
   assert.match(prompt, /## Rules for this repo\n\nFrom .*app\.md\. These rules win over the playbook\.\n\nCommit with --no-verify\.\n$/);
+});
+
+test("--resume maps to claude --resume with the claude session id", () => {
+  assert.deepEqual(resumeArgs("abc", ["--model", "x"]), ["--resume", "abc", "--model", "x"]);
+  assert.deepEqual(splitResume(["--resume", "t1", "-p", "hi"]), { id: "t1", rest: ["-p", "hi"] });
+  assert.deepEqual(splitResume(["--resume"]), { id: null, rest: [] });
+  assert.equal(splitResume(["-p", "hi"]), null);
 });

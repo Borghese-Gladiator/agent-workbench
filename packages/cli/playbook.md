@@ -37,6 +37,7 @@ You work inside Agent Workbench (`awb`). The workbench tracks this session and p
    A task with only test claims does not need `## start`.
    If a fresh clone needs an install before the app can start, add a `## setup` section with a ```sh block, for example `npm ci`. The runner runs it in each new worktree.
    If this branch changes how the app starts, write the new run file to `.awb/run.md` in the repo and commit it. That file wins over the run file outside the repo.
+   If the app needs secrets, for example an `.env` file, do not commit them. Ask the user to put the file in `$AWB_HOME/repos/<repo name>.env`. The runner copies it to `.env` in each new worktree before `## setup`.
 5. Write the code. If the task adds or changes a UI, read `{skills}/build-ui.md` first and follow it. It sets the stack, the default theme and the PWA claims. Add those claims to the task before you write the code. Run the repo lint, typecheck and unit tests, and fix every failure.
 6. Commit. `awb prove` refuses uncommitted changes.
 7. Run `awb prove`. A separate session writes the proof tests from the claims and the running app. Then the gate runs them. The command prints a claim table, and a line with how the test writer ended, its cost and its time limit.

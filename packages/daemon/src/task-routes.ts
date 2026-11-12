@@ -271,6 +271,43 @@ export function taskRoutes(
       }
     }
 
+    if (req.method === "GET" && url.pathname === "/api/resume") {
+      if (!db) return send(501, { error: "no database" }), true;
+      const id = url.searchParams.get("id");
+      const repo = url.searchParams.get("repo");
+      const branch = url.searchParams.get("branch");
+      const pick = (from: string, where: string, order: string, ...args: string[]) =>
+        db.prepare(
+          `SELECT * FROM (SELECT s.id AS session_id, s.repo, s.worktree, s.branch, ${order} AS at,
+             (SELECT e.claude_session_id FROM events e WHERE e.session_id = s.id AND e.claude_session_id IS NOT NULL ORDER BY e.id DESC LIMIT 1) AS claude_session_id
+           FROM ${from} WHERE ${where}) WHERE claude_session_id IS NOT NULL ORDER BY at DESC, session_id DESC LIMIT 1`,
+        ).get(...args) as Json | undefined;
+      const answer = (r: Json | undefined, error: string, extra: Json = {}) =>
+        (send(r ? 200 : 404, r ? { ...r, ...extra } : { error }), true);
+      if (!id) {
+        if (!repo || !branch) return send(400, { error: "missing id, or repo and branch" }), true;
+        return answer(
+          pick("sessions s", "s.repo = ? AND s.branch = ?", "s.started_at", repo, branch),
+          `no session with a claude session id on branch ${branch} of ${repo}`,
+        );
+      }
+      if (db.prepare("SELECT 1 FROM sessions WHERE id = ?").get(id)) {
+        return answer(pick("sessions s", "s.id = ?", "s.started_at", id), `session ${id} has no claude session id`);
+      }
+      let t: Task | undefined;
+      try {
+        t = id.length >= 6 ? stacks.find(id) : undefined;
+      } catch (err) {
+        return fail(err), true;
+      }
+      if (!t) return send(404, { error: `no session or task ${id}` }), true;
+      return answer(
+        pick("attempts a JOIN sessions s ON s.id = a.session_id", "a.task_id = ?", "a.started_at", t.id),
+        `task ${id} has no attempt with a claude session id`,
+        { task_id: t.id },
+      );
+    }
+
     if (req.method === "GET" && url.pathname === "/api/session-tasks") {
       return send(200, stacks.sessionTasks()), true;
     }

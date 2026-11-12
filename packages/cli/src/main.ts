@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runFilePath } from "../../daemon/src/run-md.ts";
 import { awbHome, ensureDaemon, findDaemon, api, reportCliError } from "./home.ts";
-import { gitInfo, playbookPath, claudeArgs, awbSettings, repoRulesPath } from "./launch.ts";
+import { gitInfo, playbookPath, claudeArgs, awbSettings, repoRulesPath, splitResume, resumeArgs } from "./launch.ts";
 import { doctor } from "./doctor.ts";
 import { wtCmd } from "./wt.ts";
 import { logText, type LogLine } from "../../daemon/src/log.ts";
@@ -390,21 +390,43 @@ async function taskRm(ids: string[], json: boolean): Promise<number> {
 }
 
 async function launch(passThrough: string[]): Promise<number> {
+  const resume = splitResume(passThrough);
+  let cwd = process.cwd();
+  let daemon;
+  if (resume) {
+    daemon = await ensureDaemon(home);
+    let q;
+    if (resume.id) q = new URLSearchParams({ id: resume.id });
+    else {
+      const g = here();
+      if (!g) return 1;
+      q = new URLSearchParams({ repo: g.repo, branch: g.branch });
+    }
+    try {
+      const r = await api(daemon, `/api/resume?${q}`);
+      cwd = r.worktree;
+      passThrough = resumeArgs(r.claude_session_id, resume.rest);
+      console.error(`awb: resume claude session ${r.claude_session_id} in ${cwd}`);
+    } catch (err) {
+      console.error(`awb: ${(err as Error).message}`);
+      return 1;
+    }
+  }
   let git;
   try {
-    git = gitInfo(process.cwd());
+    git = gitInfo(cwd);
   } catch {
-    console.error("awb: not inside a git repo");
+    console.error(`awb: not inside a git repo: ${cwd}`);
     return 1;
   }
-  const daemon = await ensureDaemon(home);
+  daemon ??= await ensureDaemon(home);
   const session = await api(daemon, "/api/sessions", { ...git, pid: process.pid });
   console.error(`awb: session ${session.id} on ${git.branch}, daemon port ${daemon.port}`);
 
   const claude = process.env.AWB_CLAUDE || "claude";
   mkdirSync(join(home, "repos"), { recursive: true });
   const args = claudeArgs(passThrough, playbookPath(git.worktree), awbSettings(home), repoRulesPath(home, git.repo), runFilePath(home, git.repo));
-  const child = spawn(claude, args, { stdio: "inherit", env: { ...process.env, AWB_HOME: home, AWB_SESSION_ID: session.id } });
+  const child = spawn(claude, args, { cwd, stdio: "inherit", env: { ...process.env, AWB_HOME: home, AWB_SESSION_ID: session.id } });
 
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(sig, () => child.kill(sig));
   const code: number = await new Promise((resolve) => {

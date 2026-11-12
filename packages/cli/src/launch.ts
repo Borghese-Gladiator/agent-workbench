@@ -62,3 +62,15 @@ export function claudeArgs(passThrough: string[], playbook: string, settings: ob
     ...passThrough,
   ];
 }
+
+export function resumeArgs(claudeSessionId: string, rest: string[]): string[] {
+  return ["--resume", claudeSessionId, ...rest];
+}
+
+export function splitResume(args: string[]): { id: string | null; rest: string[] } | null {
+  const i = args.indexOf("--resume");
+  if (i < 0) return null;
+  const next = args[i + 1];
+  const id = next !== undefined && !next.startsWith("-") ? next : null;
+  return { id, rest: [...args.slice(0, i), ...args.slice(i + (id ? 2 : 1))] };
+}
