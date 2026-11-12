@@ -5,7 +5,7 @@ import { alive, openStore } from "./store.ts";
 import { createApp } from "./server.ts";
 import { createStacks, migrateStacks } from "./stacks.ts";
 import { taskRoutes } from "./task-routes.ts";
-import { claudeSession, createRunner, lastSessionUsd } from "./runner.ts";
+import { claudeSession, createRunner, lastSessionUsd, stackLimit } from "./runner.ts";
 import { notify, runMessage } from "./notify.ts";
 import { createLog } from "./log.ts";
 
@@ -33,6 +33,7 @@ export async function startDaemon(home: string) {
       }),
     {
       log,
+      maxStacks: stackLimit(process.env.AWB_MAX_STACKS),
       sessionUsd: (task) => lastSessionUsd(task.folder),
       onEnd: (r) => {
         const m = runMessage(stacks, r);
@@ -54,7 +55,7 @@ export async function startDaemon(home: string) {
     logDir,
   );
   const server = createApp(store, { home, startedAt, log }, routes);
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve, reject) => server.once("error", reject).listen(Number(process.env.AWB_PORT || 0), "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;
   const sync = setInterval(
     () => routes.syncPrs().catch((err) => log("warn", "sync", "error", { error: err })),

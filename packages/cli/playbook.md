@@ -39,7 +39,7 @@ You work inside Agent Workbench (`awb`). The workbench tracks this session and p
    If this branch changes how the app starts, write the new run file to `.awb/run.md` in the repo and commit it. That file wins over the run file outside the repo.
 5. Write the code. If the task adds or changes a UI, read `{skills}/build-ui.md` first and follow it. It sets the stack, the default theme and the PWA claims. Add those claims to the task before you write the code. Run the repo lint, typecheck and unit tests, and fix every failure.
 6. Commit. `awb prove` refuses uncommitted changes.
-7. Run `awb prove`. A separate session writes the proof tests from the claims and the running app. Then the gate runs them. The command prints a claim table.
+7. Run `awb prove`. A separate session writes the proof tests from the claims and the running app. Then the gate runs them. The command prints a claim table, and a line with how the test writer ended, its cost and its time limit.
 8. If a claim fails, fix the code, commit, and run `awb prove` again. Do not edit the proof tests. They are not yours, and the gate refuses a test that changed during a run.
    If the video and the trace (or for a test claim, `proof/test.log` in the task folder) show that the test itself is wrong (it checks something that the claim does not say), run `awb prove --rewrite C1` (a comma list of claim ids). This deletes those tests, and the test writer writes them again. Do not use it to get past a real bug in your code.
 9. When every claim passes, run `awb ship`. It runs the gate again, pushes the branch, uploads the videos and opens a draft PR. Report the PR URL and the claim table.

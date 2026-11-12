@@ -71,7 +71,7 @@ const unescape = (s: string) =>
 
 export function junitReport(xml: string): Report {
   const specs: ReportSpec[] = [];
-  for (const m of xml.matchAll(/<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)) {
+  for (const m of xml.matchAll(/<testcase\b((?:[^>"]|"[^"]*")*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g)) {
     const attr = (k: string) => unescape(m[1].match(new RegExp(`\\b${k}="([^"]*)"`))?.[1] ?? "");
     const name = attr("name");
     const fromFile = [attr("file").split("/").pop() ?? "", attr("classname").split("/").pop() ?? ""]

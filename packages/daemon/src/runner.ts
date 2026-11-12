@@ -1,16 +1,17 @@
 import { spawn } from "node:child_process";
-import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { run } from "./prove.ts";
-import { findRunFile, parseSetup } from "./run-md.ts";
+import { envFilePath, findRunFile, parseSetup } from "./run-md.ts";
+import { StackError } from "./stacks.ts";
 import type { RunState, Stacks, Task } from "./stacks.ts";
 import type { Log } from "./log.ts";
 
 export type { RunState };
 export type Session = (task: Task, below: Task[]) => Promise<string | void>;
-export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log; sessionUsd?: (task: Task) => number | null };
+export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log; sessionUsd?: (task: Task) => number | null; maxStacks?: number };
 
 export function sessionEnd(out: string, timedOut: boolean, code: number | null, timeoutMin: number): string {
   if (timedOut) return `timeout after ${timeoutMin} min`;
@@ -103,6 +104,14 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
 
 const AWB = fileURLToPath(new URL("../../cli/bin/awb", import.meta.url));
 
+export const MAX_STACKS = 5;
+
+export function stackLimit(v: string | undefined): number {
+  const n = Number(v || 2);
+  if (!Number.isInteger(n) || n < 1) return 2;
+  return Math.min(n, MAX_STACKS);
+}
+
 export function claudeSession(opts: { home: string; repo: string; timeoutMin: number }): Session {
   return async (task, below) => {
     const worktree = join(opts.home, "worktrees", task.id);
@@ -112,6 +121,8 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
       const base = (await run("git", ["rev-parse", "--verify", "-q", task.base!], opts.repo)).code === 0 ? task.base! : `origin/${task.base}`;
       const add = await run("git", ["worktree", "add", "-b", task.branch!, worktree, base], opts.repo);
       if (add.code !== 0) throw new Error(`git worktree add failed: ${add.out.trim()}`);
+      const env = envFilePath(opts.home, opts.repo);
+      if (existsSync(env)) copyFileSync(env, join(worktree, ".env"));
       const runMdFile = findRunFile(opts.home, opts.repo, worktree);
       const setup = runMdFile ? parseSetup(readFileSync(runMdFile, "utf8")) : null;
       if (setup) {
@@ -166,6 +177,10 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
     start(stackId: string): RunState {
       const busy = active.get(stackId);
       if (busy) return runs.get(busy)!;
+      const max = opts.maxStacks ?? 2;
+      if (active.size >= max) {
+        throw new StackError(`${active.size} stacks are running and the limit is ${max} (AWB_MAX_STACKS, at most ${MAX_STACKS}); wait for one to end`);
+      }
       const stack = stacks.get(stackId)!;
       const state: RunState = { id: randomUUID(), stackId, state: "running", current: null, reason: null };
       runs.set(state.id, state);

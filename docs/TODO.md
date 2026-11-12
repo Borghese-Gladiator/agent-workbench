@@ -10,12 +10,12 @@ The gate proves a claim in a browser, or with a repo test for logic that no page
 - [ ] **Red on the base commit.** Run the test claims on the base commit too. A claim passes only if its test fails on the base and passes on the head. This refuses a test that passes on any code.
 - [ ] **Test claims carried forward in a stack.** Task N also runs the passing test claims of the tasks below it. A replan change must not break an earlier claim.
 - [x] **A run file for a repo that cannot hold awb files.** The run file is `$AWB_HOME/repos/<repo name>.run.md`, outside the repo, so `awb` works the same way in every repo. A committed `.awb/run.md` in the worktree still wins, for a branch that changes how the app starts. One reader (`readRunFile` in `run-md.ts`) serves `prove`, `ship` and the runner.
-- [ ] **An env file for a run.** Keep `$AWB_HOME/repos/<repo name>.env`. When the runner makes a worktree, it copies the file into it before `## setup`. The file stays outside the repo, so its secrets are not committed.
-- [ ] **Run awb on awb.** Write the run file for this repo: `## setup` runs `npm ci`, `## test` runs `npm test`, and `## start` starts a daemon with its own `AWB_HOME` on `{port}`, so that the UI claims also work. Then do each item below as an awb task in this repo. Each task gets its own worktree, so a change cannot break the daemon that runs it.
-- [ ] **Concurrent stacks.** The runner runs one stack at a time. Allow N stacks (default 2) in parallel, and never more than 5 (the v5 lesson: 10 at a time overloaded the host).
-- [ ] **Linux.** `cp -c` in the setup recipes and the `open` call are macOS only.
-- [ ] **An install.** Publish `awb` as an npm package with a `bin`, so that a user does not need an alias to a clone.
-- [ ] **A test-writer report.** Show the writer's cost, turns and time limit in `awb prove` output, so that a missing test has a clear cause.
+- [x] **An env file for a run.** When the runner makes a worktree, it copies `$AWB_HOME/repos/<repo name>.env` to `.env` in it, before `## setup`. The file stays outside the repo, so its secrets are not committed.
+- [x] **Run awb on awb.** `.awb/run.md` sets up, starts and tests this repo. The `--resume` stack (2 tasks, about 6 USD) ran through awb and shipped. It found a gate bug: a JUnit test name with a `>` lost its claim id.
+- [x] **Concurrent stacks.** `AWB_MAX_STACKS` (default 2, never more than 5, the v5 lesson) sets how many stacks run in parallel. A new stack is refused when the limit is full.
+- [x] **Linux.** `acceptance.sh` falls back to `cp -R`, and `awb ui` uses `xdg-open`.
+- [x] **An install.** `npm install -g .` from the clone links `awb` onto the PATH. A package on the npm registry cannot run, because Node does not strip types under `node_modules`; that needs a build step.
+- [x] **A test-writer report.** `awb prove` prints how the writer ended (with its turns), its cost and its time limit.
 
 ## 2. Web UI
 

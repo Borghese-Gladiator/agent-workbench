@@ -5,8 +5,8 @@ import { extname, join, sep } from "node:path";
 import { parseSince, StackError, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
 import { LEVELS, logText, readLog, type Level, type Log, type LogFilter } from "./log.ts";
 import { prove, run, type ProveDeps } from "./prove.ts";
-import { costReport, costText } from "./cost.ts";
 import { readRunFile } from "./run-md.ts";
+import { costReport, costText } from "./cost.ts";
 import type { DatabaseSync } from "node:sqlite";
 import { ship, ShipRefused, syncStatus } from "./ship.ts";
 import type { createRunner } from "./runner.ts";
@@ -213,7 +213,11 @@ export function taskRoutes(
       const b = await body();
       const stack = b.stackId ? stacks.get(b.stackId) : stacks.newestStack(b.repo ?? "");
       if (!stack) return send(404, { error: "no stack for this repo; run awb stack set first" }), true;
-      return send(202, runner.start(stack.id)), true;
+      try {
+        return send(202, runner.start(stack.id)), true;
+      } catch (err) {
+        return fail(err), true;
+      }
     }
 
     if (req.method === "GET" && url.pathname === "/api/logs") {
@@ -345,8 +349,14 @@ export function taskRoutes(
       }
       if (!t) return send(404, { error: `no task ${b.taskId}` }), true;
       if (t.status !== "failed") return send(409, { error: `task ${t.id} is ${t.status}; only a failed task can be retried` }), true;
+      const reason = t.fail_reason ?? "";
       stacks.retry(t.id);
-      return send(202, runner.start(t.stack_id)), true;
+      try {
+        return send(202, runner.start(t.stack_id)), true;
+      } catch (err) {
+        stacks.fail(t.id, reason);
+        return fail(err), true;
+      }
     }
 
     if (req.method === "POST" && url.pathname === "/api/sync") {

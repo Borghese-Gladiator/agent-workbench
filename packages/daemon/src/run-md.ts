@@ -43,6 +43,10 @@ export function runFilePath(home: string, repo: string): string {
   return join(home, "repos", `${basename(repo)}.run.md`);
 }
 
+export function envFilePath(home: string, repo: string): string {
+  return join(home, "repos", `${basename(repo)}.env`);
+}
+
 export function findRunFile(home: string, repo: string, worktree: string): string | null {
   const own = join(worktree, ".awb", "run.md");
   if (existsSync(own)) return own;

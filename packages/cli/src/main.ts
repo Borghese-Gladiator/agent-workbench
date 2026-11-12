@@ -173,11 +173,17 @@ async function proveCmd(json: boolean, rewrite: string[]): Promise<number> {
     if (json) console.log(JSON.stringify(r, null, 2));
     else {
       console.log(r.table);
+      if (r.writer) console.log(writerLine(r.writer));
       for (const row of r.rows) if (row.status === "FAIL" && row.videos.length) console.log(`  ${row.id} video: ${row.videos[0]}\n  ${row.id} trace: ${row.traces[0]}`);
       console.log(`evidence: ${r.folder}`);
     }
     return r.pass ? 0 : 1;
   });
+}
+
+function writerLine(w: { end: string; usd: number | null; timeoutMin?: number }): string {
+  const cost = w.usd === null ? "cost unknown" : `${w.usd.toFixed(2)} USD`;
+  return `test writer: ${w.end}, ${cost}, limit ${w.timeoutMin ?? "?"} min`;
 }
 
 async function streamNdjson(path: string, body: object, onResult: (r: any) => number): Promise<number> {

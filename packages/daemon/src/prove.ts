@@ -19,7 +19,7 @@ export type ProveDeps = {
   log: (line: string) => void;
 };
 
-export type WriterEnd = { end: string; usd: number | null };
+export type WriterEnd = { end: string; usd: number | null; timeoutMin?: number };
 
 export function claimsMarkdown(task: Pick<Task, "title" | "claims">, url: string): string {
   return `# Claims: ${task.title}\n\nSite: ${url}\n\n${task.claims.map((c) => `- ${c.id}: ${c.text}`).join("\n")}\n`;
@@ -183,7 +183,7 @@ async function runClaude(cwd: string, args: string[], prompt: string, deps: Prov
   const timeoutMin = deps.writerTimeoutMin ?? 30;
   const r = await run(deps.claude, ["-p", ...args, "--output-format", "stream-json", "--verbose"], cwd, prompt, timeoutMin * 60_000);
   writeFileSync(logFile, r.out);
-  const w = writerEnd(r.out, r.timedOut, r.code, timeoutMin);
+  const w = { ...writerEnd(r.out, r.timedOut, r.code, timeoutMin), timeoutMin };
   writeFileSync(join(dirname(logFile), "writer-end.txt"), w.end + "\n");
   deps.log(`test writer: ${w.end}${w.usd === null ? "" : `, ${w.usd.toFixed(2)} USD`}`);
   return w;

@@ -102,3 +102,15 @@ for (const [name, xml, n, want] of [
     assert.deepEqual(g.rows.map((r) => [r.id, r.status]), want);
   });
 }
+
+test("junitReport reads a test name with an unescaped > in it, as node --test writes it", () => {
+  const xml = `<testsuites>
+\t<testcase name="C1: GET /api/x?id=&lt;id> answers 200" file="/w/.awb-proof/c1.test.ts"/>
+\t<testcase name="C2: a > b" file="/w/.awb-proof/c2.test.ts"><failure message="no"/></testcase>
+</testsuites>`;
+  const specs = junitReport(xml).suites[0].specs!;
+  assert.deepEqual(specs.map((s) => [s.title, s.tests[0].results[0].status]), [
+    ["C1: GET /api/x?id=<id> answers 200", "passed"],
+    ["C2: a > b", "failed"],
+  ]);
+});

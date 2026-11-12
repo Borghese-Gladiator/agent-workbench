@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "../src/store.ts";
 import { createStacks, migrateStacks, parseSince, StackError } from "../src/stacks.ts";
-import { failReason, runStack, type RunState } from "../src/runner.ts";
+import { createRunner, failReason, runStack, stackLimit, type RunState } from "../src/runner.ts";
 import type { GateResult } from "../src/gate.ts";
 
 const setup = () => {
@@ -115,4 +115,17 @@ test("failReason without a gate, and with a pass but no ship", () => {
   assert.match(failReason(s, a.id), /never ran awb prove/);
   s.saveGate(s.startAttempt(a.id, null), gate(true));
   assert.match(failReason(s, a.id), /without awb ship/);
+});
+
+test("the runner refuses a new stack when the limit is full, and the limit is never above 5", () => {
+  const s = setup();
+  const stacks = ["A", "B", "C"].map((title) => s.set({ repo: "/r", branch: title, base: "main", tasks: [t(title)] }).stack);
+  const hold: (() => void)[] = [];
+  const runner = createRunner(s, () => () => new Promise<void>((ok) => hold.push(ok)), { maxStacks: 2 });
+  runner.start(stacks[0].id);
+  runner.start(stacks[1].id);
+  assert.equal(runner.start(stacks[0].id).stackId, stacks[0].id);
+  assert.throws(() => runner.start(stacks[2].id), /2 stacks are running and the limit is 2/);
+  hold.forEach((ok) => ok());
+  assert.deepEqual([stackLimit(undefined), stackLimit("3"), stackLimit("10"), stackLimit("junk")], [2, 3, 5, 2]);
 });

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseSetup, parseRunMd, parseTest, fillTest, fill, findRunFile, readRunFile, runFilePath } from "../src/run-md.ts";
+import { parseSetup, parseRunMd, parseTest, fillTest, fill, findRunFile, readRunFile, runFilePath, envFilePath } from "../src/run-md.ts";
 
 const vite = `# Run
 
@@ -78,4 +78,8 @@ test("the run file in the worktree wins, the file in AWB_HOME is the fallback, a
 
   writeFileSync(join(worktree, ".awb", "run.md"), "## start\nurl: http://own\n");
   assert.equal(readRunFile(home, repo, worktree), "## start\nurl: http://own\n");
+});
+
+test("the env file of a repo is next to its run file in AWB_HOME", () => {
+  assert.equal(envFilePath("/h", "/src/games"), join("/h", "repos", "games.env"));
 });
