@@ -21,7 +21,16 @@ export type BodyInput = {
   tests: string;
   folder: string;
   specs: { name: string; text: string }[];
+  stack?: { title: string; pr: number | null; current: boolean }[];
+  template?: string | null;
 };
+
+const TEMPLATES = [".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE.md", "pull_request_template.md", "docs/pull_request_template.md"];
+
+export function readTemplate(worktree: string): string | null {
+  const f = TEMPLATES.map((t) => join(worktree, t)).find((p) => existsSync(p));
+  return f ? readFileSync(f, "utf8").trim() || null : null;
+}
 
 const cell = (s: string) => s.replaceAll("|", "\\|").replaceAll("\n", " ");
 
@@ -35,24 +44,47 @@ export function prBody(b: BodyInput): string {
   const specs = b.specs
     .map((s) => `#### ${s.name}\n\n\`\`\`${s.name.endsWith(".py") ? "python" : "ts"}\n${s.text.trimEnd()}\n\`\`\``)
     .join("\n\n");
+  const order = (b.stack ?? []).map((t, i) => `| ${i + 1} | ${t.pr ? `#${t.pr}` : "not shipped"}${t.current ? " (this PR)" : ""} | ${cell(t.title)} |`);
+  const mergeOrder = order.length > 1
+    ? `<details open><summary><b>PR Merge Order</b></summary>
+
+| # | PR | What it does |
+| --- | --- | --- |
+${order.join("\n")}
+
+</details>
+
+`
+    : "";
+  const template = b.template
+    ? `<details><summary><b>PR template</b> (awb does not fill it)</summary>
+
+${b.template}
+
+</details>
+
+`
+    : "";
   return `## Summary
 
 ${b.title}
 
 ${b.commits.map((c) => `- ${c}`).join("\n")}
 
-## Features
+${mergeOrder}## Features
 
 | Claim | Sentence | Result | Video |
 | --- | --- | --- | --- |
 ${rows.join("\n")}
 
-## How it was run
+<details><summary><b>How it was run</b></summary>
 
 - Start: \`${b.start}\`
 - Commit: \`${b.gate.head}\`
 - Tests: ${b.tests}, from the task folder \`${b.folder}\`
 - Traces stay in \`${b.folder}/proof/results\`. They are not uploaded, because a trace can hold cookies.
+
+</details>
 
 ## Not proven
 
@@ -66,7 +98,7 @@ ${specs}
 
 </details>
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+${template}🤖 Generated with [Claude Code](https://claude.com/claude-code)
 `;
 }
 
@@ -122,7 +154,7 @@ async function uploadVideos(worktree: string, folder: string, pr: number, gate: 
 
 export type ShipResult = { url: string; number: number; gate: GateResult; table: string };
 
-export async function ship(task: Task, worktree: string, runMdText: string, log: (l: string) => void): Promise<ShipResult> {
+export async function ship(task: Task, worktree: string, runMdText: string, log: (l: string) => void, stackTasks: Task[] = []): Promise<ShipResult> {
   if (!task.branch || !task.base) throw new ShipRefused(`task ${task.id} has no branch or base`);
   if (!existsSync(task.folder)) throw new ShipRefused("no proof yet: run awb prove first");
   const folder = realpathSync(task.folder);
@@ -147,8 +179,12 @@ export async function ship(task: Task, worktree: string, runMdText: string, log:
     .trim()
     .split("\n")
     .filter(Boolean);
-  const body = (videoUrls: Record<string, string[]>) =>
-    prBody({ title: task.title, commits, claims: task.claims, gate, videoUrls, start, tests: testsLine, folder, specs });
+  const template = readTemplate(worktree);
+  const body = (videoUrls: Record<string, string[]>, number: number | null = null) =>
+    prBody({
+      title: task.title, commits, claims: task.claims, gate, videoUrls, start, tests: testsLine, folder, specs, template,
+      stack: stackTasks.map((t) => ({ title: t.title, pr: t.id === task.id ? number : t.pr_number, current: t.id === task.id })),
+    });
 
   const secrets = findSecrets([...specs, { name: "the PR body", text: body({}) }]);
   if (secrets.length) throw new ShipRefused(`secret scan: ${secrets.join("; ")}`, table);
@@ -173,7 +209,7 @@ export async function ship(task: Task, worktree: string, runMdText: string, log:
 
   const videoUrls = await uploadVideos(worktree, folder, pr!.number, gate, log);
   const bodyFile = join(folder, "proof", "pr-body.md");
-  writeFileSync(bodyFile, body(videoUrls));
+  writeFileSync(bodyFile, body(videoUrls, pr!.number));
   await gh(worktree, "pr", "edit", String(pr!.number), "--body-file", bodyFile);
   return { url: pr!.url, number: pr!.number, gate, table };
 }

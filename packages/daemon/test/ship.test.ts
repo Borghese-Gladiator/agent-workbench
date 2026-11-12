@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { prBody, findSecrets, syncStatus } from "../src/ship.ts";
+import { prBody, findSecrets, syncStatus, readTemplate } from "../src/ship.ts";
 import { gateFromDisk, testHash, removeTests } from "../src/prove.ts";
 import type { GateResult } from "../src/gate.ts";
 
@@ -40,6 +40,45 @@ test("PR body: a row and a video link for each claim, the run facts and the spec
   assert.match(b, /<details><summary>1 proof test files[\s\S]*#### c1\.spec\.ts[\s\S]*C1: x[\s\S]*<\/details>/);
   assert.match(b, /## Not proven\n\nNone\./);
   assert.match(b, /Generated with \[Claude Code\]/);
+});
+
+test("PR body: the run facts are in a closed details block", () => {
+  assert.match(body({}), /<details><summary><b>How it was run<\/b><\/summary>\n\n- Start:[\s\S]*cookies\.\n\n<\/details>\n\n## Not proven/);
+});
+
+const withStack = (stack: { title: string; pr: number | null; current: boolean }[], template: string | null = null) =>
+  prBody({ title: "t", commits: [], claims, gate, videoUrls: {}, start: "s", tests: "x", folder: "/f", specs: [], stack, template });
+
+test("PR body: a stack of more than one task shows the merge order, open", () => {
+  const b = withStack([
+    { title: "Base | layout", pr: 11, current: false },
+    { title: "Carousel", pr: 12, current: true },
+    { title: "Completed state", pr: null, current: false },
+  ]);
+  assert.match(b, /<details open><summary><b>PR Merge Order<\/b><\/summary>/);
+  assert.match(b, /\| 1 \| #11 \| Base \\\| layout \|\n\| 2 \| #12 \(this PR\) \| Carousel \|\n\| 3 \| not shipped \| Completed state \|/);
+  assert.ok(b.indexOf("PR Merge Order") < b.indexOf("## Features"));
+});
+
+test("PR body: one task, no merge order; no template, no template block", () => {
+  const b = withStack([{ title: "Only", pr: 5, current: true }]);
+  assert.doesNotMatch(b, /PR Merge Order/);
+  assert.doesNotMatch(b, /PR template/);
+});
+
+test("PR body: the repo template goes in a closed details block before the footer", () => {
+  const b = withStack([], "## Checklist\n\n- [ ] Tests");
+  assert.match(b, /<details><summary><b>PR template<\/b> \(awb does not fill it\)<\/summary>\n\n## Checklist\n\n- \[ \] Tests\n\n<\/details>\n\n🤖 Generated/);
+});
+
+test("readTemplate finds the GitHub template, and gives null when none or empty", () => {
+  const dir = mkdtempSync(join(tmpdir(), "awb-tpl-"));
+  assert.equal(readTemplate(dir), null);
+  mkdirSync(join(dir, ".github"));
+  writeFileSync(join(dir, ".github", "pull_request_template.md"), "  \n");
+  assert.equal(readTemplate(dir), null);
+  writeFileSync(join(dir, ".github", "pull_request_template.md"), "## Checklist\n");
+  assert.equal(readTemplate(dir), "## Checklist");
 });
 
 test("PR body: a claim with no uploaded video is listed under Not proven", () => {

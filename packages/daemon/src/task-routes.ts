@@ -195,7 +195,7 @@ export function taskRoutes(
       const line = (o: Json) => res.write(JSON.stringify(o) + "\n");
       try {
         log("info", "ship", "start", { task: t.id, branch: t.branch });
-        const r = await ship(t, b.worktree, readRunFile(home, b.repo, b.worktree), (msg) => (line({ log: msg }), log("info", "ship", "step", { task: t.id, msg })));
+        const r = await ship(t, b.worktree, readRunFile(home, b.repo, b.worktree), (msg) => (line({ log: msg }), log("info", "ship", "step", { task: t.id, msg })), stacks.get(t.stack_id)?.tasks);
         stacks.setPr(t.id, r.number, r.url);
         log("info", "ship", "pr", { task: t.id, pr: r.number, url: r.url });
         line({ result: { url: r.url, number: r.number, table: r.table, taskId: t.id } });
