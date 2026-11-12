@@ -36,7 +36,7 @@ case "${1:-}" in
 setup)
   rm -rf "$REPO"
   git clone -q "$REMOTE" "$REPO"
-  cp -cR "$LOCAL_GAMES/node_modules" "$REPO/node_modules"
+  cp -cR "$LOCAL_GAMES/node_modules" "$REPO/node_modules" 2>/dev/null || cp -R "$LOCAL_GAMES/node_modules" "$REPO/node_modules"
   mkdir -p "$WORK/hooks"
   cat > "$WORK/hooks/pre-push" <<'EOF'
 #!/bin/sh

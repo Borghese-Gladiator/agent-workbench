@@ -1,4 +1,22 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+
 export type RunMd = { start: string | null; url: string; ready: string };
+export type RunFile = { text: string; source: "file" | "daemon"; path?: string };
+
+export function readRunFile(worktree: string, saved: string | null | undefined): RunFile | null {
+  const path = join(worktree, ".awb", "run.md");
+  if (existsSync(path)) return { text: readFileSync(path, "utf8"), source: "file", path };
+  return saved ? { text: saved, source: "daemon" } : null;
+}
+
+export function loadRunFile(worktree: string, saved: string | null | undefined): RunFile {
+  const f = readRunFile(worktree, saved);
+  if (!f) throw new Error(`no run file: write ${path(worktree)}, or save one with awb repo set`);
+  return f;
+}
+
+const path = (worktree: string) => join(worktree, ".awb", "run.md");
 
 function sectionCommand(text: string, name: string): string | null {
   const section = text.match(new RegExp(`^##\\s+${name}\\s*$([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "im"))?.[1];

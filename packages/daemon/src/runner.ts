@@ -1,16 +1,17 @@
 import { spawn } from "node:child_process";
-import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { run } from "./prove.ts";
-import { parseSetup } from "./run-md.ts";
+import { parseSetup, readRunFile } from "./run-md.ts";
+import { StackError, type RepoConfig } from "./stacks.ts";
 import type { RunState, Stacks, Task } from "./stacks.ts";
 import type { Log } from "./log.ts";
 
 export type { RunState };
 export type Session = (task: Task, below: Task[]) => Promise<string | void>;
-export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log; sessionUsd?: (task: Task) => number | null };
+export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log; sessionUsd?: (task: Task) => number | null; maxStacks?: number };
 
 export function sessionEnd(out: string, timedOut: boolean, code: number | null, timeoutMin: number): string {
   if (timedOut) return `timeout after ${timeoutMin} min`;
@@ -35,7 +36,7 @@ export function taskPrompt(task: Task, below: Task[]): string {
     `You are on the branch ${task.branch}, and the task already exists in awb, so do not run awb stack set and do not make a branch.`,
     "The claims of this task:",
     ...task.claims.map((c) => `- ${c.id}${c.proof === "test" ? " (proven by a repo test)" : ""}: ${c.text}`),
-    "Follow the playbook from step 4: check .awb/run.md, write the code, commit, run awb prove until every claim passes, then run awb ship.",
+    "Follow the playbook from step 4: check the run file with awb repo show, write the code, commit, run awb prove until every claim passes, then run awb ship.",
   ].join("\n");
 }
 
@@ -103,7 +104,15 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
 
 const AWB = fileURLToPath(new URL("../../cli/bin/awb", import.meta.url));
 
-export function claudeSession(opts: { home: string; repo: string; timeoutMin: number }): Session {
+export const MAX_STACKS = 5;
+
+export function stackLimit(v: string | undefined): number {
+  const n = Number(v || 2);
+  if (!Number.isInteger(n) || n < 1) return 2;
+  return Math.min(n, MAX_STACKS);
+}
+
+export function claudeSession(opts: { home: string; repo: string; timeoutMin: number; config?: () => RepoConfig }): Session {
   return async (task, below) => {
     const worktree = join(opts.home, "worktrees", task.id);
     if (!existsSync(worktree)) {
@@ -112,13 +121,18 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
       const base = (await run("git", ["rev-parse", "--verify", "-q", task.base!], opts.repo)).code === 0 ? task.base! : `origin/${task.base}`;
       const add = await run("git", ["worktree", "add", "-b", task.branch!, worktree, base], opts.repo);
       if (add.code !== 0) throw new Error(`git worktree add failed: ${add.out.trim()}`);
-      const runMdFile = join(worktree, ".awb", "run.md");
-      const setup = existsSync(runMdFile) ? parseSetup(readFileSync(runMdFile, "utf8")) : null;
+      const config = opts.config?.() ?? { run_md: null, env_file: null };
+      if (config.env_file) {
+        if (!existsSync(config.env_file)) throw new Error(`the env file ${config.env_file} of this repo does not exist; fix it with awb repo set --env-file`);
+        copyFileSync(config.env_file, join(worktree, basename(config.env_file)));
+      }
+      const file = readRunFile(worktree, config.run_md);
+      const setup = file ? parseSetup(file.text) : null;
       if (setup) {
         const r = await run("sh", ["-c", setup], worktree);
         mkdirSync(task.folder, { recursive: true });
         writeFileSync(join(task.folder, "setup.log"), r.out);
-        if (r.code !== 0) throw new Error(`the setup in .awb/run.md failed; see ${join(task.folder, "setup.log")}`);
+        if (r.code !== 0) throw new Error(`the setup in the run file (${file!.source}) failed; see ${join(task.folder, "setup.log")}`);
       }
     }
     mkdirSync(task.folder, { recursive: true });
@@ -166,6 +180,10 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
     start(stackId: string): RunState {
       const busy = active.get(stackId);
       if (busy) return runs.get(busy)!;
+      const max = opts.maxStacks ?? 2;
+      if (active.size >= max) {
+        throw new StackError(`${active.size} stacks are running and the limit is ${max} (AWB_MAX_STACKS, at most ${MAX_STACKS}); wait for one to end`);
+      }
       const stack = stacks.get(stackId)!;
       const state: RunState = { id: randomUUID(), stackId, state: "running", current: null, reason: null };
       runs.set(state.id, state);

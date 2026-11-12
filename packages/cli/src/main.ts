@@ -1,7 +1,8 @@
 import { spawn, execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { awbHome, ensureDaemon, findDaemon, api, reportCliError } from "./home.ts";
-import { gitInfo, playbookPath, claudeArgs, awbSettings, repoRulesPath } from "./launch.ts";
+import { gitInfo, playbookPath, claudeArgs, awbSettings, repoRulesPath, isTeamRepo } from "./launch.ts";
 import { doctor } from "./doctor.ts";
 import { wtCmd } from "./wt.ts";
 import { logText, type LogLine } from "../../daemon/src/log.ts";
@@ -15,7 +16,7 @@ const flag = (name: string) => {
 
 console.error(`awb: AWB_HOME=${home}`);
 
-const COMMANDS = ["ui", "doctor", "daemon", "stack", "prove", "ship", "run", "retry", "show", "tasks", "cost", "logs", "task", "sessions", "wt"];
+const COMMANDS = ["ui", "doctor", "daemon", "repo", "stack", "prove", "ship", "run", "retry", "show", "tasks", "cost", "logs", "task", "sessions", "wt"];
 let lastError = "";
 const printError = console.error;
 console.error = (...args: unknown[]) => {
@@ -46,6 +47,9 @@ switch (cmd) {
     break;
   case "daemon":
     await daemonCmd(rest[0]);
+    break;
+  case "repo":
+    process.exitCode = await repoCmd(rest[0], rest.includes("--json"));
     break;
   case "stack":
     if (rest[0] !== "set") {
@@ -171,11 +175,48 @@ async function proveCmd(json: boolean, rewrite: string[]): Promise<number> {
     if (json) console.log(JSON.stringify(r, null, 2));
     else {
       console.log(r.table);
+      if (r.writer) console.log(writerLine(r.writer));
       for (const row of r.rows) if (row.status === "FAIL" && row.videos.length) console.log(`  ${row.id} video: ${row.videos[0]}\n  ${row.id} trace: ${row.traces[0]}`);
       console.log(`evidence: ${r.folder}`);
     }
     return r.pass ? 0 : 1;
   });
+}
+
+function writerLine(w: { end: string; usd: number | null; timeoutMin?: number }): string {
+  const cost = w.usd === null ? "cost unknown" : `${w.usd.toFixed(2)} USD`;
+  return `test writer: ${w.end}, ${cost}, limit ${w.timeoutMin ?? "?"} min`;
+}
+
+async function repoCmd(sub: string | undefined, json: boolean): Promise<number> {
+  if (sub !== "set" && sub !== "show") {
+    console.error("usage: awb repo set [--env-file <path>] < run.md | awb repo show [--json]");
+    return 2;
+  }
+  const git = here();
+  if (!git) return 1;
+  const d = await ensureDaemon(home);
+  try {
+    let r;
+    if (sub === "set") {
+      const envFile = flag("--env-file");
+      const text = readFileSync(0, "utf8");
+      r = await api(d, "/api/repo", { repo: git.repo, worktree: git.worktree, run_md: text, env_file: envFile ? resolve(envFile) : null });
+    } else r = await api(d, `/api/repo?${new URLSearchParams({ repo: git.repo, worktree: git.worktree })}`);
+    const team = isTeamRepo(git.repo);
+    if (json) return console.log(JSON.stringify({ ...r, team }, null, 2)), 0;
+    console.log(`repo: ${r.repo}${team ? " (team repo: do not add awb files to it; use awb repo set)" : ""}`);
+    console.log(`env file: ${r.env_file ?? "none"}`);
+    if (!r.run_file) {
+      console.log(`run file: none. Write ${team ? "one with awb repo set" : ".awb/run.md, or use awb repo set"}.`);
+      return 1;
+    }
+    console.log(`run file: ${r.run_file.source}${r.run_file.path ? ` (${r.run_file.path})` : ""}\n\n${r.run_file.text.trimEnd()}`);
+    return 0;
+  } catch (err) {
+    console.error(`awb: ${(err as Error).message}`);
+    return 1;
+  }
 }
 
 async function streamNdjson(path: string, body: object, onResult: (r: any) => number): Promise<number> {

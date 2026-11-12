@@ -5,7 +5,7 @@ import { createServer, type AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runGate, claimTable, junitReport, type Claim, type GateResult, type Report } from "./gate.ts";
-import { parseRunMd, parseTest, fill, fillTest, type RunMd } from "./run-md.ts";
+import { parseRunMd, parseTest, fill, fillTest, loadRunFile, type RunMd } from "./run-md.ts";
 import type { Task } from "./stacks.ts";
 
 const PKG = fileURLToPath(new URL("..", import.meta.url));
@@ -17,9 +17,10 @@ export type ProveDeps = {
   claude: string;
   writerTimeoutMin?: number;
   log: (line: string) => void;
+  savedRunMd?: string | null;
 };
 
-export type WriterEnd = { end: string; usd: number | null };
+export type WriterEnd = { end: string; usd: number | null; timeoutMin?: number };
 
 export function claimsMarkdown(task: Pick<Task, "title" | "claims">, url: string): string {
   return `# Claims: ${task.title}\n\nSite: ${url}\n\n${task.claims.map((c) => `- ${c.id}: ${c.text}`).join("\n")}\n`;
@@ -183,7 +184,7 @@ async function runClaude(cwd: string, args: string[], prompt: string, deps: Prov
   const timeoutMin = deps.writerTimeoutMin ?? 30;
   const r = await run(deps.claude, ["-p", ...args, "--output-format", "stream-json", "--verbose"], cwd, prompt, timeoutMin * 60_000);
   writeFileSync(logFile, r.out);
-  const w = writerEnd(r.out, r.timedOut, r.code, timeoutMin);
+  const w = { ...writerEnd(r.out, r.timedOut, r.code, timeoutMin), timeoutMin };
   writeFileSync(join(dirname(logFile), "writer-end.txt"), w.end + "\n");
   deps.log(`test writer: ${w.end}${w.usd === null ? "" : `, ${w.usd.toFixed(2)} USD`}`);
   return w;
@@ -299,9 +300,7 @@ export function gateFromDisk(claims: Claim[], folder: string, worktree: string):
 export type ProveResult = { gate: GateResult; table: string; folder: string; writer: WriterEnd | null };
 
 export async function prove(task: Task, worktree: string, deps: ProveDeps, rewrite: string[] = []): Promise<ProveResult> {
-  const runMdFile = join(worktree, ".awb", "run.md");
-  if (!existsSync(runMdFile)) throw new Error(`no run file: write ${runMdFile} with a '## start' or '## test' section`);
-  const runMdText = readFileSync(runMdFile, "utf8");
+  const runMdText = loadRunFile(worktree, deps.savedRunMd).text;
   const browserClaims = task.claims.filter((c) => c.proof !== "test");
   const testClaims = task.claims.filter((c) => c.proof === "test");
   const runMd = browserClaims.length ? parseRunMd(runMdText) : null;

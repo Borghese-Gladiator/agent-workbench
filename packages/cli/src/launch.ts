@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { HOOK_EVENTS } from "./hook-send.ts";
 
@@ -33,6 +34,16 @@ export function gitInfo(cwd: string) {
   const repo = common.endsWith("/.git") ? common.slice(0, -5) : worktree;
   const branch = git("rev-parse", "--abbrev-ref", "HEAD");
   return { repo, worktree, branch };
+}
+
+export function teamRoots(env = process.env): string[] {
+  const v = env.AWB_TEAM_ROOTS ?? join(homedir(), "Klaviyo", "Repos");
+  return v.split(":").filter(Boolean).map((r) => resolve(r.replace(/^~(?=\/|$)/, homedir())));
+}
+
+export function isTeamRepo(repo: string, env = process.env): boolean {
+  const r = resolve(repo);
+  return teamRoots(env).some((root) => r === root || r.startsWith(root + sep));
 }
 
 export function playbookPath(worktree: string): string {

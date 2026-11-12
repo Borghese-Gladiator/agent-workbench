@@ -9,18 +9,12 @@ The gate proves a claim in a browser, or with a repo test for logic that no page
 - [x] **Claims proven by repo tests.** A claim can say `"proof": "test"`. A separate writer session reads the worktree and writes an integration test in `.awb-proof/`. It cannot change the source: the daemon undoes a change and refuses. The gate runs the tests with `## test` in `.awb/run.md` and reads JUnit XML for each claim.
 - [ ] **Red on the base commit.** Run the test claims on the base commit too. A claim passes only if its test fails on the base and passes on the head. This refuses a test that passes on any code.
 - [ ] **Test claims carried forward in a stack.** Task N also runs the passing test claims of the tasks below it. A replan change must not break an earlier claim.
-- [ ] **A run file for a repo that cannot hold awb files.** A team repo (for example, every repo in `~/Klaviyo/Repos`) must not get `.awb/run.md`. Keep the file as the first choice, because it changes with the branch. If the worktree has no file, use a copy that the daemon keeps.
-  - Add a `run_md TEXT` column and an `env_file TEXT` column to `repos`.
-  - `awb repo set [--env-file <path>]` reads a run file on stdin, in the same format as `.awb/run.md`, and saves it for the current repo. `awb repo show` prints the run file that a run uses, and its source (`file` or `daemon`).
-  - One function reads the run file: the worktree file first, then `repos.run_md`. `prove.ts`, `ship.ts` and `runner.ts` call it, and do not read `.awb/run.md` themselves.
-  - When the runner makes a worktree, it copies `env_file` into it before `## setup`. The file stays outside the repo, so its secrets are not committed.
-  - Playbook step 4: if the repo is not yours, run `awb repo set`. Do not write `.awb/run.md`. To find out, check if the repo root is in `AWB_TEAM_ROOTS` (default `~/Klaviyo/Repos`).
-  - Done when `awb prove` and `awb run` work in a team repo, and `git status` in it shows no awb file.
-- [ ] **Run awb on awb.** Add `.awb/run.md` to this repo: `## setup` runs `npm ci`, `## test` runs `npm test`, and `## start` starts a daemon with its own `AWB_HOME` on `{port}`, so that the UI claims also work. Then do each item below as an awb task in this repo. Each task gets its own worktree, so a change cannot break the daemon that runs it.
-- [ ] **Concurrent stacks.** The runner runs one stack at a time. Allow N stacks (default 2) in parallel, and never more than 5 (the v5 lesson: 10 at a time overloaded the host).
-- [ ] **Linux.** `cp -c` in the setup recipes and the `open` call are macOS only.
-- [ ] **An install.** Publish `awb` as an npm package with a `bin`, so that a user does not need an alias to a clone.
-- [ ] **A test-writer report.** Show the writer's cost, turns and time limit in `awb prove` output, so that a missing test has a clear cause.
+- [x] **A run file for a repo that cannot hold awb files.** `awb repo set [--env-file <path>]` saves a run file in the daemon (`repos.run_md`, `repos.env_file`), and `awb repo show` prints the file that a run uses and its source. `readRunFile` reads the worktree file first, then the daemon copy. The runner copies the env file into each new worktree before `## setup`. A repo under `AWB_TEAM_ROOTS` (default `~/Klaviyo/Repos`) shows as a team repo. Not yet proven with `awb run` in a real team repo.
+- [ ] **Run awb on awb.** (`.awb/run.md` exists. Not yet proven with a real task.) Add `.awb/run.md` to this repo: `## setup` runs `npm ci`, `## test` runs `npm test`, and `## start` starts a daemon with its own `AWB_HOME` on `{port}`, so that the UI claims also work. Then do each item below as an awb task in this repo. Each task gets its own worktree, so a change cannot break the daemon that runs it.
+- [x] **Concurrent stacks.** `AWB_MAX_STACKS` (default 2, never more than 5, the v5 lesson) sets how many stacks run in parallel. A new stack is refused when the limit is full.
+- [x] **Linux.** `acceptance.sh` falls back to `cp -R`, and `awb ui` uses `xdg-open`.
+- [x] **An install.** `npm install -g .` from the clone links `awb` onto the PATH. A package on the npm registry cannot run, because Node does not strip types under `node_modules`; that needs a build step.
+- [x] **A test-writer report.** `awb prove` prints how the writer ended (with its turns), its cost and its time limit.
 
 ## 2. Web UI
 

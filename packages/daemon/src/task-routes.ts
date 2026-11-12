@@ -5,6 +5,7 @@ import { extname, join, sep } from "node:path";
 import { parseSince, StackError, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
 import { LEVELS, logText, readLog, type Level, type Log, type LogFilter } from "./log.ts";
 import { prove, run, type ProveDeps } from "./prove.ts";
+import { readRunFile } from "./run-md.ts";
 import { costReport, costText } from "./cost.ts";
 import type { DatabaseSync } from "node:sqlite";
 import { ship, ShipRefused, syncStatus } from "./ship.ts";
@@ -150,7 +151,8 @@ export function taskRoutes(
       log("info", "prove", "start", { ...ids, rewrite: rewrite.length ? rewrite : undefined });
       let after: TaskStatus = before === "failed" ? "failed" : "waiting";
       try {
-        const r = await prove(t, b.worktree, { ...proveDeps, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite);
+        const savedRunMd = stacks.repoConfig(stacks.get(t.stack_id)!.repo).run_md;
+        const r = await prove(t, b.worktree, { ...proveDeps, savedRunMd, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite);
         stacks.saveGate(attempt, r.gate);
         if (r.writer?.usd != null) stacks.setWriterCost(attempt, r.writer.usd);
         const failed = r.gate.rows.filter((x) => x.status === "FAIL").map((x) => `${x.id}: ${x.reasons.join(", ")}`);
@@ -181,7 +183,8 @@ export function taskRoutes(
       const line = (o: Json) => res.write(JSON.stringify(o) + "\n");
       try {
         log("info", "ship", "start", { task: t.id, branch: t.branch });
-        const r = await ship(t, b.worktree, (msg) => (line({ log: msg }), log("info", "ship", "step", { task: t.id, msg })));
+        const savedRunMd = stacks.repoConfig(stacks.get(t.stack_id)!.repo).run_md;
+        const r = await ship(t, b.worktree, (msg) => (line({ log: msg }), log("info", "ship", "step", { task: t.id, msg })), savedRunMd);
         stacks.setPr(t.id, r.number, r.url);
         log("info", "ship", "pr", { task: t.id, pr: r.number, url: r.url });
         line({ result: { url: r.url, number: r.number, table: r.table, taskId: t.id } });
@@ -199,7 +202,11 @@ export function taskRoutes(
       const b = await body();
       const stack = b.stackId ? stacks.get(b.stackId) : stacks.newestStack(b.repo ?? "");
       if (!stack) return send(404, { error: "no stack for this repo; run awb stack set first" }), true;
-      return send(202, runner.start(stack.id)), true;
+      try {
+        return send(202, runner.start(stack.id)), true;
+      } catch (err) {
+        return fail(err), true;
+      }
     }
 
     if (req.method === "GET" && url.pathname === "/api/logs") {
@@ -251,6 +258,22 @@ export function taskRoutes(
       } catch (err) {
         return fail(err), true;
       }
+    }
+
+    if (url.pathname === "/api/repo") {
+      const b = req.method === "POST" ? await body() : null;
+      const root = b ? b.repo : url.searchParams.get("repo");
+      const worktree = b ? b.worktree : url.searchParams.get("worktree");
+      if (typeof root !== "string" || !root) return send(400, { error: "missing repo" }), true;
+      if (b) {
+        if (typeof b.run_md !== "string" || !b.run_md.trim()) return send(400, { error: "run_md must be the text of a run file" }), true;
+        if (b.env_file != null && (typeof b.env_file !== "string" || !b.env_file.startsWith("/"))) return send(400, { error: "env_file must be an absolute path" }), true;
+        stacks.setRepoConfig(root, { run_md: b.run_md, env_file: b.env_file ?? null });
+        log("info", "repo", "set", { repo: root, env_file: b.env_file ?? undefined });
+      }
+      const config = stacks.repoConfig(root);
+      const file = readRunFile(typeof worktree === "string" && worktree ? worktree : root, config.run_md);
+      return send(200, { repo: root, ...config, run_file: file }), true;
     }
 
     if (req.method === "GET" && url.pathname === "/api/session-tasks") {
@@ -327,8 +350,14 @@ export function taskRoutes(
       }
       if (!t) return send(404, { error: `no task ${b.taskId}` }), true;
       if (t.status !== "failed") return send(409, { error: `task ${t.id} is ${t.status}; only a failed task can be retried` }), true;
+      const reason = t.fail_reason ?? "";
       stacks.retry(t.id);
-      return send(202, runner.start(t.stack_id)), true;
+      try {
+        return send(202, runner.start(t.stack_id)), true;
+      } catch (err) {
+        stacks.fail(t.id, reason);
+        return fail(err), true;
+      }
     }
 
     if (req.method === "POST" && url.pathname === "/api/sync") {

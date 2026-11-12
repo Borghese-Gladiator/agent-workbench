@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpat
 import { join } from "node:path";
 import { claimTable, type Claim, type GateResult } from "./gate.ts";
 import { gateFromDisk, run, testFileClaim } from "./prove.ts";
-import { parseRunMd, parseTest } from "./run-md.ts";
+import { loadRunFile, parseRunMd, parseTest } from "./run-md.ts";
 import { SECRETS } from "./log.ts";
 import type { Task, TaskStatus } from "./stacks.ts";
 
@@ -122,7 +122,7 @@ async function uploadVideos(worktree: string, folder: string, pr: number, gate: 
 
 export type ShipResult = { url: string; number: number; gate: GateResult; table: string };
 
-export async function ship(task: Task, worktree: string, log: (l: string) => void): Promise<ShipResult> {
+export async function ship(task: Task, worktree: string, log: (l: string) => void, savedRunMd?: string | null): Promise<ShipResult> {
   if (!task.branch || !task.base) throw new ShipRefused(`task ${task.id} has no branch or base`);
   if (!existsSync(task.folder)) throw new ShipRefused("no proof yet: run awb prove first");
   const folder = realpathSync(task.folder);
@@ -137,7 +137,7 @@ export async function ship(task: Task, worktree: string, log: (l: string) => voi
     .filter((f) => (/\.spec\.(ts|js)$/.test(f) && f !== "seed.spec.ts") || testFileClaim(f))
     .sort()
     .map((name) => ({ name, text: readFileSync(join(tests, name), "utf8") }));
-  const runMdText = readFileSync(join(worktree, ".awb", "run.md"), "utf8");
+  const runMdText = loadRunFile(worktree, savedRunMd).text;
   const hasBrowser = task.claims.some((c) => c.proof !== "test");
   const hasTest = task.claims.some((c) => c.proof === "test");
   const runMd = hasBrowser ? parseRunMd(runMdText) : null;

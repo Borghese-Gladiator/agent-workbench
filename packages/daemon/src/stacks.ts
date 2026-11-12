@@ -33,6 +33,8 @@ export function parseSince(v: string, now = Date.now()): string {
 
 export type RunState = { id: string; stackId: string; state: "running" | "done" | "stopped"; current: string | null; reason: string | null };
 
+export type RepoConfig = { run_md: string | null; env_file: string | null };
+
 export type Stack = { id: string; repo: string; base: string | null; version: number; created_at: string; tasks: Task[] };
 
 export type TaskInput = { id?: string; title: string; claims: Claim[] };
@@ -92,6 +94,9 @@ export function migrateStacks(db: DatabaseSync) {
   if (!cols.includes("fail_reason")) db.exec("ALTER TABLE tasks ADD COLUMN fail_reason TEXT;");
   const attemptCols = (db.prepare("PRAGMA table_info(attempts)").all() as { name: string }[]).map((c) => c.name);
   if (!attemptCols.includes("writer_usd")) db.exec("ALTER TABLE attempts ADD COLUMN writer_usd REAL;");
+  db.exec("CREATE TABLE IF NOT EXISTS repos (root TEXT PRIMARY KEY, first_seen TEXT NOT NULL)");
+  const repoCols = (db.prepare("PRAGMA table_info(repos)").all() as { name: string }[]).map((c) => c.name);
+  if (!repoCols.includes("run_md")) db.exec("ALTER TABLE repos ADD COLUMN run_md TEXT; ALTER TABLE repos ADD COLUMN env_file TEXT;");
   db.exec(`
     CREATE TABLE IF NOT EXISTS runs (
       id TEXT PRIMARY KEY,
@@ -177,6 +182,11 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     ),
     getRun: db.prepare("SELECT id, stack_id AS stackId, state, current, reason FROM runs WHERE id = ?"),
     stopRuns: db.prepare("UPDATE runs SET state = 'stopped', reason = ?, ended_at = ? WHERE state = 'running'"),
+    getRepo: db.prepare("SELECT run_md, env_file FROM repos WHERE root = ?"),
+    setRepo: db.prepare(
+      `INSERT INTO repos (root, first_seen, run_md, env_file) VALUES (?, ?, ?, ?)
+       ON CONFLICT(root) DO UPDATE SET run_md = excluded.run_md, env_file = excluded.env_file`,
+    ),
     doingTasks: db.prepare("SELECT * FROM tasks WHERE status = 'doing'"),
     openSessionPids: db.prepare(
       `SELECT DISTINCT s.pid FROM attempts a JOIN sessions s ON s.id = a.session_id
@@ -374,6 +384,13 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
       const tasks = doing.filter((t) => !alive.includes(t));
       for (const t of tasks) q.setFail.run("the daemon restarted while the task ran", t.id);
       return { runs, tasks: tasks.map((t) => t.id), alive: alive.map((t) => t.id) };
+    },
+    repoConfig(root: string): RepoConfig {
+      const r = q.getRepo.get(root) as RepoConfig | undefined;
+      return { run_md: r?.run_md ?? null, env_file: r?.env_file ?? null };
+    },
+    setRepoConfig(root: string, c: RepoConfig) {
+      q.setRepo.run(root, new Date().toISOString(), c.run_md, c.env_file);
     },
     saveGate(attemptId: string, g: GateResult) {
       q.addGate.run(attemptId, g.head, g.pass ? 1 : 0, JSON.stringify(g), new Date().toISOString());

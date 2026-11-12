@@ -4,6 +4,7 @@
   "type": "module",
   "workspaces": ["packages/*"],
   "engines": { "node": ">=24" },
+  "bin": { "awb": "packages/cli/bin/awb" },
   "scripts": {
     "test": "node --test --disable-warning=ExperimentalWarning 'packages/*/test/*.test.ts'",
     "typecheck": "tsc --noEmit"

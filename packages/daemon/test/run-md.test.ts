@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseSetup, parseRunMd, parseTest, fillTest, fill } from "../src/run-md.ts";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { parseSetup, parseRunMd, parseTest, fillTest, fill, readRunFile, loadRunFile } from "../src/run-md.ts";
 
 const vite = `# Run
 
@@ -56,3 +59,13 @@ for (const [name, text] of [
 ]) {
   test(`parseTest refuses ${name}`, () => assert.throws(() => parseTest(text)));
 }
+
+test("readRunFile takes the worktree file first, then the daemon copy", () => {
+  const wt = mkdtempSync(join(tmpdir(), "awb-runfile-"));
+  assert.equal(readRunFile(wt, null), null);
+  assert.throws(() => loadRunFile(wt, null), /awb repo set/);
+  assert.deepEqual(readRunFile(wt, "## test\n"), { text: "## test\n", source: "daemon" });
+  mkdirSync(join(wt, ".awb"));
+  writeFileSync(join(wt, ".awb", "run.md"), "## start\nurl: http://x\n");
+  assert.equal(readRunFile(wt, "## test\n")!.source, "file");
+});
