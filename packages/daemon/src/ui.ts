@@ -199,7 +199,7 @@ async function proof(id) {
     (g ? " · gate <span class='" + (g.pass ? "PASS" : "FAIL") + "'>" + (g.pass ? "PASS" : "FAIL") + "</span> at <span class='mono'>" + esc(g.commit_sha.slice(0, 10)) + "</span>" : " · no gate run") +
     " · cost " + t.cost_usd.toFixed(2) + " USD · " + t.attempts.length + " attempt(s)" +
     (t.fail_reason ? "<p class='FAIL'>" + esc(t.fail_reason) + "</p>" : "") +
-    (t.writer_end ? "<p><span class='muted'>test writer ended:</span> <span class='FAIL'>" + esc(t.writer_end) + "</span></p>" : "") + "</div>" +
+    (t.writer_end ? "<p><span class='muted'>test writer ended:</span> <span class='" + (t.writer_end.startsWith("success") ? "PASS" : "FAIL") + "'>" + esc(t.writer_end) + "</span></p>" : "") + "</div>" +
     actions(t) +
     "<div class='claims'>" + claimCards + "</div>" +
     "<details" + (t.status === "failed" ? " open" : "") + "><summary>Logs (" + t.log.length + " lines)</summary><pre>" + (t.log.length ? t.log.map(logLine).join("\\n") : "<span class='muted'>no log lines for this task</span>") + "</pre>" +

@@ -6,4 +6,5 @@
 - `packages/daemon`: one local process with SQLite, the gate, the stack runner and the web UI.
 - `docs/architecture.md`: the diagrams. `docs/TODO.md`: the work to an MVP.
 - `e2e/acceptance.sh`: the end-to-end test with the real `claude` and GitHub.
+- `e2e/ui.sh`: the end-to-end test of the web UI, with a stub `claude` and `gh`.
 - `archive/`: v1 to v5, and the v6 build notes.

@@ -50,5 +50,6 @@ To test:
 npm test
 npm run typecheck
 bash e2e/wt.sh                           # awb wt with real git worktrees and the picker in a pty (no cost)
+bash e2e/ui.sh                           # the web UI in a browser: a real stack run with a stub claude and gh (no cost, about 1 min)
 WORK=<dir> bash e2e/acceptance.sh setup   # then single, bug, stack, ask (real claude and GitHub, about 6 USD)
 ```
