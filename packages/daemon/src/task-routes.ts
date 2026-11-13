@@ -59,6 +59,8 @@ export function costOf(transcript: string): number {
   return cost;
 }
 
+export const toolCallsOf = (transcript: string) => readFileSync(transcript, "utf8").match(/"type":\s*"tool_use"/g)?.length ?? 0;
+
 type Json = Record<string, any>;
 
 export function taskRoutes(
@@ -99,7 +101,9 @@ export function taskRoutes(
     const specs = existsSync(tests)
       ? readdirSync(tests).filter((f) => /\.spec\.(ts|js)$/.test(f) && f !== "seed.spec.ts").sort().map((name) => ({ name, text: readFileSync(join(tests, name), "utf8") }))
       : [];
-    const sessionUsd = transcripts.filter((f) => !f.endsWith("writer.jsonl")).reduce((n, f) => n + costOf(f), 0);
+    const sessionFiles = transcripts.filter((f) => !f.endsWith("writer.jsonl"));
+    const sessionUsd = sessionFiles.reduce((n, f) => n + costOf(f), 0);
+    const tool_calls = sessionFiles.reduce((n, f) => n + toolCallsOf(f), 0);
     const saved = attempts.map((a: any) => a.writer_usd).filter((v: unknown): v is number => typeof v === "number");
     const writerUsd = saved.length ? saved.reduce((n: number, v: number) => n + v, 0) : transcripts.filter((f) => f.endsWith("writer.jsonl")).reduce((n, f) => n + costOf(f), 0);
     const lines = logDir ? readLog(logDir, { task: t.id, limit: 200 }) : [];
@@ -111,7 +115,7 @@ export function taskRoutes(
       | { worktree: string }
       | undefined;
     const worktree = own && existsSync(own) ? own : (last?.worktree ?? null);
-    return { ...t, stack: stacks.get(t.stack_id), attempts, transcripts, specs, log: lines, writer_end, worktree, cost_usd: sessionUsd + writerUsd, writer_usd: writerUsd };
+    return { ...t, stack: stacks.get(t.stack_id), attempts, transcripts, specs, log: lines, writer_end, worktree, tool_calls, cost_usd: sessionUsd + writerUsd, writer_usd: writerUsd };
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse, url: URL, body: () => Promise<Json>): Promise<boolean> {

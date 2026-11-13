@@ -53,9 +53,13 @@ test("costOf takes the last running total, not the sum of the result rows", asyn
   assert.equal(costOf(f), 1.5);
 });
 
-test("the page script parses", async () => {
-  const { page } = await import("../src/ui.ts");
-  const html = page("/home");
-  const script = html.slice(html.indexOf("<script>") + 8, html.lastIndexOf("</script>"));
-  assert.doesNotThrow(() => new Function(script));
+test("uiAsset serves UI modules as plain JavaScript and refuses paths outside the UI folder", async () => {
+  const { uiAsset } = await import("../src/server.ts");
+  const app = uiAsset("app.ts")!;
+  assert.match(app.type, /^text\/javascript/);
+  assert.doesNotMatch(app.body, /: Data\b|as Json|<string>/);
+  assert.equal(uiAsset("vendor/htm-preact.js")?.type, "text/javascript; charset=utf-8");
+  for (const bad of ["../src/store.ts", "..%2Fsrc%2Fstore.ts", "/etc/passwd.ts", "vendor/../../src/store.ts", "nope.ts", "index.html"]) {
+    assert.equal(uiAsset(bad), null, bad);
+  }
 });

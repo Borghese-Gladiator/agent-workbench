@@ -2,8 +2,21 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { randomUUID } from "node:crypto";
 import type { Store } from "./store.ts";
 import { tokenTotals } from "./usage.ts";
-import { page } from "./ui.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { stripTypeScriptTypes } from "node:module";
+import { join } from "node:path";
 import type { Log } from "./log.ts";
+
+const UI = join(import.meta.dirname, "..", "ui");
+const UI_TYPES: Record<string, string> = { ts: "text/javascript", js: "text/javascript", css: "text/css" };
+
+export function uiAsset(name: string) {
+  const m = name.match(/^(?:[\w-]+\/)*[\w-]+\.(ts|js|css)$/);
+  const f = m && join(UI, name);
+  if (!f || !existsSync(f)) return null;
+  const src = readFileSync(f, "utf8");
+  return { type: UI_TYPES[m[1]] + "; charset=utf-8", body: m[1] === "ts" ? stripTypeScriptTypes(src) : src };
+}
 
 type Info = { home: string; startedAt: string; log?: Log };
 type Extra = (req: IncomingMessage, res: ServerResponse, url: URL, body: () => Promise<Record<string, any>>) => Promise<boolean>;
@@ -98,7 +111,14 @@ async function route(
   }
   if (req.method === "GET" && url.pathname === "/") {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    return res.end(page(info.home));
+    return res.end(readFileSync(join(UI, "index.html")));
+  }
+  if (req.method === "GET" && url.pathname.startsWith("/ui/")) {
+    const asset = uiAsset(url.pathname.slice(4));
+    if (asset) {
+      res.writeHead(200, { "content-type": asset.type, "cache-control": "no-cache" });
+      return res.end(asset.body);
+    }
   }
   send(res, 404, { error: "not found" });
 }
