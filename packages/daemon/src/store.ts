@@ -30,6 +30,7 @@ export type FeedRow = Session & {
   last_hook: string | null;
   last_tool: string | null;
   last_event_at: string | null;
+  current_op: { tool: string; detail: string } | null;
   usage: Usage | null;
 };
 
@@ -108,6 +109,15 @@ export function openStore(file: string, opts: { quietMs?: number; isAlive?: (pid
   const lastTool = db.prepare(
     "SELECT tool_name FROM events WHERE session_id = ? AND tool_name IS NOT NULL ORDER BY id DESC LIMIT 1",
   );
+  const lastPre = db.prepare(
+    "SELECT tool_name, payload FROM events WHERE session_id = ? AND hook = 'PreToolUse' ORDER BY id DESC LIMIT 1",
+  );
+  const currentOp = (id: string) => {
+    const e = lastPre.get(id) as { tool_name: string | null; payload: string } | undefined;
+    if (!e) return null;
+    const i = JSON.parse(e.payload).tool_input ?? {};
+    return { tool: e.tool_name ?? "", detail: String(i.command ?? i.file_path ?? i.path ?? i.pattern ?? "") };
+  };
   const setUsage = db.prepare(
     `INSERT INTO session_usage (session_id, input, output, cache_read, cache_creation, cost_usd, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -136,6 +146,7 @@ export function openStore(file: string, opts: { quietMs?: number; isAlive?: (pid
       last_hook: last?.hook ?? null,
       last_tool: (lastTool.get(s.id) as { tool_name: string } | undefined)?.tool_name ?? null,
       last_event_at: last?.at ?? null,
+      current_op: currentOp(s.id),
       usage: usage ? { ...usage } : null,
     };
   };
