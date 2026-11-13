@@ -34,3 +34,5 @@ button{font:inherit;padding:5px 12px;border-radius:6px;border:1px solid var(--bo
 .add{color:var(--pass)}.del{color:var(--fail)}h2{font-size:17px;margin:4px 0 12px}h3{font-size:14px;margin:0 0 8px}
 .head{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.head h2{margin:4px 0}
 .banner{border-color:var(--fail)}.stats{display:flex;gap:32px;flex-wrap:wrap}.stats div{display:flex;flex-direction:column}
+.warnbox{border-color:var(--warn)}.warnbox b{color:var(--warn)}.filters{margin:0 0 12px}button[aria-pressed=true]{background:var(--accent);color:#fff}
+.panes{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}.panes pre{margin:0}
