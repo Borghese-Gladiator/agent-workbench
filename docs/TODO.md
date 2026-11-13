@@ -8,6 +8,10 @@ The gate proves a claim in a browser, or with a repo test for logic that no page
 
 - [ ] **Red on the base commit.** Run the test claims on the base commit too. A claim passes only if its test fails on the base and passes on the head. This refuses a test that passes on any code.
 - [ ] **Test claims carried forward in a stack.** Task N also runs the passing test claims of the tasks below it. A replan change must not break an earlier claim.
+- [ ] **Seed data for the proof app.** The app starts with an empty `AWB_HOME`, so the writer's sub-agents build state through the UI. That cost 13.15 USD and 7.88 USD in the UI stack. Add a `## seed` run-file section that makes a fixture once and caches it in `$AWB_HOME/repos/<repo>.seed/`, keyed by a hash of the seed script and the schema. If the cache exists, do nothing. Each proof copies the cache into its fresh temp home, so tests cannot change the shared seed. The writer prompt says which seed data exists. For awb itself: a stack with a done task, a failed task with gate rows, and a session with tool events.
+- [ ] **Writer rerun for claims with no test.** In the same `awb prove`, if a claim has no test after the writer ends, run the writer once more for only those claims, then run the gate. In the UI stack, the writer ended "success, 0 turns" with C3 untested.
+- [ ] **Configurable retries.** A transient API error (connection refused, overloaded, 5xx) stops the stack today. The runner resumes the session with `claude --resume` up to N times. Set N with `awb run --retries N` and `awb retry <id> --retries N`, default 1.
+- [ ] **Stop a stack or a task.** `awb stop <stack id>` stops the run and every task in it. `awb stop <task id>` stops one task, in a stack or alone; the later tasks of its stack stay `waiting`. Kill only the process group of that session and its writer. Today the only way is to kill process groups by hand, and two stacks can share one group.
 
 ## 2. Web UI
 
