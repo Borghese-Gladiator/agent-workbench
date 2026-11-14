@@ -1,0 +1,2 @@
+# Shell scripts must keep LF: a CRLF shebang line breaks them on Linux and macOS.
+packages/cli/bin/* text eol=lf
