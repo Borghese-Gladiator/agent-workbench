@@ -7,9 +7,9 @@ import { Prs } from "./prs.ts";
 import { TaskView } from "./task.ts";
 
 const NAV = [
-  ["live", "#/", "Live"],
-  ["stacks", "#/stacks", "Stacks"],
-  ["prs", "#/prs", "PRs"],
+  ["live", "#/", "Live", "M22 12h-4l-3 9L9 3l-3 9H2"],
+  ["stacks", "#/stacks", "Stacks", "M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"],
+  ["prs", "#/prs", "PRs", "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9"],
 ];
 
 function App() {
@@ -19,6 +19,13 @@ function App() {
   const [today, setToday] = useState<number | null>(null);
   const [stackCount, setStackCount] = useState<number | null>(null);
   const [menu, setMenu] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("awb.sidebar") === "collapsed"; } catch { return false; }
+  });
+  const toggleSidebar = () => {
+    setCollapsed(!collapsed);
+    try { localStorage.setItem("awb.sidebar", collapsed ? "open" : "collapsed"); } catch {}
+  };
   const [sessions, setSessions] = useState(new Map<string, Session>());
   const [d, setD] = useState({ tasks: [] as Json[], bySession: {} as Record<string, string>, runs: [] as Json[], taskUsd: {} as Record<string, number> });
 
@@ -69,12 +76,18 @@ function App() {
   const current = view === "session" ? "live" : view === "task" ? "stacks" : view;
   const count: Record<string, number | null> = { stacks: stackCount, prs: d.tasks.filter((t) => t.pr_number && t.status === "done").length };
   return html`<button class="plain menu" aria-expanded=${menu} aria-controls="sidebar" onClick=${() => setMenu(!menu)}>Menu</button>
-    <aside id="sidebar" class=${menu ? "open" : ""}>
-      <b>awb</b>
+    <aside id="sidebar" class=${[menu && "open", collapsed && "collapsed"].filter(Boolean).join(" ")}>
+      <div class="head">
+        <b>awb</b>
+        <button class="plain collapse" aria-label=${collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded=${!collapsed} aria-controls="sidebar" title=${collapsed ? "Expand sidebar" : "Collapse sidebar"} onClick=${toggleSidebar}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></svg>
+        </button>
+      </div>
       <nav>
         ${NAV.map(
-          ([k, href, label]) => html`<a href=${href} aria-current=${current === k ? "page" : undefined}>
-            <span>${label}</span>${count[k] == null ? null : html`<span class="count">${count[k]}</span>`}
+          ([k, href, label, icon]) => html`<a href=${href} aria-current=${current === k ? "page" : undefined} title=${label}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d=${icon} /></svg>
+            <span class="label">${label}</span>${count[k] == null ? null : html`<span class="count">${count[k]}</span>`}
           </a>`,
         )}
       </nav>
