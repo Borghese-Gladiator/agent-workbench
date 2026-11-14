@@ -10,6 +10,10 @@ export const SKILLS_DIR = fileURLToPath(new URL("../skills", import.meta.url));
 export const HOOK_SCRIPT = fileURLToPath(new URL("./hook-send.ts", import.meta.url));
 export const PLUGIN_DIR = fileURLToPath(new URL("../plugin", import.meta.url));
 
+// Claude Code permission rules match POSIX-style paths. On Windows "C:\Users\me" is written "/c/Users/me".
+export const toRulePath = (p: string, platform: string = process.platform) =>
+  platform === "win32" ? p.replaceAll("\\", "/").replace(/^([A-Za-z]):/, (_, d: string) => `/${d.toLowerCase()}`) : p;
+
 export const hookCommand = (node = process.execPath, script = HOOK_SCRIPT) => [node, "--disable-warning=ExperimentalWarning", script].map(quote).join(" ");
 
 export function awbSettings(home: string, command = hookCommand()) {
@@ -19,7 +23,7 @@ export function awbSettings(home: string, command = hookCommand()) {
     permissions: {
       additionalDirectories: [join(home, "repos")],
       deny: [
-        ...["awb.db*", "daemon.json", "tasks/**"].map((p) => `Edit(/${home}/${p})`),
+        ...["awb.db*", "daemon.json", "tasks/**"].map((p) => `Edit(/${toRulePath(home)}/${p})`),
       ],
     },
     hooks: Object.fromEntries(
