@@ -59,6 +59,26 @@ for (const [name, env] of [
   });
 }
 
+for (const [command, blocked] of [
+  ["gh pr create --title x --body-file b.md", true],
+  ["cd /r && gh pr create -t x", true],
+  ["gh pr create --draft --title x", false],
+  ["gh pr create -d -t x", false],
+  ["gh pr create --title x --draft", false],
+  ["gh pr create -t x && echo --draft", true],
+  ["gh pr view 12", false],
+  ['grep -rn "gh pr create" docs', false],
+  ["git push origin feat", false],
+] as const) {
+  test(`the hook ${blocked ? "blocks" : "allows"} ${JSON.stringify(command)}`, () => {
+    const input = JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } });
+    const r = spawnSync(HOOK_BIN, { input, env: { PATH: process.env.PATH, AWB_HOME: newHome() }, encoding: "utf8" });
+    assert.equal(r.status, blocked ? 2 : 0);
+    assert.equal(r.stdout, "");
+    if (blocked) assert.match(r.stderr, /draft/);
+  });
+}
+
 test("sendHook returns false when daemon.json names a port with no listener", async () => {
   const dead = newHome();
   const probe = createServer();

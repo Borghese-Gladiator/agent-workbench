@@ -13,6 +13,25 @@ export function eventBody(raw: string, awbSessionId: string) {
   return { awb_session_id: awbSessionId, payload };
 }
 
+export function blockReason(raw: string): string | null {
+  let p: any;
+  try {
+    p = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (p?.hook_event_name !== "PreToolUse" || p?.tool_name !== "Bash") return null;
+  const cmd = String(p?.tool_input?.command ?? "");
+  for (const segment of cmd.split(/&&|\|\||[;|\n]/)) {
+    const s = segment.trim();
+    if (!/^gh\s+pr\s+create\b/.test(s)) continue;
+    if (!/(^|\s)(--draft|-d)(?=\s|=|$)/.test(s)) {
+      return "awb: open a PR only as a draft. Add --draft to gh pr create.";
+    }
+  }
+  return null;
+}
+
 export async function sendHook(raw: string, env: NodeJS.ProcessEnv, timeoutMs = 1000): Promise<boolean> {
   try {
     const home = env.AWB_HOME;
@@ -37,5 +56,10 @@ if (import.meta.main) {
     raw = readFileSync(0, "utf8");
   } catch {}
   await sendHook(raw, process.env);
+  const reason = blockReason(raw);
+  if (reason) {
+    process.stderr.write(reason + "\n");
+    process.exit(2);
+  }
   process.exit(0);
 }

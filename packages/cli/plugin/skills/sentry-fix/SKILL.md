@@ -159,7 +159,7 @@ Find each ticket that the PR body links (for example `Fixes https://linear.app/k
 
 Give the user: the result (fixed, skipped or not reproduced), the branch, the two commit SHAs, the proof file path, and the before and after output in short form.
 
-`awb ship` proves only browser claims today, so it cannot ship this branch, and `gh pr create` is denied in an `awb` session. If the user asks for a PR, push the branch and open a draft PR with `gh pr create --draft` outside `awb`, with the PR body from the proof file. Then do step 11. Never open a PR that is not a draft, never run `gh pr ready`, and never request reviewers.
+`awb ship` proves only browser claims today, so it cannot ship this branch. If the user asks for a PR, push the branch and open a draft PR with `gh pr create --draft`, with the PR body from the proof file. The `awb` hook blocks `gh pr create` without `--draft`. Then do step 11. Never open a PR that is not a draft, never run `gh pr ready`, and never request reviewers.
 
 For an error in fender with a browser path, the fix also needs a browser claim. Follow the playbook feature flow: write a claim for the correct behavior, then run `awb prove` and `awb ship`.
 
