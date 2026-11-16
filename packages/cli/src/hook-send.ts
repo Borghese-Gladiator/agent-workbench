@@ -21,11 +21,13 @@ export function blockReason(raw: string): string | null {
     return null;
   }
   if (p?.hook_event_name !== "PreToolUse" || p?.tool_name !== "Bash") return null;
-  const cmd = String(p?.tool_input?.command ?? "");
-  for (const segment of cmd.split(/&&|\|\||[;|\n]/)) {
-    const s = segment.trim();
-    if (!/^gh\s+pr\s+create\b/.test(s)) continue;
-    if (!/(^|\s)(--draft|-d)(?=\s|=|$)/.test(s)) {
+  const cmd = String(p?.tool_input?.command ?? "").replace(/'[^']*'|"[^"]*"/g, '""');
+  for (const s of cmd.split(/&&|\|\||[;|\n&()`]|\$\(/)) {
+    if (/(^|\s)gh\s+pr\s+ready\b/.test(s) && !/(^|\s)--undo(?=\s|$)/.test(s)) {
+      return "awb: only the user moves a PR out of draft. Do not run gh pr ready.";
+    }
+    if (!/(^|\s)gh\s+pr\s+create\b/.test(s)) continue;
+    if (!/(^|\s)(--draft|-d|--draft=true)(?=\s|$)/.test(s)) {
       return "awb: open a PR only as a draft. Add --draft to gh pr create.";
     }
   }

@@ -69,6 +69,14 @@ for (const [command, blocked] of [
   ["gh pr view 12", false],
   ['grep -rn "gh pr create" docs', false],
   ["git push origin feat", false],
+  ["gh pr create --draft=false -t x", true],
+  ["gh pr create --draft=true -t x", false],
+  ["env A=1 gh pr create -t x", true],
+  ["(gh pr create -t x)", true],
+  ["echo $(gh pr create -t x)", true],
+  ['gh pr create -t "x --draft"', true],
+  ["gh pr ready 12", true],
+  ["gh pr ready 12 --undo", false],
 ] as const) {
   test(`the hook ${blocked ? "blocks" : "allows"} ${JSON.stringify(command)}`, () => {
     const input = JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } });
