@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gateFromDisk, prove, writerLimit } from "../src/prove.ts";
+import { gateFromDisk, prove, seedCache, seedCopy, writerLimit } from "../src/prove.ts";
 import type { Task } from "../src/stacks.ts";
 
 delete process.env.NODE_TEST_CONTEXT;
@@ -146,4 +146,39 @@ test("prove: a carried claim of the task below fails when the new code breaks it
   assert.equal(r2.gate.pass, false);
   assert.deepEqual(r2.gate.rows.map((r) => [r.id, r.status]), [["T1/C1", "FAIL"]]);
   assert.deepEqual(gateFromDisk(task2.claims, task2.folder, below.repo).rows.map((r) => r.id), ["T1/C1"]);
+});
+
+test("seed: the cache is built once, a key file change builds it again, and each proof gets a copy", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "awb-seed-test-")));
+  const repo = join(root, "repo");
+  const dir = join(root, "home", "repos", "repo.seed");
+  mkdirSync(repo);
+  writeFileSync(join(repo, "schema.sql"), "v1");
+  writeFileSync(join(repo, "seed.sh"), `echo run >> ${join(root, "runs")}\necho data > "$1/data.txt"\n`);
+  const seed = { cmd: "sh seed.sh {seed}", key: ["schema.sql"], about: "" };
+  const runs = () => readFileSync(join(root, "runs"), "utf8").split("\n").filter(Boolean).length;
+
+  const a = await seedCache(seed, repo, dir, root, () => {});
+  const b = await seedCache(seed, repo, dir, root, () => {});
+  assert.equal(a, b);
+  assert.equal(runs(), 1);
+  assert.deepEqual(readdirSync(dir), [a.split("/").pop()]);
+
+  const copy = seedCopy(a);
+  assert.notEqual(copy, a);
+  writeFileSync(join(copy, "data.txt"), "changed");
+  assert.equal(readFileSync(join(a, "data.txt"), "utf8"), "data\n");
+
+  writeFileSync(join(repo, "schema.sql"), "v2");
+  const c = await seedCache(seed, repo, dir, root, () => {});
+  assert.notEqual(c, a);
+  assert.equal(runs(), 2);
+});
+
+test("seed: a failed seed command writes seed.log, throws, and leaves no cache", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "awb-seed-test-")));
+  const dir = join(root, "repo.seed");
+  await assert.rejects(seedCache({ cmd: "echo boom {seed}; exit 3", key: [], about: "" }, root, dir, root, () => {}), /exit 3/);
+  assert.match(readFileSync(join(root, "seed.log"), "utf8"), /boom/);
+  assert.deepEqual(readdirSync(dir), []);
 });

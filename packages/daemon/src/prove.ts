@@ -1,11 +1,12 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createServer, type AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runGate, claimTable, junitReport, type Carried, type Claim, type GateResult, type Report } from "./gate.ts";
-import { parseRunMd, parseTest, fill, fillTest, type RunMd } from "./run-md.ts";
+import { parseRunMd, parseSeed, parseTest, fill, fillTest, quote, type RunMd, type Seed } from "./run-md.ts";
 import type { Task } from "./stacks.ts";
 import { tokenTotals } from "./usage.ts";
 
@@ -18,6 +19,7 @@ export type ProveDeps = {
   claude: string;
   writerTimeoutMin?: number;
   deadline?: number;
+  seedDir?: string;
   log: (line: string) => void;
 };
 
@@ -109,12 +111,41 @@ async function waitReady(url: string, ms: number) {
   throw new Error(`the app did not answer at ${url} in ${ms / 1000} s`);
 }
 
-async function startApp(runMd: RunMd, cwd: string, log: (l: string) => void) {
+export async function seedCache(seed: Seed, worktree: string, dir: string, proof: string, log: (l: string) => void): Promise<string> {
+  const h = createHash("sha256").update(seed.cmd);
+  for (const f of seed.key) h.update("\0").update(f).update("\0").update(readFileSync(join(worktree, f)));
+  const cache = join(dir, h.digest("hex").slice(0, 16));
+  if (existsSync(cache)) return cache;
+  mkdirSync(dir, { recursive: true });
+  const tmp = mkdtempSync(join(dir, ".tmp-"));
+  log(`seed: ${seed.cmd}`);
+  const r = await run("sh", ["-c", seed.cmd.replaceAll("{seed}", quote(tmp))], worktree);
+  if (r.code !== 0) {
+    rmSync(tmp, { recursive: true, force: true });
+    writeFileSync(join(proof, "seed.log"), r.out);
+    throw new Error(`the seed command failed with exit ${r.code}; see ${join(proof, "seed.log")}`);
+  }
+  try {
+    renameSync(tmp, cache);
+  } catch (err) {
+    rmSync(tmp, { recursive: true, force: true });
+    if (!existsSync(cache)) throw err;
+  }
+  return cache;
+}
+
+export function seedCopy(cache: string): string {
+  const copy = mkdtempSync(join(tmpdir(), "awb-seed-"));
+  cpSync(cache, copy, { recursive: true });
+  return copy;
+}
+
+async function startApp(runMd: RunMd, cwd: string, log: (l: string) => void, seed?: string) {
   const port = await freePort();
   const url = fill(runMd.url, port).replace(/\/$/, "");
   let child: ChildProcess | null = null;
   if (runMd.start) {
-    const cmd = fill(runMd.start, port);
+    const cmd = fill(runMd.start, port, seed);
     log(`app: ${cmd}`);
     child = spawn("sh", ["-c", cmd], { cwd, stdio: "ignore", detached: true });
   }
@@ -124,6 +155,7 @@ async function startApp(runMd: RunMd, cwd: string, log: (l: string) => void) {
         process.kill(-child.pid, "SIGTERM");
       } catch {}
     }
+    if (seed) rmSync(seed, { recursive: true, force: true });
   };
   try {
     await waitReady(url + runMd.ready, 60_000);
@@ -156,11 +188,12 @@ export function run(cmd: string, args: string[], cwd: string, input?: string, ti
   });
 }
 
-export function writerPrompt(claims: Claim[], url: string, ready: string): string {
+export function writerPrompt(claims: Claim[], url: string, ready: string, seed?: string): string {
   return [
     `Use the playwright-test-generator agent to write one test for each of these claims in claims.md: ${claims.map((c) => c.id).join(", ")}.`,
     `The site is ${url}. Start from ${ready}.`,
     "Use the seed file proof-tests/seed.spec.ts.",
+    ...(seed ? [`Seed data: ${seed}`] : []),
     "Save each test as proof-tests/<claim id in lower case>.spec.ts, for example proof-tests/c1.spec.ts.",
     "Start each test title with its claim id, for example 'C1: ...'.",
     "Test what a user sees. Do not change a test to make it pass: if the page does not do what the claim says, the test must fail.",
@@ -203,7 +236,7 @@ async function runClaude(cwd: string, args: string[], prompt: string, deps: Prov
   return w;
 }
 
-async function runWriter(folder: string, claims: Claim[], url: string, ready: string, deps: ProveDeps): Promise<WriterEnd> {
+async function runWriter(folder: string, claims: Claim[], url: string, ready: string, deps: ProveDeps, seed?: string): Promise<WriterEnd> {
   const mcp = join(folder, "mcp.json");
   writeFileSync(
     mcp,
@@ -217,7 +250,7 @@ async function runWriter(folder: string, claims: Claim[], url: string, ready: st
   return runClaude(
     folder,
     ["--agents", AGENTS, "--mcp-config", mcp, "--strict-mcp-config", "--allowedTools", "Task", "Agent", "Read", "Glob", "Grep", "LS", "mcp__playwright-test__*"],
-    writerPrompt(claims, url, ready),
+    writerPrompt(claims, url, ready, seed),
     deps,
     join(folder, "proof", "writer.jsonl"),
   );
@@ -364,6 +397,7 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
   const testClaims = task.claims.filter((c) => c.proof === "test");
   const runMd = browserClaims.length ? parseRunMd(runMdText) : null;
   const testCmd = testClaims.length || carried.length ? parseTest(runMdText) : null;
+  const seed = runMd ? parseSeed(runMdText) : null;
 
   mkdirSync(task.folder, { recursive: true });
   const folder = realpathSync(task.folder);
@@ -384,7 +418,9 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
   let writer: WriterEnd | null = null;
   if (testCmd) writer = await writeMissing(testClaims, tests, proof, deps.log, (c) => runTestWriter(folder, worktree, c, testCmd, deps));
 
-  const app = runMd ? await startApp(runMd, worktree, deps.log) : null;
+  if (seed && !deps.seedDir) throw new Error("run.md has a '## seed' section, but no seed folder is set");
+  const seedPath = seed ? seedCopy(await seedCache(seed, worktree, deps.seedDir!, proof, deps.log)) : undefined;
+  const app = runMd ? await startApp(runMd, worktree, deps.log, seedPath) : null;
   try {
     if (runMd && app) {
       writeFileSync(join(folder, "claims.md"), claimsMarkdown({ title: task.title, claims: browserClaims }, app.url));
@@ -395,7 +431,7 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
           `import { test } from "@playwright/test";\ntest("seed", async ({ page }) => {\n  await page.goto(${JSON.stringify(runMd.ready)});\n});\n`,
         );
       }
-      writer = (await writeMissing(browserClaims, tests, proof, deps.log, (c) => runWriter(folder, c, app.url, runMd.ready, deps))) ?? writer;
+      writer = (await writeMissing(browserClaims, tests, proof, deps.log, (c) => runWriter(folder, c, app.url, runMd.ready, deps, seed?.about))) ?? writer;
     }
 
     writeFileSync(join(proof, "test-hash.txt"), testHash(tests) + "\n");

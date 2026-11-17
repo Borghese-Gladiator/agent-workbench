@@ -5,7 +5,7 @@ import { extname, join, sep } from "node:path";
 import { parseSince, StackError, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
 import { LEVELS, logText, readLog, type Level, type Log, type LogFilter } from "./log.ts";
 import { prove, run, type CarriedTask, type ProveDeps } from "./prove.ts";
-import { readRunFile } from "./run-md.ts";
+import { readRunFile, seedDir } from "./run-md.ts";
 import { costReport, costText } from "./cost.ts";
 import type { DatabaseSync } from "node:sqlite";
 import { ship, ShipRefused, syncStatus } from "./ship.ts";
@@ -202,7 +202,7 @@ export function taskRoutes(
       log("info", "prove", "start", { ...ids, rewrite: rewrite.length ? rewrite : undefined });
       let after: TaskStatus = before === "failed" ? "failed" : "waiting";
       try {
-        const r = await prove(t, b.worktree, readRunFile(home, b.repo, b.worktree), { ...proveDeps, deadline: Number(b.deadline) || undefined, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite, carriedClaims(stacks, t));
+        const r = await prove(t, b.worktree, readRunFile(home, b.repo, b.worktree), { ...proveDeps, deadline: Number(b.deadline) || undefined, seedDir: seedDir(home, b.repo), log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite, carriedClaims(stacks, t));
         stacks.saveGate(attempt, r.gate);
         if (r.writer?.usd != null) stacks.setWriterCost(attempt, r.writer.usd);
         const failed = r.gate.rows.filter((x) => x.status === "FAIL").map((x) => `${x.id}: ${x.reasons.join(", ")}`);
