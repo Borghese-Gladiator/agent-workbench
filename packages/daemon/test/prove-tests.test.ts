@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { prove } from "../src/prove.ts";
+import { prove, writerLimit } from "../src/prove.ts";
 import type { Task } from "../src/stacks.ts";
 
 delete process.env.NODE_TEST_CONTEXT;
@@ -93,4 +93,19 @@ test("prove: a writer that writes every test runs once", async () => {
   const { repo, task, deps } = setup("a + b", `echo x >> ${"../calls"}`);
   await prove(task, repo, RUN_MD, deps);
   assert.equal(readFileSync(join(repo, "..", "calls"), "utf8").split("\n").filter(Boolean).length, 1);
+});
+
+test("writerLimit: the writer gets the session time that is left, up to its own limit", () => {
+  const now = 1_000_000;
+  assert.equal(writerLimit(30, undefined, now), 30);
+  assert.equal(writerLimit(30, now + 10 * 60_000, now), 10);
+  assert.equal(writerLimit(30, now + 90 * 60_000, now), 30);
+  assert.equal(writerLimit(30, now + 30_000, now), 0);
+});
+
+test("prove: with no time left in the session, the writer does not start", async () => {
+  const { repo, task, deps } = setup("a + b", "touch ../started");
+  const r = await prove(task, repo, RUN_MD, { ...deps, deadline: Date.now() + 30_000 });
+  assert.equal(existsSync(join(repo, "..", "started")), false);
+  assert.deepEqual(r.gate.rows[0].reasons, ["no test (test writer: no time left in the session)"]);
 });

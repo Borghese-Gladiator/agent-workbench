@@ -169,7 +169,7 @@ function defaultBranch(cwd: string): string {
 async function proveCmd(json: boolean, rewrite: string[]): Promise<number> {
   const git = here();
   if (!git) return 1;
-  return streamNdjson("/api/prove", { ...git, sessionId: process.env.AWB_SESSION_ID, rewrite }, (r) => {
+  return streamNdjson("/api/prove", { ...git, sessionId: process.env.AWB_SESSION_ID, rewrite, deadline: Number(process.env.AWB_SESSION_DEADLINE) || undefined }, (r) => {
     if (json) console.log(JSON.stringify(r, null, 2));
     else {
       console.log(r.table);
@@ -182,6 +182,7 @@ async function proveCmd(json: boolean, rewrite: string[]): Promise<number> {
 }
 
 function writerLine(w: { end: string; usd: number | null; timeoutMin?: number }): string {
+  if (w.timeoutMin !== undefined && w.timeoutMin < 1) return `test writer: ${w.end}`;
   const cost = w.usd === null ? "cost unknown" : `${w.usd.toFixed(2)} USD`;
   return `test writer: ${w.end}, ${cost}, limit ${w.timeoutMin ?? "?"} min`;
 }
