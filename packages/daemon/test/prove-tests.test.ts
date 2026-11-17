@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { prove } from "../src/prove.ts";
@@ -73,4 +73,24 @@ test("prove: a writer that times out still has the cost of its messages", async 
   const r = await prove(task, repo, RUN_MD, { ...deps, writerTimeoutMin: 0.01 });
   assert.equal(r.writer?.end, "timeout after 0.01 min");
   assert.equal(r.writer?.usd?.toFixed(2), "4.00");
+});
+
+test("prove: the writer runs once more for a claim that still has no test", async () => {
+  const { repo, task, deps } = setup("a + b");
+  const count = join(task.folder, "..", "calls");
+  writeFileSync(
+    deps.claude,
+    `#!/bin/sh\ncat > /dev/null\necho x >> ${count}\n[ $(wc -l < ${count}) -ge 2 ] && cp ${join(task.folder, "..", "proof.mjs")} .awb-proof/c1.test.mjs\necho '{"type":"result","subtype":"success","num_turns":0,"total_cost_usd":0.5}'\n`,
+  );
+  const r = await prove(task, repo, RUN_MD, deps);
+  assert.equal(r.gate.pass, true);
+  assert.equal(readFileSync(count, "utf8").split("\n").filter(Boolean).length, 2);
+  assert.equal(r.writer?.end, "success, 0 turns; rerun: success, 0 turns");
+  assert.equal(r.writer?.usd, 1);
+});
+
+test("prove: a writer that writes every test runs once", async () => {
+  const { repo, task, deps } = setup("a + b", `echo x >> ${"../calls"}`);
+  await prove(task, repo, RUN_MD, deps);
+  assert.equal(readFileSync(join(repo, "..", "calls"), "utf8").split("\n").filter(Boolean).length, 1);
 });
