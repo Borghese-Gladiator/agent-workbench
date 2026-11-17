@@ -17,6 +17,7 @@ const NODE_MODULES = join(PKG, "..", "..", "node_modules");
 export type ProveDeps = {
   claude: string;
   writerTimeoutMin?: number;
+  deadline?: number;
   log: (line: string) => void;
 };
 
@@ -180,8 +181,19 @@ export function writerEnd(out: string, timedOut: boolean, code: number, timeoutM
   return { end: `exit ${code}`, usd };
 }
 
+export function writerLimit(limitMin: number, deadline?: number, now = Date.now()): number {
+  if (!deadline) return limitMin;
+  return Math.min(limitMin, Math.floor((deadline - now) / 60_000));
+}
+
 async function runClaude(cwd: string, args: string[], prompt: string, deps: ProveDeps, logFile: string): Promise<WriterEnd> {
-  const timeoutMin = deps.writerTimeoutMin ?? 30;
+  const timeoutMin = writerLimit(deps.writerTimeoutMin ?? 30, deps.deadline);
+  if (timeoutMin < 1) {
+    const w = { end: "no time left in the session", usd: null, timeoutMin };
+    writeFileSync(join(dirname(logFile), "writer-end.txt"), w.end + "\n");
+    deps.log(`test writer: ${w.end}`);
+    return w;
+  }
   const r = await run(deps.claude, ["-p", ...args, "--output-format", "stream-json", "--verbose"], cwd, prompt, timeoutMin * 60_000);
   writeFileSync(logFile, r.out);
   const w = { ...writerEnd(r.out, r.timedOut, r.code, timeoutMin), timeoutMin };

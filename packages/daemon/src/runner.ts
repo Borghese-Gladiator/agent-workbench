@@ -142,7 +142,7 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
       "--output-format", "stream-json", "--verbose",
     ];
     return new Promise<string>((resolve) => {
-      const child = spawn(AWB, args, { cwd: worktree, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, AWB_HOME: opts.home }, detached: true });
+      const child = spawn(AWB, args, { cwd: worktree, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, AWB_HOME: opts.home, AWB_SESSION_DEADLINE: String(Date.now() + opts.timeoutMin * 60_000) }, detached: true });
       let timedOut = false;
       let tail = "";
       const group = (sig: NodeJS.Signals) => {
