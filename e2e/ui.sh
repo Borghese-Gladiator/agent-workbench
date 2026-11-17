@@ -155,7 +155,7 @@ new DatabaseSync(process.argv[1]).prepare("UPDATE events SET at = ? WHERE sessio
 
 echo "== 5. the browser test of the UI"
 cd "$ROOT"
-AWB_URL="$API" AWB_T1="$T1" AWB_T2="$T2" AWB_T3="$T3" node_modules/.bin/playwright test --config e2e/ui.config.ts
+AWB_URL="$API" AWB_T1="$T1" AWB_T2="$T2" AWB_T3="$T3" node_modules/.bin/playwright test --config e2e/ui.config.ts "$@"
 echo
 echo "screenshots: $WORK/screens"
 echo "PASS"

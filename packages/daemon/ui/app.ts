@@ -5,11 +5,13 @@ import { SessionView } from "./session.ts";
 import { Stacks } from "./stacks.ts";
 import { Prs } from "./prs.ts";
 import { TaskView } from "./task.ts";
+import { Logs } from "./logs.ts";
 
 const NAV = [
   ["live", "#/", "Live", "M22 12h-4l-3 9L9 3l-3 9H2"],
   ["stacks", "#/stacks", "Stacks", "M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"],
   ["prs", "#/prs", "PRs", "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9"],
+  ["logs", "#/logs", "Logs", "M4 6h16M4 12h16M4 18h10"],
 ];
 
 function App() {
@@ -44,7 +46,10 @@ function App() {
       setD({ tasks, bySession, runs, taskUsd: Object.fromEntries(all.by_task.map((x: Json) => [x.task_id, x.usd])) });
       setStackCount(stacks.length);
       setToday(day.total_usd);
-    } catch {}
+      setStatus((s) => (s.startsWith("reload failed") ? "live" : s));
+    } catch (err) {
+      setStatus("reload failed: " + (err as Error).message);
+    }
   };
 
   useEffect(() => {
@@ -72,6 +77,7 @@ function App() {
     : view === "stacks" ? html`<${Stacks} d=${data} />`
     : view === "prs" ? html`<${Prs} d=${data} />`
     : view === "task" ? html`<${TaskView} key=${id} d=${data} id=${id} />`
+    : view === "logs" ? html`<${Logs} key=${id} task=${id ?? ""} />`
     : html`<${Live} d=${data} />`;
   const current = view === "session" ? "live" : view === "task" ? "stacks" : view;
   const count: Record<string, number | null> = { stacks: stackCount, prs: d.tasks.filter((t) => t.pr_number && t.status === "done").length };

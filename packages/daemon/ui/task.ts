@@ -1,15 +1,5 @@
 import { html, useEffect, useState } from "./vendor/htm-preact.js";
-import { ago, file, get, Pass, post, State, time, usd, type Data, type Json } from "./components.ts";
-
-const LEVEL: Record<string, string> = { error: "FAIL", warn: "busy", info: "muted" };
-
-function LogLine({ l }: { l: Json }) {
-  const { ts, level, source, event, ...rest } = l;
-  const text =
-    " " + ts.slice(0, 19).replace("T", " ") + " " + source + "." + event + " " +
-    Object.entries(rest).map(([k, v]) => k + "=" + (typeof v === "string" ? v : JSON.stringify(v))).join(" ");
-  return html`<span class=${"badge " + (LEVEL[level] ?? "")}>${level.toUpperCase()}</span><span class=${level === "error" ? "FAIL" : ""}>${text}</span>${"\n"}`;
-}
+import { ago, file, get, LogLine, Pass, post, State, time, usd, type Data, type Json } from "./components.ts";
 
 function Buttons({ t, setMsg, reload }: { t: Json; setMsg: (m: [string, boolean]) => void; reload: () => void }) {
   const fail = (err: unknown) => setMsg([(err as Error).message, true]);
@@ -80,7 +70,7 @@ function Rewrite({ t, msg, setMsg }: { t: Json; msg: [string, boolean]; setMsg: 
         <button class="plain" disabled=${!t.worktree || busy}>Rewrite test</button>
       </div>
       ${t.worktree ? null : html`<p class="muted">This task has no worktree, so the proof cannot run from here.</p>`}
-      ${out === null ? null : html`<pre>${out}</pre>`}
+      ${out === null ? null : html`<pre aria-label="Rewrite output">${out}</pre>`}
     </form>
   </div>`;
 }
@@ -148,14 +138,14 @@ function Shipped({ t }: { t: Json }) {
 }
 
 export function TaskView({ d, id }: { d: Data; id: string }) {
-  const [data, setData] = useState<{ t: Json; diff: string; setupLog: string } | null>(null);
+  const [data, setData] = useState<{ t: Json; diff: string; setupLog: string; grafana: string | null } | null>(null);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState<[string, boolean]>(["", false]);
   const load = async () => {
     try {
-      const [t, diff] = await Promise.all([get("/api/tasks/" + id), get("/api/tasks/" + id + "/diff").catch(() => "")]);
+      const [t, diff, health] = await Promise.all([get("/api/tasks/" + id), get("/api/tasks/" + id + "/diff").catch(() => ""), get("/health").catch(() => ({}))]);
       const setupLog = await get(file(t.folder + "/setup.log")).catch(() => "");
-      setData({ t, diff, setupLog });
+      setData({ t, diff, setupLog, grafana: health.grafana ?? null });
     } catch (err) {
       setError((err as Error).message);
     }
@@ -163,7 +153,7 @@ export function TaskView({ d, id }: { d: Data; id: string }) {
   useEffect(() => void load(), [id]);
   if (error) return html`<p class="FAIL">${error}</p>`;
   if (!data) return html`<p class="muted">Loading…</p>`;
-  const { diff, setupLog } = data;
+  const { diff, setupLog, grafana } = data;
   const t: Json = { ...data.t, failed_claims: d.tasks.find((x) => x.id === data.t.id)?.failed_claims ?? [] };
   const writer = t.transcripts.find((f: string) => f.endsWith("writer.jsonl"));
   const g = t.attempts.flatMap((a: Json) => a.gates).at(-1);
@@ -198,6 +188,9 @@ export function TaskView({ d, id }: { d: Data; id: string }) {
       <pre>${t.log.length ? t.log.map((l: Json) => html`<${LogLine} l=${l} />`) : html`<span class="muted">no log lines for this task</span>`}</pre>
       ${setupLog ? html`<h3>Setup log</h3><pre>${setupLog}</pre>` : null}
       ${writer ? html`<p><a href=${file(writer)} target="_blank">Test writer log</a> <span class="muted mono">${writer}</span></p>` : null}
+      <p><a href=${"#/logs/" + t.id}>All logs of this task</a>${grafana
+        ? html` · <a href=${grafana.replace(/\/$/, "") + "/d/awb/awb?var-task=" + encodeURIComponent(t.id)} target="_blank">Open in Grafana</a>`
+        : null}</p>
     </details>
     <details>
       <summary>Attempts (${t.attempts.length})</summary>

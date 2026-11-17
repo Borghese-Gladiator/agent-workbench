@@ -17,7 +17,6 @@ export function awbSettings(home: string, hookBin = HOOK_BIN) {
     permissions: {
       additionalDirectories: [join(home, "repos")],
       deny: [
-        "Bash(gh pr create:*)",
         ...["awb.db*", "daemon.json", "tasks/**"].map((p) => `Edit(/${home}/${p})`),
       ],
     },

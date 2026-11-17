@@ -17,12 +17,11 @@ test("settings register the hook sender for every hook type, with AWB_HOME", () 
   }
 });
 
-test("settings deny gh pr create and writes to the daemon files and the proof, not to the worktrees", () => {
+test("settings deny writes to the daemon files and the proof, not to the worktrees", () => {
   const s = awbSettings("/h/.awb");
   assert.deepEqual(s.permissions.additionalDirectories, ["/h/.awb/repos"]);
   const deny = s.permissions.deny;
   assert.deepEqual(deny, [
-    "Bash(gh pr create:*)",
     "Edit(//h/.awb/awb.db*)",
     "Edit(//h/.awb/daemon.json)",
     "Edit(//h/.awb/tasks/**)",
