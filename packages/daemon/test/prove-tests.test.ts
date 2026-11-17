@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { prove, writerLimit } from "../src/prove.ts";
+import { gateFromDisk, prove, writerLimit } from "../src/prove.ts";
 import type { Task } from "../src/stacks.ts";
 
 delete process.env.NODE_TEST_CONTEXT;
@@ -133,3 +133,17 @@ for (const [name, baseBody, headBody, reasons] of [
     assert.equal(git(repo, "status", "--porcelain"), "");
   });
 }
+
+test("prove: a carried claim of the task below fails when the new code breaks it", async () => {
+  const below = setup("a + b");
+  const r1 = await prove(below.task, below.repo, RUN_MD, below.deps);
+  assert.equal(r1.gate.pass, true);
+  writeFileSync(join(below.repo, "add.mjs"), "export const add = (a, b) => a - b;\nexport const two = () => 2;\n");
+  git(below.repo, "-c", "user.email=t@t", "-c", "user.name=t", "-c", "core.hooksPath=/dev/null", "commit", "-qam", "task 2");
+  const task2 = { ...below.task, id: "t2", claims: [], folder: join(below.task.folder, "..", "task2") } as Task;
+  const carried = [{ label: "T1", claims: below.task.claims, folder: below.task.folder }];
+  const r2 = await prove(task2, below.repo, RUN_MD, below.deps, [], carried);
+  assert.equal(r2.gate.pass, false);
+  assert.deepEqual(r2.gate.rows.map((r) => [r.id, r.status]), [["T1/C1", "FAIL"]]);
+  assert.deepEqual(gateFromDisk(task2.claims, task2.folder, below.repo).rows.map((r) => r.id), ["T1/C1"]);
+});

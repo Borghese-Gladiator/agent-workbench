@@ -4,6 +4,7 @@ import { openStore } from "../src/store.ts";
 import { createStacks, migrateStacks, parseSince, StackError } from "../src/stacks.ts";
 import { createRunner, failReason, runStack, stackLimit, type RunState } from "../src/runner.ts";
 import type { GateResult } from "../src/gate.ts";
+import { carriedClaims } from "../src/task-routes.ts";
 
 const setup = () => {
   const store = openStore(":memory:");
@@ -128,4 +129,15 @@ test("the runner refuses a new stack when the limit is full, and the limit is ne
   assert.throws(() => runner.start(stacks[2].id), /2 stacks are running and the limit is 2/);
   hold.forEach((ok) => ok());
   assert.deepEqual([stackLimit(undefined), stackLimit("3"), stackLimit("10"), stackLimit("junk")], [2, 3, 5, 2]);
+});
+
+test("carriedClaims takes the test claims that passed in the last passing gate of each task below", () => {
+  const s = setup();
+  const tc = (title: string) => ({ title, claims: [{ id: "C1", text: "x", proof: "test" as const }, { id: "C2", text: "browser" }] });
+  const { stack } = s.set({ repo: "/r", branch: "feat", base: "main", tasks: [tc("A"), tc("B"), tc("C")] });
+  const [a, b, c] = stack.tasks;
+  s.saveGate(s.startAttempt(a.id, null), gate(true));
+  s.saveGate(s.startAttempt(b.id, null), gate(false));
+  assert.deepEqual(carriedClaims(s, c), [{ label: "T1", claims: [a.claims[0]], folder: a.folder }]);
+  assert.deepEqual(carriedClaims(s, a), []);
 });
