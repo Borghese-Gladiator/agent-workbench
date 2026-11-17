@@ -12,8 +12,6 @@ The gate proves a claim in a browser, or with a repo test for logic that no page
 
 ## Runner
 
-- [ ] **Stop a stack or a task.** `awb stop <stack id>` stops the run and every task in it. `awb stop <task id>` stops one task, in a stack or alone; the later tasks of its stack stay `waiting`. Kill only the process group of that session and its writer. Today the only way is to kill process groups by hand, and two stacks can share one group.
-
 ## Logging
 
 The local log, `awb logs`, the Logs tab and the `awb doctor` checks are done. `infra/logging/README.md` has the Loki and Grafana design.

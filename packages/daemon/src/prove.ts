@@ -21,6 +21,7 @@ export type ProveDeps = {
   deadline?: number;
   seedDir?: string;
   log: (line: string) => void;
+  signal?: AbortSignal;
 };
 
 export type WriterEnd = { end: string; usd: number | null; timeoutMin?: number };
@@ -148,9 +149,11 @@ async function startApp(runMd: RunMd, cwd: string, log: (l: string) => void, see
     const cmd = fill(runMd.start, port, seed);
     log(`app: ${cmd}`);
     child = spawn("sh", ["-c", cmd], { cwd, stdio: "ignore", detached: true });
+    if (child.pid) groups.add(child.pid);
   }
   const stop = () => {
     if (child?.pid) {
+      groups.delete(child.pid);
       try {
         process.kill(-child.pid, "SIGTERM");
       } catch {}
@@ -166,22 +169,45 @@ async function startApp(runMd: RunMd, cwd: string, log: (l: string) => void, see
   return { url, stop };
 }
 
-export function run(cmd: string, args: string[], cwd: string, input?: string, timeoutMs = 0): Promise<{ code: number; out: string; timedOut: boolean }> {
+const groups = new Set<number>();
+
+export function killChildren(): number {
+  const n = groups.size;
+  for (const pid of groups) {
+    try {
+      process.kill(-pid, "SIGTERM");
+    } catch {}
+  }
+  groups.clear();
+  return n;
+}
+
+export function run(cmd: string, args: string[], cwd: string, input?: string, timeoutMs = 0, signal?: AbortSignal): Promise<{ code: number; out: string; timedOut: boolean }> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
+    const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env, detached: true });
+    if (child.pid) groups.add(child.pid);
     let timedOut = false;
+    const kill = () => {
+      try {
+        process.kill(-child.pid!, "SIGTERM");
+      } catch {}
+    };
     const timer = timeoutMs
       ? setTimeout(() => {
           timedOut = true;
-          child.kill("SIGTERM");
+          kill();
         }, timeoutMs)
       : null;
+    if (signal?.aborted) kill();
+    signal?.addEventListener("abort", kill, { once: true });
     let out = "";
     child.stdout.on("data", (d) => (out += d));
     child.stderr.on("data", (d) => (out += d));
     child.on("error", (e) => resolve({ code: 127, out: String(e), timedOut }));
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
+      if (child.pid) groups.delete(child.pid);
+      signal?.removeEventListener("abort", kill);
       resolve({ code: code ?? 1, out, timedOut });
     });
     child.stdin.end(input ?? "");
@@ -227,8 +253,10 @@ async function runClaude(cwd: string, args: string[], prompt: string, deps: Prov
     deps.log(`test writer: ${w.end}`);
     return w;
   }
-  const r = await run(deps.claude, ["-p", ...args, "--output-format", "stream-json", "--verbose"], cwd, prompt, timeoutMin * 60_000);
+  deps.signal?.throwIfAborted();
+  const r = await run(deps.claude, ["-p", ...args, "--output-format", "stream-json", "--verbose"], cwd, prompt, timeoutMin * 60_000, deps.signal);
   writeFileSync(logFile, r.out);
+  deps.signal?.throwIfAborted();
   const w = { ...writerEnd(r.out, r.timedOut, r.code, timeoutMin), timeoutMin };
   if (w.usd === null) w.usd = tokenTotals(logFile).cost_usd;
   writeFileSync(join(dirname(logFile), "writer-end.txt"), w.end + "\n");
@@ -309,7 +337,7 @@ async function runTestWriter(folder: string, worktree: string, claims: Claim[], 
   }
 }
 
-async function runRepoTests(folder: string, worktree: string, testCmd: string, log: (l: string) => void, from = folder, name = "junit") {
+async function runRepoTests(folder: string, worktree: string, testCmd: string, log: (l: string) => void, from = folder, name = "junit", signal?: AbortSignal) {
   const files = repoTests(join(from, "proof-tests"));
   const work = join(worktree, PROOF_DIR);
   rmSync(work, { recursive: true, force: true });
@@ -318,7 +346,7 @@ async function runRepoTests(folder: string, worktree: string, testCmd: string, l
     for (const f of files) copyFileSync(join(from, "proof-tests", f), join(work, f));
     const cmd = fillTest(testCmd, files.map((f) => `${PROOF_DIR}/${f}`), join(folder, "proof", `${name}.xml`));
     log(`proof run${name === "base-junit" ? " on the base commit" : ""}: ${cmd}`);
-    const r = await run("sh", ["-c", `export PYTHONDONTWRITEBYTECODE=1\n${cmd}`], worktree);
+    const r = await run("sh", ["-c", `export PYTHONDONTWRITEBYTECODE=1\n${cmd}`], worktree, "", 0, signal);
     writeFileSync(join(folder, "proof", `${name.replace(/junit$/, "test")}.log`), r.out);
   } finally {
     rmSync(work, { recursive: true, force: true });
@@ -335,7 +363,7 @@ function mergeBase(worktree: string, base: string | null): string | null {
   return null;
 }
 
-async function runBaseTests(task: Task, folder: string, worktree: string, testCmd: string, log: (l: string) => void) {
+async function runBaseTests(task: Task, folder: string, worktree: string, testCmd: string, log: (l: string) => void, signal?: AbortSignal) {
   const sha = mergeBase(worktree, task.base);
   if (!sha) return log(`base run skipped: no merge base with ${task.base ?? "(no base)"}`);
   if (git(worktree, "status", "--porcelain") !== "") return log("base run skipped: the worktree has uncommitted changes");
@@ -343,7 +371,7 @@ async function runBaseTests(task: Task, folder: string, worktree: string, testCm
   const branch = git(worktree, "rev-parse", "--abbrev-ref", "HEAD");
   git(worktree, "switch", "-q", "--detach", sha);
   try {
-    await runRepoTests(folder, worktree, testCmd, log, folder, "base-junit");
+    await runRepoTests(folder, worktree, testCmd, log, folder, "base-junit", signal);
   } finally {
     git(worktree, "switch", "-q", ...(branch === "HEAD" ? ["--detach", head] : [branch]));
   }
@@ -437,17 +465,18 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
     writeFileSync(join(proof, "test-hash.txt"), testHash(tests) + "\n");
     if (app) {
       deps.log("proof run: playwright test");
-      const pw = await run(PLAYWRIGHT, ["test", "--config", "playwright.config.ts"], folder);
+      const pw = await run(PLAYWRIGHT, ["test", "--config", "playwright.config.ts"], folder, "", 0, deps.signal);
       writeFileSync(join(proof, "run.log"), pw.out);
     }
     if (testClaims.length && testCmd) {
-      await runRepoTests(folder, worktree, testCmd, deps.log);
-      await runBaseTests(task, folder, worktree, testCmd, deps.log);
+      await runRepoTests(folder, worktree, testCmd, deps.log, folder, "junit", deps.signal);
+      await runBaseTests(task, folder, worktree, testCmd, deps.log, deps.signal);
     }
     if (carried.length && testCmd) {
       writeFileSync(join(proof, "carried.json"), JSON.stringify(carried));
-      for (const k of carried) await runRepoTests(folder, worktree, testCmd, deps.log, k.folder, `carried-${k.label}`);
+      for (const k of carried) await runRepoTests(folder, worktree, testCmd, deps.log, k.folder, `carried-${k.label}`, deps.signal);
     }
+    deps.signal?.throwIfAborted();
 
     const gate = gateFromDisk(task.claims, folder, worktree);
     writeFileSync(join(proof, "gate.json"), JSON.stringify(gate, null, 2));

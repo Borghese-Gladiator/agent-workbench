@@ -73,6 +73,26 @@ export function carriedClaims(stacks: Stacks, t: Task): CarriedTask[] {
   });
 }
 
+export function isAwbSession(pid: number): boolean {
+  try {
+    return /cli\/src\/main\.ts/.test(execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }));
+  } catch {
+    return false;
+  }
+}
+
+export function stopSessions(pids: number[], isSession = isAwbSession): number[] {
+  return pids.filter((pid) => {
+    if (!isSession(pid)) return false;
+    try {
+      process.kill(pid, "SIGTERM");
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function taskRoutes(
   stacks: Stacks,
   proveDeps: Omit<ProveDeps, "log">,
@@ -83,6 +103,7 @@ export function taskRoutes(
   log: Log = () => {},
   logDir = "",
 ) {
+  const proofs = new Map<string, AbortController>();
   const running = new Map<string, { kind: "prove" | "ship"; lines: Json[]; listeners: Set<ServerResponse> }>();
   const begin = (id: string, kind: "prove" | "ship", res: ServerResponse) => {
     const r = { kind, lines: [] as Json[], listeners: new Set([res]) };
@@ -193,6 +214,8 @@ export function taskRoutes(
       const unknown = rewrite.filter((id) => !t.claims.some((c) => c.id === id));
       if (unknown.length) return send(400, { error: `no claim ${unknown.join(", ")} in task ${t.id}` }), true;
 
+      const ctrl = new AbortController();
+      proofs.set(t.id, ctrl);
       const { line, end } = begin(t.id, "prove", res);
       const before = t.status;
       const ownedByRun = runner.owns(t.id);
@@ -202,7 +225,7 @@ export function taskRoutes(
       log("info", "prove", "start", { ...ids, rewrite: rewrite.length ? rewrite : undefined });
       let after: TaskStatus = before === "failed" ? "failed" : "waiting";
       try {
-        const r = await prove(t, b.worktree, readRunFile(home, b.repo, b.worktree), { ...proveDeps, deadline: Number(b.deadline) || undefined, seedDir: seedDir(home, b.repo), log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite, carriedClaims(stacks, t));
+        const r = await prove(t, b.worktree, readRunFile(home, b.repo, b.worktree), { ...proveDeps, deadline: Number(b.deadline) || undefined, seedDir: seedDir(home, b.repo), signal: ctrl.signal, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite, carriedClaims(stacks, t));
         stacks.saveGate(attempt, r.gate);
         if (r.writer?.usd != null) stacks.setWriterCost(attempt, r.writer.usd);
         const failed = r.gate.rows.filter((x) => x.status === "FAIL").map((x) => `${x.id}: ${x.reasons.join(", ")}`);
@@ -215,6 +238,7 @@ export function taskRoutes(
       } finally {
         stacks.endAttempt(attempt);
         if (!ownedByRun) stacks.setStatus(t.id, after);
+        proofs.delete(t.id);
         end();
       }
       return true;
@@ -438,6 +462,29 @@ export function taskRoutes(
         stacks.fail(t.id, reason);
         return fail(err), true;
       }
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/stop") {
+      const b = await body();
+      const id = String(b.id ?? "");
+      let t: Task | undefined;
+      let stack;
+      try {
+        stack = stacks.findStack(id);
+        if (!stack) t = stacks.find(id);
+      } catch (err) {
+        return fail(err), true;
+      }
+      if (!stack && !t) return send(404, { error: `no stack or task ${id}` }), true;
+      const tasks = stack ? stack.tasks : [t!];
+      const stackId = stack ? stack.id : t!.stack_id;
+      const done = stack || runner.owns(t!.id) ? runner.stop(stackId) : null;
+      const proof = tasks.filter((x) => proofs.has(x.id));
+      for (const x of proof) proofs.get(x.id)!.abort();
+      const sessions = t && !done ? stopSessions(stacks.openSessionPids(t.id)) : [];
+      if (!done && !proof.length && !sessions.length) return send(409, { error: `nothing runs for ${id}` }), true;
+      log("info", "runner", "stop", { id, stack: stackId, proofs: proof.map((x) => x.id), sessions });
+      return send(200, { run: done ? await done : null, proofs: proof.map((x) => x.id), sessions }), true;
     }
 
     if (req.method === "POST" && url.pathname === "/api/sync") {
