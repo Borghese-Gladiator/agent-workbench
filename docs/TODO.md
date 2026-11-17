@@ -21,4 +21,3 @@ The gate proves a claim in a browser, or with a repo test for logic that no page
 
 - [ ] **Configurable retries.** A transient API error (connection refused, overloaded, 5xx) stops the stack today. The runner resumes the session with `claude --resume` up to N times. Set N with `awb run --retries N` and `awb retry <id> --retries N`, default 1.
 - [ ] **Stop a stack or a task.** `awb stop <stack id>` stops the run and every task in it. `awb stop <task id>` stops one task, in a stack or alone; the later tasks of its stack stay `waiting`. Kill only the process group of that session and its writer. Today the only way is to kill process groups by hand, and two stacks can share one group.
-- [ ] **Delete stack base branches.** Each stack run leaves a base branch on GitHub. `e2e/acceptance.sh` must delete it after the PRs are retargeted or closed.
