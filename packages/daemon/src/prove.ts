@@ -188,7 +188,7 @@ export function writerLimit(limitMin: number, deadline?: number, now = Date.now(
 
 async function runClaude(cwd: string, args: string[], prompt: string, deps: ProveDeps, logFile: string): Promise<WriterEnd> {
   const timeoutMin = writerLimit(deps.writerTimeoutMin ?? 30, deps.deadline);
-  if (timeoutMin < 1) {
+  if (deps.deadline && timeoutMin < 1) {
     const w = { end: "no time left in the session", usd: null, timeoutMin };
     writeFileSync(join(dirname(logFile), "writer-end.txt"), w.end + "\n");
     deps.log(`test writer: ${w.end}`);
@@ -320,7 +320,7 @@ async function writeMissing(claims: Claim[], tests: string, proof: string, log: 
   if (!missing.length) return null;
   const first = await write(missing);
   const still = claimsWithoutTest(claims, tests);
-  if (!still.length || first.end.startsWith("timeout")) return first;
+  if (!still.length || first.end.startsWith("timeout") || first.end.startsWith("no time left")) return first;
   log(`test writer: rerun for ${still.map((c) => c.id).join(", ")}`);
   const w = joinWriterEnds(first, await write(still));
   writeFileSync(join(proof, "writer-end.txt"), w.end + "\n");
