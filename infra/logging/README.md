@@ -4,6 +4,14 @@ Loki, Grafana and Alloy in Docker on the awb machine. Other computers open Grafa
 
 awb does not need this stack. awb always writes its log to `AWB_HOME/logs/awb.<day>.jsonl` first, and `awb logs` reads that file. This stack only copies the lines to Loki, so that Grafana can show them from another computer.
 
+awb settings for this stack:
+
+| Setting | Default | Job |
+| --- | --- | --- |
+| `AWB_GRAFANA_URL` | none | When set, the awb task page links to the "awb" dashboard for that task. |
+| `AWB_ALLOY_URL` | `http://127.0.0.1:12345` | `awb doctor` asks Alloy if it is ready. No answer means "off", not a failure. |
+| `AWB_LOKI_URL` | `http://127.0.0.1:3100` | `awb doctor` fails if the newest line in Loki is more than 2 min older than the newest local line. |
+
 | Service | Image | Port | Job |
 | --- | --- | --- | --- |
 | loki | `grafana/loki:3.7.9` | `127.0.0.1:3100` | Stores the logs. No retention: it never deletes a line. |
