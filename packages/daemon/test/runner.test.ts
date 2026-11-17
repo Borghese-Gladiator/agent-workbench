@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "../src/store.ts";
 import { createStacks, migrateStacks, taskBranch } from "../src/stacks.ts";
-import { runStack, taskPrompt, type RunState, type Session } from "../src/runner.ts";
+import { runStack, taskPrompt, createRunner, STOPPED, type RunState, type Session } from "../src/runner.ts";
+import { run } from "../src/prove.ts";
 
 const setup = () => {
   const store = openStore(":memory:");
@@ -97,4 +98,33 @@ test("the task prompt has the claims and the titles of the tasks below", () => {
   assert.match(p, /below this one are done.*"Accounts", "Save results"/);
   assert.match(p, new RegExp(`branch ${c.branch}`));
   assert.match(taskPrompt(a, []), /first task of the stack/);
+});
+
+test("stop fails the current task with the reason, and the later tasks stay waiting", async () => {
+  const s = setup();
+  const { stack } = s.set({ ...where, tasks: three });
+  const started: string[] = [];
+  const waiting: Session = (task, _below, signal) => {
+    started.push(task.title);
+    return new Promise((ok) => signal!.addEventListener("abort", () => ok("exit 143")));
+  };
+  const runner = createRunner(s, () => waiting);
+  runner.start(stack.id);
+  await new Promise((ok) => setImmediate(ok));
+  const r = await runner.stop(stack.id)!;
+  assert.deepEqual([r.state, r.reason, started], ["stopped", STOPPED, ["Accounts"]]);
+  assert.equal(s.task(stack.tasks[0].id)!.fail_reason, STOPPED);
+  assert.deepEqual(s.get(stack.id)!.tasks.map((t) => t.status), ["failed", "waiting", "waiting"]);
+  assert.equal(runner.stop(stack.id), null);
+});
+
+test("run() with an aborted signal kills the child and its group", async () => {
+  const ctrl = new AbortController();
+  const p = run("sh", ["-c", "sleep 30 & echo $!; wait"], "/", "", 0, ctrl.signal);
+  await new Promise((ok) => setTimeout(ok, 300));
+  ctrl.abort();
+  const r = await p;
+  const pid = Number(r.out.trim());
+  assert.notEqual(r.code, 0);
+  assert.throws(() => process.kill(pid, 0));
 });

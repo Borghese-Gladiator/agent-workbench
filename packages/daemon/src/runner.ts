@@ -10,8 +10,10 @@ import type { RunState, Stacks, Task } from "./stacks.ts";
 import type { Log } from "./log.ts";
 
 export type { RunState };
-export type Session = (task: Task, below: Task[]) => Promise<string | void>;
-export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log; sessionUsd?: (task: Task) => number | null; maxStacks?: number };
+export type Session = (task: Task, below: Task[], signal?: AbortSignal) => Promise<string | void>;
+export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log; sessionUsd?: (task: Task) => number | null; maxStacks?: number; signal?: AbortSignal };
+
+export const STOPPED = "stopped by awb stop";
 
 export function sessionEnd(out: string, timedOut: boolean, code: number | null, timeoutMin: number): string {
   if (timedOut) return `timeout after ${timeoutMin} min`;
@@ -79,6 +81,7 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
     if (i < 0) return end({ state: "done", current: null });
     const task = stack.tasks[i];
     if (task.status !== "waiting") return end({ state: "stopped", current: task.id, reason: `task ${task.id} is ${task.status}` });
+    if (opts.signal?.aborted) return end({ state: "stopped", reason: STOPPED });
 
     end({ current: task.id });
     stacks.setStatus(task.id, "doing");
@@ -86,7 +89,7 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
     opts.log?.("info", "runner", "session.start", { ...ids, branch: task.branch });
     let how = "";
     try {
-      how = (await session(task, stack.tasks.slice(0, i))) || "";
+      how = (await session(task, stack.tasks.slice(0, i), opts.signal)) || "";
     } catch (err) {
       state.reason = (err as Error).message;
     }
@@ -94,7 +97,7 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
     const after = stacks.task(task.id)!;
     if (after.status !== "done") {
       const base = state.reason ?? failReason(stacks, task.id);
-      const reason = how ? `${base} (session: ${how})` : base;
+      const reason = opts.signal?.aborted ? STOPPED : how ? `${base} (session: ${how})` : base;
       stacks.fail(task.id, reason);
       opts.log?.("error", "runner", "task.failed", { ...ids, reason });
       return end({ state: "stopped", reason });
@@ -113,11 +116,11 @@ export function stackLimit(v: string | undefined): number {
 }
 
 export function claudeSession(opts: { home: string; repo: string; timeoutMin: number }): Session {
-  return async (task, below) => {
+  return async (task, below, signal) => {
     const worktree = join(opts.home, "worktrees", task.id);
     if (!existsSync(worktree)) {
       mkdirSync(join(opts.home, "worktrees"), { recursive: true });
-      await run("git", ["fetch", "-q", "origin"], opts.repo);
+      await run("git", ["fetch", "-q", "origin"], opts.repo, "", 0, signal);
       const base = (await run("git", ["rev-parse", "--verify", "-q", task.base!], opts.repo)).code === 0 ? task.base! : `origin/${task.base}`;
       const add = await run("git", ["worktree", "add", "-b", task.branch!, worktree, base], opts.repo);
       if (add.code !== 0) throw new Error(`git worktree add failed: ${add.out.trim()}`);
@@ -126,12 +129,13 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
       const runMdFile = findRunFile(opts.home, opts.repo, worktree);
       const setup = runMdFile ? parseSetup(readFileSync(runMdFile, "utf8")) : null;
       if (setup) {
-        const r = await run("sh", ["-c", setup], worktree);
+        const r = await run("sh", ["-c", setup], worktree, "", 0, signal);
         mkdirSync(task.folder, { recursive: true });
         writeFileSync(join(task.folder, "setup.log"), r.out);
         if (r.code !== 0) throw new Error(`the setup in ${runMdFile} failed; see ${join(task.folder, "setup.log")}`);
       }
     }
+    if (signal?.aborted) return STOPPED;
     mkdirSync(task.folder, { recursive: true });
     const n = readdirSync(task.folder).filter((f) => /^session-\d+\.jsonl$/.test(f)).length + 1;
     const out = createWriteStream(join(task.folder, `session-${n}.jsonl`));
@@ -151,11 +155,15 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
         } catch {}
       };
       let hard: NodeJS.Timeout | undefined;
-      const timer = setTimeout(() => {
-        timedOut = true;
+      const kill = () => {
         group("SIGTERM");
         hard = setTimeout(() => group("SIGKILL"), 10_000);
+      };
+      const timer = setTimeout(() => {
+        timedOut = true;
+        kill();
       }, opts.timeoutMin * 60_000);
+      signal?.addEventListener("abort", kill, { once: true });
       child.stdout.on("data", (d) => (tail = (tail + d).slice(-20_000)));
       child.stdout.pipe(out);
       child.stderr.pipe(out);
@@ -163,6 +171,7 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
       child.on("close", (code) => {
         clearTimeout(timer);
         clearTimeout(hard);
+        signal?.removeEventListener("abort", kill);
         resolve(sessionEnd(tail, timedOut, code, opts.timeoutMin));
       });
       child.stdin.end(taskPrompt(task, below));
@@ -173,6 +182,7 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
 export function createRunner(stacks: Stacks, session: (repo: string) => Session, opts: RunOpts = {}) {
   const runs = new Map<string, RunState>();
   const active = new Map<string, string>();
+  const stops = new Map<string, { ctrl: AbortController; done: Promise<RunState> }>();
   return {
     start(stackId: string): RunState {
       const busy = active.get(stackId);
@@ -187,13 +197,15 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
       active.set(stackId, state.id);
       stacks.saveRun(state);
       opts.log?.("info", "runner", "run.start", { run: state.id, stack: stackId, repo: stack.repo });
-      runStack(stacks, stackId, session(stack.repo), state, opts)
+      const ctrl = new AbortController();
+      const done = runStack(stacks, stackId, session(stack.repo), state, { ...opts, signal: ctrl.signal })
         .catch((err) => {
           Object.assign(state, { state: "stopped", reason: (err as Error).message });
           stacks.saveRun(state);
         })
         .finally(() => {
           active.delete(stackId);
+          stops.delete(stackId);
           const level = state.state === "done" ? "info" : "warn";
           opts.log?.(level, "runner", "run.end", { run: state.id, stack: stackId, task: state.current, state: state.state, reason: state.reason });
           try {
@@ -201,8 +213,16 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
           } catch (err) {
             opts.log?.("warn", "runner", "notify.error", { run: state.id, error: err });
           }
-        });
+        })
+        .then(() => state);
+      stops.set(stackId, { ctrl, done });
       return state;
+    },
+    stop(stackId: string): Promise<RunState> | null {
+      const s = stops.get(stackId);
+      if (!s) return null;
+      s.ctrl.abort();
+      return s.done;
     },
     get(id: string) {
       return runs.get(id) ?? stacks.run(id);

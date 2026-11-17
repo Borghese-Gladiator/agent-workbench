@@ -17,7 +17,7 @@ const flag = (name: string) => {
 
 console.error(`awb: AWB_HOME=${home}`);
 
-const COMMANDS = ["ui", "doctor", "daemon", "stack", "prove", "ship", "run", "retry", "show", "tasks", "cost", "logs", "task", "sessions", "wt"];
+const COMMANDS = ["ui", "doctor", "daemon", "stack", "prove", "ship", "run", "retry", "stop", "show", "tasks", "cost", "logs", "task", "sessions", "wt"];
 let lastError = "";
 const printError = console.error;
 console.error = (...args: unknown[]) => {
@@ -68,6 +68,9 @@ switch (cmd) {
     break;
   case "retry":
     process.exitCode = await retryCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"), rest.includes("--wait"));
+    break;
+  case "stop":
+    process.exitCode = await stopCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"));
     break;
   case "show":
     process.exitCode = await showCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"));
@@ -266,6 +269,26 @@ async function retryCmd(taskId: string | undefined, json: boolean, wait: boolean
     if (wait) r = await waitRun(d, r);
     printRun(r, json);
     return wait && r.state !== "done" ? 1 : 0;
+  } catch (err) {
+    console.error(`awb: ${(err as Error).message}`);
+    return 1;
+  }
+}
+
+async function stopCmd(id: string | undefined, json: boolean): Promise<number> {
+  if (!id) {
+    console.error("usage: awb stop <stack id | task id>");
+    return 2;
+  }
+  const d = await ensureDaemon(home);
+  try {
+    const r = await api(d, "/api/stop", { id });
+    if (json) console.log(JSON.stringify(r, null, 2));
+    else {
+      if (r.run) printRun(r.run, false);
+      for (const t of r.proofs) console.log(`stopped the proof of task ${t}`);
+    }
+    return 0;
   } catch (err) {
     console.error(`awb: ${(err as Error).message}`);
     return 1;

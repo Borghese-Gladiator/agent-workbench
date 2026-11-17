@@ -74,6 +74,7 @@ export function taskRoutes(
   logDir = "",
 ) {
   const proving = new Set<string>();
+  const proofs = new Map<string, AbortController>();
 
   async function syncPrs() {
     for (const t of stacks.shipped()) {
@@ -158,6 +159,8 @@ export function taskRoutes(
       if (unknown.length) return send(400, { error: `no claim ${unknown.join(", ")} in task ${t.id}` }), true;
 
       proving.add(t.id);
+      const ctrl = new AbortController();
+      proofs.set(t.id, ctrl);
       res.writeHead(200, { "content-type": "application/x-ndjson" });
       const line = (o: Json) => res.write(JSON.stringify(o) + "\n");
       const before = t.status;
@@ -168,7 +171,7 @@ export function taskRoutes(
       log("info", "prove", "start", { ...ids, rewrite: rewrite.length ? rewrite : undefined });
       let after: TaskStatus = before === "failed" ? "failed" : "waiting";
       try {
-        const r = await prove(t, b.worktree, readRunFile(home, b.repo, b.worktree), { ...proveDeps, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite);
+        const r = await prove(t, b.worktree, readRunFile(home, b.repo, b.worktree), { ...proveDeps, signal: ctrl.signal, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite);
         stacks.saveGate(attempt, r.gate);
         if (r.writer?.usd != null) stacks.setWriterCost(attempt, r.writer.usd);
         const failed = r.gate.rows.filter((x) => x.status === "FAIL").map((x) => `${x.id}: ${x.reasons.join(", ")}`);
@@ -182,6 +185,7 @@ export function taskRoutes(
         stacks.endAttempt(attempt);
         if (!ownedByRun) stacks.setStatus(t.id, after);
         proving.delete(t.id);
+        proofs.delete(t.id);
         res.end();
       }
       return true;
@@ -398,6 +402,29 @@ export function taskRoutes(
         stacks.fail(t.id, reason);
         return fail(err), true;
       }
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/stop") {
+      const b = await body();
+      const id = String(b.id ?? "");
+      let t: Task | undefined;
+      const stack = stacks.get(id);
+      if (!stack) {
+        try {
+          t = stacks.find(id);
+        } catch (err) {
+          return fail(err), true;
+        }
+        if (!t) return send(404, { error: `no stack or task ${id}` }), true;
+      }
+      const tasks = stack ? stack.tasks : [t!];
+      const stackId = stack ? stack.id : t!.stack_id;
+      const done = stack || runner.owns(t!.id) ? runner.stop(stackId) : null;
+      const proof = tasks.filter((x) => proofs.has(x.id));
+      for (const x of proof) proofs.get(x.id)!.abort();
+      if (!done && !proof.length) return send(409, { error: `nothing runs for ${id}` }), true;
+      log("info", "runner", "stop", { id, stack: stackId, proofs: proof.map((x) => x.id) });
+      return send(200, { run: done ? await done : null, proofs: proof.map((x) => x.id) }), true;
     }
 
     if (req.method === "POST" && url.pathname === "/api/sync") {
