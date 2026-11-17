@@ -276,19 +276,43 @@ async function runTestWriter(folder: string, worktree: string, claims: Claim[], 
   }
 }
 
-async function runRepoTests(folder: string, worktree: string, testCmd: string, log: (l: string) => void) {
+async function runRepoTests(folder: string, worktree: string, testCmd: string, log: (l: string) => void, name = "") {
   const files = repoTests(join(folder, "proof-tests"));
   const work = join(worktree, PROOF_DIR);
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work);
   try {
     for (const f of files) copyFileSync(join(folder, "proof-tests", f), join(work, f));
-    const cmd = fillTest(testCmd, files.map((f) => `${PROOF_DIR}/${f}`), join(folder, "proof", "junit.xml"));
-    log(`proof run: ${cmd}`);
+    const cmd = fillTest(testCmd, files.map((f) => `${PROOF_DIR}/${f}`), join(folder, "proof", `${name}junit.xml`));
+    log(`proof run${name ? " on the base commit" : ""}: ${cmd}`);
     const r = await run("sh", ["-c", `export PYTHONDONTWRITEBYTECODE=1\n${cmd}`], worktree);
-    writeFileSync(join(folder, "proof", "test.log"), r.out);
+    writeFileSync(join(folder, "proof", `${name}test.log`), r.out);
   } finally {
     rmSync(work, { recursive: true, force: true });
+  }
+}
+
+function mergeBase(worktree: string, base: string | null): string | null {
+  if (!base) return null;
+  for (const ref of [base, `origin/${base}`]) {
+    try {
+      return execFileSync("git", ["merge-base", "HEAD", ref], { cwd: worktree, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {}
+  }
+  return null;
+}
+
+async function runBaseTests(task: Task, folder: string, worktree: string, testCmd: string, log: (l: string) => void) {
+  const sha = mergeBase(worktree, task.base);
+  if (!sha) return log(`base run skipped: no merge base with ${task.base ?? "(no base)"}`);
+  if (git(worktree, "status", "--porcelain") !== "") return log("base run skipped: the worktree has uncommitted changes");
+  const head = git(worktree, "rev-parse", "HEAD");
+  const branch = git(worktree, "rev-parse", "--abbrev-ref", "HEAD");
+  git(worktree, "switch", "-q", "--detach", sha);
+  try {
+    await runRepoTests(folder, worktree, testCmd, log, "base-");
+  } finally {
+    git(worktree, "switch", "-q", ...(branch === "HEAD" ? ["--detach", head] : [branch]));
   }
 }
 
@@ -307,6 +331,7 @@ export function gateFromDisk(claims: Claim[], folder: string, worktree: string):
     testHashNow: testHash(join(folder, "proof-tests")),
     fileExists: existsSync,
     writerEnd: read("writer-end.txt") || undefined,
+    baseReport: read("base-junit.xml") ? junitReport(read("base-junit.xml")) : undefined,
   });
 }
 
@@ -374,7 +399,10 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
       const pw = await run(PLAYWRIGHT, ["test", "--config", "playwright.config.ts"], folder);
       writeFileSync(join(proof, "run.log"), pw.out);
     }
-    if (testCmd) await runRepoTests(folder, worktree, testCmd, deps.log);
+    if (testCmd) {
+      await runRepoTests(folder, worktree, testCmd, deps.log);
+      await runBaseTests(task, folder, worktree, testCmd, deps.log);
+    }
 
     const gate = gateFromDisk(task.claims, folder, worktree);
     writeFileSync(join(proof, "gate.json"), JSON.stringify(gate, null, 2));
