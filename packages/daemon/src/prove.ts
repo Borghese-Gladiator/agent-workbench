@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { runGate, claimTable, junitReport, type Claim, type GateResult, type Report } from "./gate.ts";
 import { parseRunMd, parseTest, fill, fillTest, type RunMd } from "./run-md.ts";
 import type { Task } from "./stacks.ts";
+import { tokenTotals } from "./usage.ts";
 
 const PKG = fileURLToPath(new URL("..", import.meta.url));
 const PLAYWRIGHT = join(PKG, "..", "..", "node_modules", ".bin", "playwright");
@@ -184,6 +185,7 @@ async function runClaude(cwd: string, args: string[], prompt: string, deps: Prov
   const r = await run(deps.claude, ["-p", ...args, "--output-format", "stream-json", "--verbose"], cwd, prompt, timeoutMin * 60_000);
   writeFileSync(logFile, r.out);
   const w = { ...writerEnd(r.out, r.timedOut, r.code, timeoutMin), timeoutMin };
+  if (w.usd === null) w.usd = tokenTotals(logFile).cost_usd;
   writeFileSync(join(dirname(logFile), "writer-end.txt"), w.end + "\n");
   deps.log(`test writer: ${w.end}${w.usd === null ? "" : `, ${w.usd.toFixed(2)} USD`}`);
   return w;

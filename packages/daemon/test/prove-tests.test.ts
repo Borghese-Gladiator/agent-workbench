@@ -65,3 +65,12 @@ test("prove: a writer that edits the source is refused, and the edit is undone",
   assert.equal(git(repo, "status", "--porcelain"), "");
   assert.match(git(repo, "show", "HEAD:add.mjs"), /a - b/);
 });
+
+test("prove: a writer that times out still has the cost of its messages", async () => {
+  const { repo, task, deps } = setup("a + b");
+  const msg = JSON.stringify({ type: "assistant", message: { id: "m1", model: "claude-opus-5-5", usage: { input_tokens: 1_000_000, output_tokens: 0 } } });
+  writeFileSync(deps.claude, `#!/bin/sh\ncat > /dev/null\necho '${msg}'\nexec sleep 5\n`);
+  const r = await prove(task, repo, RUN_MD, { ...deps, writerTimeoutMin: 0.01 });
+  assert.equal(r.writer?.end, "timeout after 0.01 min");
+  assert.equal(r.writer?.usd?.toFixed(2), "4.00");
+});
