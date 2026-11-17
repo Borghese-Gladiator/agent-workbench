@@ -10,8 +10,25 @@ import type { RunState, Stacks, Task } from "./stacks.ts";
 import type { Log } from "./log.ts";
 
 export type { RunState };
-export type Session = (task: Task, below: Task[]) => Promise<string | void>;
+export type Session = (task: Task, below: Task[], resume?: boolean) => Promise<string | void>;
 export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log; sessionUsd?: (task: Task) => number | null; maxStacks?: number };
+
+export const RESUME_PROMPT = "Continue the task. The last session stopped on an API error.";
+
+export function transientError(text: string): string | null {
+  return text.match(/API Error: (429|5\d\d)\b|overloaded|Connection error|ECONNREFUSED|ECONNRESET|fetch failed/i)?.[0] ?? null;
+}
+
+export function initSessionId(out: string): string | null {
+  for (const line of out.split("\n")) {
+    if (!line.includes('"subtype":"init"')) continue;
+    try {
+      const j = JSON.parse(line);
+      if (j.type === "system" && typeof j.session_id === "string") return j.session_id;
+    } catch {}
+  }
+  return null;
+}
 
 export function sessionEnd(out: string, timedOut: boolean, code: number | null, timeoutMin: number): string {
   if (timedOut) return `timeout after ${timeoutMin} min`;
@@ -22,9 +39,10 @@ export function sessionEnd(out: string, timedOut: boolean, code: number | null, 
       last = JSON.parse(line);
     } catch {}
   }
-  if (last && last.subtype !== "success") return String(last.subtype);
-  if (code !== 0) return `exit ${code}`;
-  return "";
+  const fail = last && last.subtype !== "success" ? String(last.subtype) : code !== 0 ? `exit ${code}` : "";
+  if (!fail && !last?.is_error) return "";
+  const api = transientError(last ? String(last.result ?? "") : out.split("\n").slice(-20).join("\n"));
+  return api ? `${fail || "error"}: ${api}` : fail;
 }
 
 export function taskPrompt(task: Task, below: Task[]): string {
@@ -85,12 +103,16 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
     const ids = { task: task.id, run: state.id, stack: stackId, repo: stack.repo };
     opts.log?.("info", "runner", "session.start", { ...ids, branch: task.branch });
     let how = "";
-    try {
-      how = (await session(task, stack.tasks.slice(0, i))) || "";
-    } catch (err) {
-      state.reason = (err as Error).message;
+    for (let n = 0; ; n++) {
+      try {
+        how = (await session(task, stack.tasks.slice(0, i), n > 0)) || "";
+      } catch (err) {
+        state.reason = (err as Error).message;
+      }
+      opts.log?.(how || state.reason ? "warn" : "info", "runner", "session.ended", { ...ids, how: how || undefined, error: state.reason ?? undefined, usd: opts.sessionUsd?.(task) ?? undefined });
+      if (n >= (state.retries ?? 1) || state.reason || stacks.task(task.id)!.status === "done" || !transientError(how)) break;
+      opts.log?.("warn", "runner", "session.retry", { ...ids, attempt: n + 1, how });
     }
-    opts.log?.(how || state.reason ? "warn" : "info", "runner", "session.ended", { ...ids, how: how || undefined, error: state.reason ?? undefined, usd: opts.sessionUsd?.(task) ?? undefined });
     const after = stacks.task(task.id)!;
     if (after.status !== "done") {
       const base = state.reason ?? failReason(stacks, task.id);
@@ -106,6 +128,13 @@ const AWB = fileURLToPath(new URL("../../cli/bin/awb", import.meta.url));
 
 export const MAX_STACKS = 5;
 
+export function retryCount(v: unknown): number {
+  if (v === undefined || v === null) return 1;
+  const n = typeof v === "number" ? v : /^\d+$/.test(String(v)) ? Number(v) : NaN;
+  if (!Number.isInteger(n) || n < 0 || n > 5) throw new StackError(`retries must be an integer from 0 to 5, not ${v}`, 400);
+  return n;
+}
+
 export function stackLimit(v: string | undefined): number {
   const n = Number(v || 2);
   if (!Number.isInteger(n) || n < 1) return 2;
@@ -113,7 +142,8 @@ export function stackLimit(v: string | undefined): number {
 }
 
 export function claudeSession(opts: { home: string; repo: string; timeoutMin: number }): Session {
-  return async (task, below) => {
+  const claudeIds = new Map<string, string>();
+  return async (task, below, resume = false) => {
     const worktree = join(opts.home, "worktrees", task.id);
     if (!existsSync(worktree)) {
       mkdirSync(join(opts.home, "worktrees"), { recursive: true });
@@ -135,7 +165,9 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
     mkdirSync(task.folder, { recursive: true });
     const n = readdirSync(task.folder).filter((f) => /^session-\d+\.jsonl$/.test(f)).length + 1;
     const out = createWriteStream(join(task.folder, `session-${n}.jsonl`));
+    const claudeId = resume ? claudeIds.get(task.id) : undefined;
     const args = [
+      ...(claudeId ? ["--resume", claudeId] : []),
       "-p",
       "--permission-mode", "acceptEdits",
       "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep", "Bash",
@@ -145,6 +177,7 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
       const child = spawn(AWB, args, { cwd: worktree, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, AWB_HOME: opts.home, AWB_SESSION_DEADLINE: String(Date.now() + opts.timeoutMin * 60_000) }, detached: true });
       let timedOut = false;
       let tail = "";
+      let head = "";
       const group = (sig: NodeJS.Signals) => {
         try {
           process.kill(-child.pid!, sig);
@@ -156,16 +189,21 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
         group("SIGTERM");
         hard = setTimeout(() => group("SIGKILL"), 10_000);
       }, opts.timeoutMin * 60_000);
-      child.stdout.on("data", (d) => (tail = (tail + d).slice(-20_000)));
+      child.stdout.on("data", (d) => {
+        tail = (tail + d).slice(-20_000);
+        if (head.length < 200_000) head += d;
+      });
       child.stdout.pipe(out);
       child.stderr.pipe(out);
       child.on("error", (err) => resolve(`could not start: ${err.message}`));
       child.on("close", (code) => {
         clearTimeout(timer);
         clearTimeout(hard);
+        const id = initSessionId(head);
+        if (id) claudeIds.set(task.id, id);
         resolve(sessionEnd(tail, timedOut, code, opts.timeoutMin));
       });
-      child.stdin.end(taskPrompt(task, below));
+      child.stdin.end(claudeId ? RESUME_PROMPT : taskPrompt(task, below));
     });
   };
 }
@@ -174,7 +212,7 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
   const runs = new Map<string, RunState>();
   const active = new Map<string, string>();
   return {
-    start(stackId: string): RunState {
+    start(stackId: string, retries = 1): RunState {
       const busy = active.get(stackId);
       if (busy) return runs.get(busy)!;
       const max = opts.maxStacks ?? 2;
@@ -182,7 +220,7 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
         throw new StackError(`${active.size} stacks are running and the limit is ${max} (AWB_MAX_STACKS, at most ${MAX_STACKS}); wait for one to end`);
       }
       const stack = stacks.get(stackId)!;
-      const state: RunState = { id: randomUUID(), stackId, state: "running", current: null, reason: null };
+      const state: RunState = { id: randomUUID(), stackId, state: "running", current: null, reason: null, retries };
       runs.set(state.id, state);
       active.set(stackId, state.id);
       stacks.saveRun(state);

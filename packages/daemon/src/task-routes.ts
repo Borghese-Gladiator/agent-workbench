@@ -9,7 +9,7 @@ import { readRunFile } from "./run-md.ts";
 import { costReport, costText } from "./cost.ts";
 import type { DatabaseSync } from "node:sqlite";
 import { ship, ShipRefused, syncStatus } from "./ship.ts";
-import type { createRunner } from "./runner.ts";
+import { retryCount, type createRunner } from "./runner.ts";
 
 export function proofFile(home: string, path: string): string | null {
   try {
@@ -228,7 +228,7 @@ export function taskRoutes(
       const stack = b.stackId ? stacks.get(b.stackId) : stacks.newestStack(b.repo ?? "");
       if (!stack) return send(404, { error: "no stack for this repo; run awb stack set first" }), true;
       try {
-        return send(202, runner.start(stack.id)), true;
+        return send(202, runner.start(stack.id, retryCount(b.retries))), true;
       } catch (err) {
         return fail(err), true;
       }
@@ -307,6 +307,10 @@ export function taskRoutes(
       }
       if (db.prepare("SELECT 1 FROM sessions WHERE id = ?").get(id)) {
         return answer(pick("sessions s", "s.id = ?", "s.started_at", id), `session ${id} has no claude session id`);
+      }
+      const byClaude = db.prepare("SELECT session_id FROM events WHERE claude_session_id = ? ORDER BY id DESC LIMIT 1").get(id) as Json | undefined;
+      if (byClaude) {
+        return answer(pick("sessions s", "s.id = ?", "s.started_at", String(byClaude.session_id)), `no session for claude session ${id}`, { claude_session_id: id });
       }
       let t: Task | undefined;
       try {
@@ -399,11 +403,17 @@ export function taskRoutes(
         return fail(err), true;
       }
       if (!t) return send(404, { error: `no task ${b.taskId}` }), true;
+      let retries;
+      try {
+        retries = retryCount(b.retries);
+      } catch (err) {
+        return fail(err), true;
+      }
       if (t.status !== "failed") return send(409, { error: `task ${t.id} is ${t.status}; only a failed task can be retried` }), true;
       const reason = t.fail_reason ?? "";
       stacks.retry(t.id);
       try {
-        return send(202, runner.start(t.stack_id)), true;
+        return send(202, runner.start(t.stack_id, retries)), true;
       } catch (err) {
         stacks.fail(t.id, reason);
         return fail(err), true;

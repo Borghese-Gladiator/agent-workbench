@@ -14,6 +14,7 @@ const flag = (name: string) => {
   const i = rest.indexOf(name);
   return i >= 0 ? rest[i + 1] : undefined;
 };
+const positional = () => rest.find((a, i) => !a.startsWith("-") && rest[i - 1] !== "--retries");
 
 console.error(`awb: AWB_HOME=${home}`);
 
@@ -64,10 +65,10 @@ switch (cmd) {
     process.exitCode = await shipCmd(rest.includes("--json"));
     break;
   case "run":
-    process.exitCode = await runCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"), rest.includes("--wait"));
+    process.exitCode = await runCmd(positional(), rest.includes("--json"), rest.includes("--wait"), flag("--retries"));
     break;
   case "retry":
-    process.exitCode = await retryCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"), rest.includes("--wait"));
+    process.exitCode = await retryCmd(positional(), rest.includes("--json"), rest.includes("--wait"), flag("--retries"));
     break;
   case "show":
     process.exitCode = await showCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"));
@@ -241,12 +242,12 @@ async function waitRun(d: Awaited<ReturnType<typeof ensureDaemon>>, r: any): Pro
   return r;
 }
 
-async function runCmd(stackId: string | undefined, json: boolean, wait: boolean): Promise<number> {
+async function runCmd(stackId: string | undefined, json: boolean, wait: boolean, retries?: string): Promise<number> {
   const git = here();
   if (!git) return 1;
   const d = await ensureDaemon(home);
   try {
-    let r = await api(d, "/api/run", { repo: git.repo, stackId });
+    let r = await api(d, "/api/run", { repo: git.repo, stackId, retries });
     if (wait) r = await waitRun(d, r);
     printRun(r, json);
     return wait && r.state !== "done" ? 1 : 0;
@@ -256,14 +257,14 @@ async function runCmd(stackId: string | undefined, json: boolean, wait: boolean)
   }
 }
 
-async function retryCmd(taskId: string | undefined, json: boolean, wait: boolean): Promise<number> {
+async function retryCmd(taskId: string | undefined, json: boolean, wait: boolean, retries?: string): Promise<number> {
   if (!taskId) {
-    console.error("usage: awb retry <task id>");
+    console.error("usage: awb retry <task id> [--retries N]");
     return 2;
   }
   const d = await ensureDaemon(home);
   try {
-    let r = await api(d, "/api/retry", { taskId });
+    let r = await api(d, "/api/retry", { taskId, retries });
     if (wait) r = await waitRun(d, r);
     printRun(r, json);
     return wait && r.state !== "done" ? 1 : 0;

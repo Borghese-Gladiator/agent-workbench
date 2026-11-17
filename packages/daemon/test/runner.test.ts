@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "../src/store.ts";
 import { createStacks, migrateStacks, taskBranch } from "../src/stacks.ts";
-import { runStack, taskPrompt, type RunState, type Session } from "../src/runner.ts";
+import { initSessionId, retryCount, runStack, sessionEnd, taskPrompt, transientError, type RunState, type Session } from "../src/runner.ts";
 
 const setup = () => {
   const store = openStore(":memory:");
@@ -85,6 +85,69 @@ test("a session that throws marks the task failed with the reason", async () => 
   const r = await runStack(s, stack.id, async () => { throw new Error("git worktree add failed"); }, state(stack.id));
   assert.equal(r.reason, "git worktree add failed");
   assert.equal(s.get(stack.id)!.tasks[0].status, "failed");
+});
+
+for (const [line, hit] of [
+  ["API Error: 529 overloaded_error", "API Error: 529"],
+  ["API Error: 500 Internal server error", "API Error: 500"],
+  ["API Error: 429 rate_limit_error", "API Error: 429"],
+  ["API Error: Connection error.", "Connection error"],
+  ["connect ECONNREFUSED 127.0.0.1:443", "ECONNREFUSED"],
+  ["read ECONNRESET", "ECONNRESET"],
+  ["TypeError: fetch failed", "fetch failed"],
+  ["API Error: 400 invalid_request_error", null],
+  ["API Error: 401 authentication_error", null],
+  ["error_max_turns", null],
+  ["", null],
+] as const) {
+  test(`transientError(${JSON.stringify(line)}) is ${hit}`, () => {
+    assert.equal(transientError(line), hit);
+  });
+}
+
+test("sessionEnd names a transient error from the result line, and initSessionId reads the init line", () => {
+  const init = JSON.stringify({ type: "system", subtype: "init", session_id: "claude-1" });
+  const tool = JSON.stringify({ type: "user", content: "curl: ECONNREFUSED" });
+  const ok = JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "done" });
+  const api = JSON.stringify({ type: "result", subtype: "success", is_error: true, result: "API Error: 529 overloaded" });
+  assert.equal(sessionEnd([init, tool, ok].join("\n"), false, 0, 45), "");
+  assert.equal(sessionEnd([init, api].join("\n"), false, 1, 45), "exit 1: API Error: 529");
+  assert.equal(sessionEnd("TypeError: fetch failed", false, 1, 45), "exit 1: fetch failed");
+  assert.equal(initSessionId([init, api].join("\n")), "claude-1");
+  assert.equal(initSessionId(api), null);
+});
+
+for (const [v, n] of [[undefined, 1], [0, 0], ["3", 3], [5, 5], ["6", null], [-1, null], ["1.5", null], ["x", null], ["", null]] as const) {
+  test(`retryCount(${JSON.stringify(v)}) is ${n ?? "an error"}`, () => {
+    if (n === null) assert.throws(() => retryCount(v), /retries must be an integer from 0 to 5/);
+    else assert.equal(retryCount(v), n);
+  });
+}
+
+for (const [retries, want] of [[1, "done"], [0, "stopped"]] as const) {
+  test(`a transient error on the first session gives ${want} with retries ${retries}`, async () => {
+    const s = setup();
+    const { stack } = s.set({ ...where, tasks: three.slice(0, 1) });
+    const calls: boolean[] = [];
+    const flaky: Session = async (task, _below, resume = false) => {
+      calls.push(resume);
+      if (calls.length === 1) return "exit 1: API Error: 529";
+      s.setPr(task.id, 1, "https://gh/pr/1");
+    };
+    const r = await runStack(s, stack.id, flaky, { ...state(stack.id), retries });
+    assert.equal(r.state, want);
+    assert.deepEqual(calls, retries ? [false, true] : [false]);
+    if (!retries) assert.match(r.reason!, /session: exit 1: API Error: 529/);
+  });
+}
+
+test("a session that fails without a transient error is not retried", async () => {
+  const s = setup();
+  const { stack } = s.set({ ...where, tasks: three.slice(0, 1) });
+  let calls = 0;
+  const r = await runStack(s, stack.id, async () => (calls++, "error_max_turns"), { ...state(stack.id), retries: 3 });
+  assert.equal(r.state, "stopped");
+  assert.equal(calls, 1);
 });
 
 test("the task prompt has the claims and the titles of the tasks below", () => {
