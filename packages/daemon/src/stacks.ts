@@ -31,7 +31,7 @@ export function parseSince(v: string, now = Date.now()): string {
   return d.toISOString();
 }
 
-export type RunState = { id: string; stackId: string; state: "running" | "done" | "stopped"; current: string | null; reason: string | null };
+export type RunState = { id: string; stackId: string; state: "running" | "done" | "stopped"; current: string | null; reason: string | null; retries?: number };
 
 export type Stack = { id: string; repo: string; base: string | null; version: number; created_at: string; tasks: Task[] };
 
