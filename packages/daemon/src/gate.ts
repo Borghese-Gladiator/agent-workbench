@@ -16,7 +16,10 @@ export type GateInput = {
   fileExists: (path: string) => boolean;
   writerEnd?: string;
   baseReport?: Report;
+  carried?: Carried[];
 };
+
+export type Carried = { label: string; claims: Claim[]; report: Report };
 
 export type GateRow = { id: string; tests: number; status: "PASS" | "FAIL"; reasons: string[]; videos: string[]; traces: string[] };
 export type GateResult = { pass: boolean; rows: GateRow[]; head: string; reasons: string[] };
@@ -37,9 +40,7 @@ export function runGate(input: GateInput): GateResult {
   if (input.dirty) global.push("source has uncommitted changes");
   if (input.testHashAtStart !== input.testHashNow) global.push("a test file changed after the run started");
 
-  const specs = specsOf(input.report);
-  const baseSpecs = input.baseReport ? specsOf(input.baseReport) : [];
-  const rows = input.claims.map((c): GateRow => {
+  const row = (c: Claim, specs: ReportSpec[], id = c.id, baseSpecs: ReportSpec[] = []): GateRow => {
     const mine = specs.filter((s) => new RegExp(`^${c.id}\\b`).test(s.title));
     const tests = mine.flatMap((s) => s.tests);
     const results = tests.flatMap((t) => t.results);
@@ -60,14 +61,20 @@ export function runGate(input: GateInput): GateResult {
     if (c.proof !== "test" && (videos.some((v) => !v) || traces.some((t) => !t))) reasons.push("no video or trace");
     reasons.push(...global);
     return {
-      id: c.id,
+      id,
       tests: tests.length,
       status: reasons.length ? "FAIL" : "PASS",
       reasons,
       videos: videos.filter((v): v is string => !!v),
       traces: traces.filter((t): t is string => !!t),
     };
-  });
+  };
+  const specs = specsOf(input.report);
+  const baseSpecs = input.baseReport ? specsOf(input.baseReport) : [];
+  const rows = [
+    ...input.claims.map((c) => row(c, specs, c.id, baseSpecs)),
+    ...(input.carried ?? []).flatMap((k) => k.claims.map((c) => row(c, specsOf(k.report), `${k.label}/${c.id}`))),
+  ];
   return { pass: rows.length > 0 && rows.every((r) => r.status === "PASS"), rows, head: input.head, reasons: global };
 }
 

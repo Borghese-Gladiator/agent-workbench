@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, sep } from "node:path";
 import { parseSince, StackError, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
 import { LEVELS, logText, readLog, type Level, type Log, type LogFilter } from "./log.ts";
-import { prove, run, type ProveDeps } from "./prove.ts";
+import { prove, run, type CarriedTask, type ProveDeps } from "./prove.ts";
 import { readRunFile } from "./run-md.ts";
 import { costReport, costText } from "./cost.ts";
 import type { DatabaseSync } from "node:sqlite";
@@ -62,6 +62,16 @@ export function costOf(transcript: string): number {
 export const toolCallsOf = (transcript: string) => readFileSync(transcript, "utf8").match(/"type":\s*"tool_use"/g)?.length ?? 0;
 
 type Json = Record<string, any>;
+
+export function carriedClaims(stacks: Stacks, t: Task): CarriedTask[] {
+  const below = stacks.get(t.stack_id)?.tasks.filter((x) => x.position < t.position) ?? [];
+  return below.flatMap((x) => {
+    const gate = stacks.history(x.id).flatMap((a) => a.gates).findLast((g) => g.pass);
+    const passed = new Set<string>(gate ? gate.result.rows.filter((r: any) => r.status === "PASS").map((r: any) => r.id) : []);
+    const claims = x.claims.filter((c) => c.proof === "test" && passed.has(c.id));
+    return claims.length ? [{ label: `T${x.position + 1}`, claims, folder: x.folder }] : [];
+  });
+}
 
 export function taskRoutes(
   stacks: Stacks,
@@ -168,7 +178,7 @@ export function taskRoutes(
       log("info", "prove", "start", { ...ids, rewrite: rewrite.length ? rewrite : undefined });
       let after: TaskStatus = before === "failed" ? "failed" : "waiting";
       try {
-        const r = await prove(t, b.worktree, readRunFile(home, b.repo, b.worktree), { ...proveDeps, deadline: Number(b.deadline) || undefined, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite);
+        const r = await prove(t, b.worktree, readRunFile(home, b.repo, b.worktree), { ...proveDeps, deadline: Number(b.deadline) || undefined, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite, carriedClaims(stacks, t));
         stacks.saveGate(attempt, r.gate);
         if (r.writer?.usd != null) stacks.setWriterCost(attempt, r.writer.usd);
         const failed = r.gate.rows.filter((x) => x.status === "FAIL").map((x) => `${x.id}: ${x.reasons.join(", ")}`);

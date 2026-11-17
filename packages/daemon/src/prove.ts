@@ -4,7 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpat
 import { createServer, type AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runGate, claimTable, junitReport, type Claim, type GateResult, type Report } from "./gate.ts";
+import { runGate, claimTable, junitReport, type Carried, type Claim, type GateResult, type Report } from "./gate.ts";
 import { parseRunMd, parseTest, fill, fillTest, type RunMd } from "./run-md.ts";
 import type { Task } from "./stacks.ts";
 import { tokenTotals } from "./usage.ts";
@@ -276,17 +276,17 @@ async function runTestWriter(folder: string, worktree: string, claims: Claim[], 
   }
 }
 
-async function runRepoTests(folder: string, worktree: string, testCmd: string, log: (l: string) => void, name = "") {
-  const files = repoTests(join(folder, "proof-tests"));
+async function runRepoTests(folder: string, worktree: string, testCmd: string, log: (l: string) => void, from = folder, name = "junit") {
+  const files = repoTests(join(from, "proof-tests"));
   const work = join(worktree, PROOF_DIR);
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work);
   try {
-    for (const f of files) copyFileSync(join(folder, "proof-tests", f), join(work, f));
-    const cmd = fillTest(testCmd, files.map((f) => `${PROOF_DIR}/${f}`), join(folder, "proof", `${name}junit.xml`));
-    log(`proof run${name ? " on the base commit" : ""}: ${cmd}`);
+    for (const f of files) copyFileSync(join(from, "proof-tests", f), join(work, f));
+    const cmd = fillTest(testCmd, files.map((f) => `${PROOF_DIR}/${f}`), join(folder, "proof", `${name}.xml`));
+    log(`proof run${name === "base-junit" ? " on the base commit" : ""}: ${cmd}`);
     const r = await run("sh", ["-c", `export PYTHONDONTWRITEBYTECODE=1\n${cmd}`], worktree);
-    writeFileSync(join(folder, "proof", `${name}test.log`), r.out);
+    writeFileSync(join(folder, "proof", `${name.replace(/junit$/, "test")}.log`), r.out);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -310,7 +310,7 @@ async function runBaseTests(task: Task, folder: string, worktree: string, testCm
   const branch = git(worktree, "rev-parse", "--abbrev-ref", "HEAD");
   git(worktree, "switch", "-q", "--detach", sha);
   try {
-    await runRepoTests(folder, worktree, testCmd, log, "base-");
+    await runRepoTests(folder, worktree, testCmd, log, folder, "base-junit");
   } finally {
     git(worktree, "switch", "-q", ...(branch === "HEAD" ? ["--detach", head] : [branch]));
   }
@@ -332,8 +332,13 @@ export function gateFromDisk(claims: Claim[], folder: string, worktree: string):
     fileExists: existsSync,
     writerEnd: read("writer-end.txt") || undefined,
     baseReport: read("base-junit.xml") ? junitReport(read("base-junit.xml")) : undefined,
+    carried: (read("carried.json") ? (JSON.parse(read("carried.json")) as CarriedTask[]) : []).map(
+      (k): Carried => ({ label: k.label, claims: k.claims, report: read(`carried-${k.label}.xml`) ? junitReport(read(`carried-${k.label}.xml`)) : { suites: [] } }),
+    ),
   });
 }
+
+export type CarriedTask = { label: string; claims: Claim[]; folder: string };
 
 export function joinWriterEnds(a: WriterEnd, b: WriterEnd): WriterEnd {
   const usd = a.usd === null && b.usd === null ? null : (a.usd ?? 0) + (b.usd ?? 0);
@@ -352,13 +357,13 @@ async function writeMissing(claims: Claim[], tests: string, proof: string, log: 
   return w;
 }
 
-export type ProveResult ={ gate: GateResult; table: string; folder: string; writer: WriterEnd | null };
+export type ProveResult = { gate: GateResult; table: string; folder: string; writer: WriterEnd | null };
 
-export async function prove(task: Task, worktree: string, runMdText: string, deps: ProveDeps, rewrite: string[] = []): Promise<ProveResult> {
+export async function prove(task: Task, worktree: string, runMdText: string, deps: ProveDeps, rewrite: string[] = [], carried: CarriedTask[] = []): Promise<ProveResult> {
   const browserClaims = task.claims.filter((c) => c.proof !== "test");
   const testClaims = task.claims.filter((c) => c.proof === "test");
   const runMd = browserClaims.length ? parseRunMd(runMdText) : null;
-  const testCmd = testClaims.length ? parseTest(runMdText) : null;
+  const testCmd = testClaims.length || carried.length ? parseTest(runMdText) : null;
 
   mkdirSync(task.folder, { recursive: true });
   const folder = realpathSync(task.folder);
@@ -399,9 +404,13 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
       const pw = await run(PLAYWRIGHT, ["test", "--config", "playwright.config.ts"], folder);
       writeFileSync(join(proof, "run.log"), pw.out);
     }
-    if (testCmd) {
+    if (testClaims.length && testCmd) {
       await runRepoTests(folder, worktree, testCmd, deps.log);
       await runBaseTests(task, folder, worktree, testCmd, deps.log);
+    }
+    if (carried.length && testCmd) {
+      writeFileSync(join(proof, "carried.json"), JSON.stringify(carried));
+      for (const k of carried) await runRepoTests(folder, worktree, testCmd, deps.log, k.folder, `carried-${k.label}`);
     }
 
     const gate = gateFromDisk(task.claims, folder, worktree);
