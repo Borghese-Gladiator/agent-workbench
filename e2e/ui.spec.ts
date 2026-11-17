@@ -20,15 +20,14 @@ test("Live shows the stopped run, quiet and lost sessions, the USD column and th
   await expect(row(page, "lost-branch").getByRole("cell").first()).toHaveText("lostits awb process is gone");
   await expect(row(page, "quiet-branch").getByRole("cell").first()).toHaveText("quietno event in the quiet time");
   const color = (sel: string) => page.locator(sel).first().evaluate((e) => getComputedStyle(e).color);
-  const [fail, muted, text] = [await color(".card p.FAIL"), await color("#status"), await color("h2")];
+  const [fail, text] = [await color(".card p.FAIL"), await color("h2")];
   expect(fail).not.toBe(text);
-  expect(muted).not.toBe(text);
-  expect(await color("td.lost")).toBe(fail);
-  expect(await color("td.quiet")).toBe(muted);
+  expect(await color(".badge.lost")).toBe(fail);
+  expect(await color(".badge.quiet")).not.toBe(fail);
 
-  await expect(page.getByRole("columnheader", { name: "USD" })).toBeVisible();
-  for (const branch of ["awb/scoreboard", "awb/footer"]) await expect(row(page, branch).locator("td.num")).toHaveText("0.60");
-  await expect(page.locator("#today")).toHaveText("today 2.70 USD");
+  await expect(page.getByRole("columnheader", { name: "USD" }).first()).toBeVisible();
+  for (const branch of ["awb/scoreboard", "awb/footer"]) await expect(page.getByRole("table").first().getByRole("row").filter({ hasText: branch }).locator("td.num")).toHaveText("0.60");
+  await expect(page.locator("aside .foot")).toContainText("Today 2.70 USD");
   await shot(page, "1-live");
 });
 
@@ -57,7 +56,7 @@ test("the failed task page shows its logs, the setup log and the writer end", as
   await expect(page.getByRole("heading", { level: 2 })).toHaveText("Footer failed");
   await expect(page.getByText(/^the gate failed at \w+: C2 not passed/)).toBeVisible();
   await expect(page.getByText("success, 3 turns", { exact: true })).toHaveClass("PASS");
-  const logs = page.locator("details").filter({ has: page.getByText(/^Logs \(\d+ lines\)$/) });
+  const logs = page.locator("details").filter({ has: page.getByText(/^Logs \(\d+ lines · \d+ errors?\)$/) });
   await expect(logs).toHaveAttribute("open", "");
   await expect(logs.locator("pre").first()).toContainText("runner.session.start");
   await expect(logs.locator("pre").first()).toContainText("prove.gate");
@@ -77,7 +76,7 @@ test("Rewrite test removes the test of a claim and runs the real proof again", a
   await expect(page.getByRole("checkbox", { name: "C1" })).not.toBeChecked();
   await expect(page.getByRole("checkbox", { name: "C2" })).toBeChecked();
   await page.getByRole("button", { name: "Rewrite test" }).click();
-  const out = page.locator("#rewrite-out");
+  const out = page.getByLabel("Rewrite output");
   await expect(out).toContainText("removed for a rewrite: c2.spec.ts", { timeout: 60_000 });
   await expect(out).toContainText("test writer: C2");
   await expect(out).toContainText("proof run: playwright test");
@@ -134,4 +133,29 @@ test("a task that is not failed has no action buttons", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 2 })).toHaveText("Scoreboard done");
   await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Drop" })).toHaveCount(0);
+});
+
+test("Logs filters by level and task, and the task page links to its logs", async ({ page }) => {
+  await page.goto("/#/logs");
+  await expect(page.getByRole("heading", { level: 2 })).toHaveText("Logs");
+  const pre = page.getByLabel("Log lines");
+  await expect(pre).toContainText("daemon.start");
+  await page.getByLabel("Level").selectOption("error");
+  await expect(pre).not.toContainText("daemon.start");
+  await expect(pre).toContainText("runner.task.failed");
+  await expect(pre.locator(".badge")).not.toHaveText(["INFO"]);
+  await shot(page, "9-logs-errors");
+
+  await page.goto(`/#/task/${T1}`);
+  await page.getByText(/^Logs \(/).click();
+  await page.getByRole("link", { name: "All logs of this task" }).click();
+  await expect(page).toHaveURL(new RegExp(`#/logs/${T1}$`));
+  await expect(page.getByLabel("Task")).toHaveValue(T1);
+  await expect(pre).toContainText("runner.session.start");
+  await expect(pre).toContainText("ship.pr");
+  const ids = await pre.evaluate((el) => [...el.textContent!.matchAll(/task=(\w+)/g)].map((m) => m[1]));
+  expect(ids.length).toBeGreaterThan(0);
+  expect(ids.every((id) => T1.startsWith(id))).toBe(true);
+  await expect(page.getByRole("link", { name: "Logs" })).toHaveAttribute("aria-current", "page");
+  await shot(page, "10-logs-task");
 });

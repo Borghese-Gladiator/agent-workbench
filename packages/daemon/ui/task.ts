@@ -70,7 +70,7 @@ function Rewrite({ t, msg, setMsg }: { t: Json; msg: [string, boolean]; setMsg: 
         <button class="plain" disabled=${!t.worktree || busy}>Rewrite test</button>
       </div>
       ${t.worktree ? null : html`<p class="muted">This task has no worktree, so the proof cannot run from here.</p>`}
-      ${out === null ? null : html`<pre>${out}</pre>`}
+      ${out === null ? null : html`<pre aria-label="Rewrite output">${out}</pre>`}
     </form>
   </div>`;
 }
