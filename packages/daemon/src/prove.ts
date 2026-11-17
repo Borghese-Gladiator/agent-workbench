@@ -298,7 +298,24 @@ export function gateFromDisk(claims: Claim[], folder: string, worktree: string):
   });
 }
 
-export type ProveResult = { gate: GateResult; table: string; folder: string; writer: WriterEnd | null };
+export function joinWriterEnds(a: WriterEnd, b: WriterEnd): WriterEnd {
+  const usd = a.usd === null && b.usd === null ? null : (a.usd ?? 0) + (b.usd ?? 0);
+  return { ...b, end: `${a.end}; rerun: ${b.end}`, usd };
+}
+
+async function writeMissing(claims: Claim[], tests: string, proof: string, log: (l: string) => void, write: (c: Claim[]) => Promise<WriterEnd>): Promise<WriterEnd | null> {
+  const missing = claimsWithoutTest(claims, tests);
+  if (!missing.length) return null;
+  const first = await write(missing);
+  const still = claimsWithoutTest(claims, tests);
+  if (!still.length || first.end.startsWith("timeout")) return first;
+  log(`test writer: rerun for ${still.map((c) => c.id).join(", ")}`);
+  const w = joinWriterEnds(first, await write(still));
+  writeFileSync(join(proof, "writer-end.txt"), w.end + "\n");
+  return w;
+}
+
+export type ProveResult ={ gate: GateResult; table: string; folder: string; writer: WriterEnd | null };
 
 export async function prove(task: Task, worktree: string, runMdText: string, deps: ProveDeps, rewrite: string[] = []): Promise<ProveResult> {
   const browserClaims = task.claims.filter((c) => c.proof !== "test");
@@ -323,10 +340,7 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
   if (removed.length) deps.log(`removed for a rewrite: ${removed.join(", ")}`);
 
   let writer: WriterEnd | null = null;
-  if (testCmd) {
-    const missing = claimsWithoutTest(testClaims, tests);
-    if (missing.length) writer = await runTestWriter(folder, worktree, missing, testCmd, deps);
-  }
+  if (testCmd) writer = await writeMissing(testClaims, tests, proof, deps.log, (c) => runTestWriter(folder, worktree, c, testCmd, deps));
 
   const app = runMd ? await startApp(runMd, worktree, deps.log) : null;
   try {
@@ -339,8 +353,7 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
           `import { test } from "@playwright/test";\ntest("seed", async ({ page }) => {\n  await page.goto(${JSON.stringify(runMd.ready)});\n});\n`,
         );
       }
-      const missing = claimsWithoutTest(browserClaims, tests);
-      if (missing.length) writer = await runWriter(folder, missing, app.url, runMd.ready, deps);
+      writer = (await writeMissing(browserClaims, tests, proof, deps.log, (c) => runWriter(folder, c, app.url, runMd.ready, deps))) ?? writer;
     }
 
     writeFileSync(join(proof, "test-hash.txt"), testHash(tests) + "\n");
