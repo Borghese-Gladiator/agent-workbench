@@ -287,6 +287,7 @@ async function stopCmd(id: string | undefined, json: boolean): Promise<number> {
     else {
       if (r.run) printRun(r.run, false);
       for (const t of r.proofs) console.log(`stopped the proof of task ${t}`);
+      for (const pid of r.sessions ?? []) console.log(`sent SIGTERM to session pid ${pid}`);
     }
     return 0;
   } catch (err) {

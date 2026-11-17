@@ -63,6 +63,26 @@ export const toolCallsOf = (transcript: string) => readFileSync(transcript, "utf
 
 type Json = Record<string, any>;
 
+export function isAwbSession(pid: number): boolean {
+  try {
+    return /cli\/src\/main\.ts/.test(execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }));
+  } catch {
+    return false;
+  }
+}
+
+export function stopSessions(pids: number[], isSession = isAwbSession): number[] {
+  return pids.filter((pid) => {
+    if (!isSession(pid)) return false;
+    try {
+      process.kill(pid, "SIGTERM");
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function taskRoutes(
   stacks: Stacks,
   proveDeps: Omit<ProveDeps, "log">,
@@ -408,23 +428,23 @@ export function taskRoutes(
       const b = await body();
       const id = String(b.id ?? "");
       let t: Task | undefined;
-      const stack = stacks.get(id);
-      if (!stack) {
-        try {
-          t = stacks.find(id);
-        } catch (err) {
-          return fail(err), true;
-        }
-        if (!t) return send(404, { error: `no stack or task ${id}` }), true;
+      let stack;
+      try {
+        stack = stacks.findStack(id);
+        if (!stack) t = stacks.find(id);
+      } catch (err) {
+        return fail(err), true;
       }
+      if (!stack && !t) return send(404, { error: `no stack or task ${id}` }), true;
       const tasks = stack ? stack.tasks : [t!];
       const stackId = stack ? stack.id : t!.stack_id;
       const done = stack || runner.owns(t!.id) ? runner.stop(stackId) : null;
       const proof = tasks.filter((x) => proofs.has(x.id));
       for (const x of proof) proofs.get(x.id)!.abort();
-      if (!done && !proof.length) return send(409, { error: `nothing runs for ${id}` }), true;
-      log("info", "runner", "stop", { id, stack: stackId, proofs: proof.map((x) => x.id) });
-      return send(200, { run: done ? await done : null, proofs: proof.map((x) => x.id) }), true;
+      const sessions = t && !done ? stopSessions(stacks.openSessionPids(t.id)) : [];
+      if (!done && !proof.length && !sessions.length) return send(409, { error: `nothing runs for ${id}` }), true;
+      log("info", "runner", "stop", { id, stack: stackId, proofs: proof.map((x) => x.id), sessions });
+      return send(200, { run: done ? await done : null, proofs: proof.map((x) => x.id), sessions }), true;
     }
 
     if (req.method === "POST" && url.pathname === "/api/sync") {

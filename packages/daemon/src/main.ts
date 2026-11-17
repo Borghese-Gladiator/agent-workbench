@@ -8,6 +8,7 @@ import { taskRoutes } from "./task-routes.ts";
 import { claudeSession, createRunner, lastSessionUsd, stackLimit } from "./runner.ts";
 import { notify, runMessage } from "./notify.ts";
 import { createLog } from "./log.ts";
+import { killChildren } from "./prove.ts";
 
 export async function startDaemon(home: string) {
   mkdirSync(home, { recursive: true });
@@ -69,7 +70,10 @@ export async function startDaemon(home: string) {
   writeFileSync(tmp, JSON.stringify({ pid: process.pid, port, startedAt }));
   renameSync(tmp, file);
 
+  process.on("exit", killChildren);
   const stop = () => {
+    const killed = killChildren();
+    if (killed) log("warn", "daemon", "stop.children", { groups: killed });
     try {
       if (JSON.parse(readFileSync(file, "utf8")).pid === process.pid) rmSync(file);
     } catch {}

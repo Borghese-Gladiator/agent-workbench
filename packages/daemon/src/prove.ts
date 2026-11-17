@@ -116,9 +116,11 @@ async function startApp(runMd: RunMd, cwd: string, log: (l: string) => void) {
     const cmd = fill(runMd.start, port);
     log(`app: ${cmd}`);
     child = spawn("sh", ["-c", cmd], { cwd, stdio: "ignore", detached: true });
+    if (child.pid) groups.add(child.pid);
   }
   const stop = () => {
     if (child?.pid) {
+      groups.delete(child.pid);
       try {
         process.kill(-child.pid, "SIGTERM");
       } catch {}
@@ -133,9 +135,23 @@ async function startApp(runMd: RunMd, cwd: string, log: (l: string) => void) {
   return { url, stop };
 }
 
+const groups = new Set<number>();
+
+export function killChildren(): number {
+  const n = groups.size;
+  for (const pid of groups) {
+    try {
+      process.kill(-pid, "SIGTERM");
+    } catch {}
+  }
+  groups.clear();
+  return n;
+}
+
 export function run(cmd: string, args: string[], cwd: string, input?: string, timeoutMs = 0, signal?: AbortSignal): Promise<{ code: number; out: string; timedOut: boolean }> {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env, detached: true });
+    if (child.pid) groups.add(child.pid);
     let timedOut = false;
     const kill = () => {
       try {
@@ -156,6 +172,7 @@ export function run(cmd: string, args: string[], cwd: string, input?: string, ti
     child.on("error", (e) => resolve({ code: 127, out: String(e), timedOut }));
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
+      if (child.pid) groups.delete(child.pid);
       signal?.removeEventListener("abort", kill);
       resolve({ code: code ?? 1, out, timedOut });
     });

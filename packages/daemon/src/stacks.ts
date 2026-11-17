@@ -148,6 +148,7 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     setFail: db.prepare("UPDATE tasks SET status = 'failed', fail_reason = ? WHERE id = ?"),
     clearFail: db.prepare("UPDATE tasks SET status = 'waiting', fail_reason = NULL WHERE id = ?"),
     byPrefix: db.prepare("SELECT * FROM tasks WHERE id LIKE ? || '%' LIMIT 2"),
+    stackByPrefix: db.prepare("SELECT id FROM stacks WHERE id LIKE ? || '%' LIMIT 2"),
     sessionTasks: db.prepare("SELECT DISTINCT session_id, task_id FROM attempts WHERE session_id IS NOT NULL"),
     all: db.prepare(
       "SELECT t.*, s.repo FROM tasks t JOIN stacks s ON s.id = t.stack_id WHERE t.created_at >= ? ORDER BY t.created_at DESC, t.position DESC",
@@ -307,6 +308,15 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
       const rows = q.byPrefix.all(idOrPrefix) as any[];
       if (rows.length > 1) throw new StackError(`task id prefix ${idOrPrefix} matches more than one task`, 400);
       return rows[0] ? row(rows[0]) : undefined;
+    },
+    findStack(idOrPrefix: string): Stack | undefined {
+      if (idOrPrefix.length < 6) throw new StackError("a stack id prefix needs 6 or more characters", 400);
+      const rows = q.stackByPrefix.all(idOrPrefix) as { id: string }[];
+      if (rows.length > 1) throw new StackError(`stack id prefix ${idOrPrefix} matches more than one stack`, 400);
+      return rows[0] && get(rows[0].id);
+    },
+    openSessionPids(taskId: string): number[] {
+      return (q.openSessionPids.all(taskId) as { pid: number }[]).map((s) => s.pid);
     },
     sessionTasks(): Record<string, string> {
       return Object.fromEntries((q.sessionTasks.all() as { session_id: string; task_id: string }[]).map((r) => [r.session_id, r.task_id]));
