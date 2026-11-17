@@ -114,3 +114,15 @@ test("junitReport reads a test name with an unescaped > in it, as node --test wr
     ["C2: a > b", "failed"],
   ]);
 });
+
+test("a test claim that also passes on the base commit fails; one that fails or is missing there passes", () => {
+  const claims = testClaims(3);
+  const report = junitReport(`<testsuites><testcase name="C1: a"/><testcase name="C2: b"/><testcase name="C3: c"/></testsuites>`);
+  const baseReport = junitReport(`<testsuites><testcase name="C1: a"/><testcase name="C2: b"><failure message="x"/></testcase></testsuites>`);
+  const g = runGate(base([], { claims, report, baseReport }));
+  assert.deepEqual(g.rows.map((r) => [r.id, r.reasons]), [
+    ["C1", ["passes on the base commit"]],
+    ["C2", []],
+    ["C3", []],
+  ]);
+});

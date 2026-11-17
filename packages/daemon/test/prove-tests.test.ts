@@ -19,14 +19,22 @@ import { add } from "../add.mjs";
 test("C1: add sums two numbers", () => assert.equal(add(2, 3), 5));
 `;
 
-function setup(addBody: string, writerExtra = "") {
+const commit = (repo: string, addBody: string) => {
+  writeFileSync(join(repo, "add.mjs"), `export const add = (a, b) => ${addBody};\n`);
+  git(repo, "add", ".");
+  git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "-c", "core.hooksPath=/dev/null", "commit", "-qm", addBody);
+};
+
+function setup(addBody: string, writerExtra = "", baseBody?: string) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "awb-prove-")));
   const repo = join(root, "repo");
   mkdirSync(repo, { recursive: true });
-  writeFileSync(join(repo, "add.mjs"), `export const add = (a, b) => ${addBody};\n`);
-  git(repo, "init", "-q");
-  git(repo, "add", ".");
-  git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "init");
+  git(repo, "init", "-q", "-b", "main");
+  if (baseBody) {
+    commit(repo, baseBody);
+    git(repo, "switch", "-q", "-c", "feat");
+  }
+  commit(repo, addBody);
 
   const claude = join(root, "claude");
   writeFileSync(join(root, "proof.mjs"), PROOF);
@@ -38,6 +46,8 @@ function setup(addBody: string, writerExtra = "") {
     title: "Add",
     claims: [{ id: "C1", text: "add sums two numbers", proof: "test" }],
     folder: join(root, "task"),
+    branch: baseBody ? "feat" : null,
+    base: baseBody ? "main" : null,
   } as Task;
   return { repo, task, deps: { claude, log: () => {} } };
 }
@@ -109,3 +119,17 @@ test("prove: with no time left in the session, the writer does not start", async
   assert.equal(existsSync(join(repo, "..", "started")), false);
   assert.deepEqual(r.gate.rows[0].reasons, ["no test (test writer: no time left in the session)"]);
 });
+
+for (const [name, baseBody, headBody, reasons] of [
+  ["a test that fails on the base commit and passes on head passes", "a - b", "a + b", []],
+  ["a test that also passes on the base commit fails", "a + b", "b + a", ["passes on the base commit"]],
+] as const) {
+  test(`prove: ${name}`, async () => {
+    const { repo, task, deps } = setup(headBody, "", baseBody);
+    const r = await prove(task, repo, RUN_MD, deps);
+    assert.deepEqual(r.gate.rows[0].reasons, reasons);
+    assert.equal(git(repo, "branch", "--show-current").trim(), "feat");
+    assert.ok(git(repo, "show", "HEAD:add.mjs").includes(headBody));
+    assert.equal(git(repo, "status", "--porcelain"), "");
+  });
+}

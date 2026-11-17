@@ -6,7 +6,6 @@ v6 is a proof of concept. The acceptance test passes (`e2e/acceptance.sh`), but 
 
 The gate proves a claim in a browser, or with a repo test for logic that no page shows.
 
-- [ ] **Red on the base commit.** Run the test claims on the base commit too. A claim passes only if its test fails on the base and passes on the head. This refuses a test that passes on any code.
 - [ ] **Test claims carried forward in a stack.** Task N also runs the passing test claims of the tasks below it. A replan change must not break an earlier claim.
 
 ## Test writer
