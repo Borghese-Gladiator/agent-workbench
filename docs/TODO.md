@@ -10,7 +10,6 @@ The gate proves a claim in a browser, or with a repo test for logic that no page
 ## Test writer
 
 - [ ] **Seed data for the proof app.** The app starts with an empty `AWB_HOME`, so the writer's sub-agents build state through the UI. That cost 13.15 USD and 7.88 USD in the UI stack. Add a `## seed` run-file section that makes a fixture once and caches it in `$AWB_HOME/repos/<repo>.seed/`, keyed by a hash of the seed script and the schema. If the cache exists, do nothing. Each proof copies the cache into its fresh temp home, so tests cannot change the shared seed. The writer prompt says which seed data exists. For awb itself: a stack with a done task, a failed task with gate rows, and a session with tool events.
-- [ ] **Attach to a running proof.** A second `awb prove` for the same task gets a 409 "already running", and the agent loses the result of the first. Let `awb prove` wait for the running proof and print its result. Tell the playbook to run `awb prove` in the background.
 
 ## Runner
 

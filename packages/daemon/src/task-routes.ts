@@ -83,7 +83,23 @@ export function taskRoutes(
   log: Log = () => {},
   logDir = "",
 ) {
-  const proving = new Set<string>();
+  const running = new Map<string, { kind: "prove" | "ship"; lines: Json[]; listeners: Set<ServerResponse> }>();
+  const begin = (id: string, kind: "prove" | "ship", res: ServerResponse) => {
+    const r = { kind, lines: [] as Json[], listeners: new Set([res]) };
+    running.set(id, r);
+    res.on("close", () => r.listeners.delete(res));
+    res.writeHead(200, { "content-type": "application/x-ndjson" });
+    return {
+      line: (o: Json) => {
+        r.lines.push(o);
+        for (const l of r.listeners) l.write(JSON.stringify(o) + "\n");
+      },
+      end: () => {
+        running.delete(id);
+        for (const l of r.listeners) l.end();
+      },
+    };
+  };
 
   async function syncPrs() {
     for (const t of stacks.shipped()) {
@@ -161,15 +177,23 @@ export function taskRoutes(
       const b = await body();
       const t = stacks.taskForBranch(b.repo ?? "", b.branch ?? "");
       if (!t) return send(404, { error: "no task on this branch; run awb stack set first" }), true;
+      const current = running.get(t.id);
+      if (current?.kind === "ship") return send(409, { error: `a ship for task ${t.id} is already running` }), true;
+      if (current) {
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        const ignored = Array.isArray(b.rewrite) && b.rewrite.length ? `; the --rewrite value ${b.rewrite.join(",")} is ignored` : "";
+        res.write(JSON.stringify({ log: `a proof run for task ${t.id} is already running; waiting for its result${ignored}` }) + "\n");
+        for (const o of current.lines) res.write(JSON.stringify(o) + "\n");
+        current.listeners.add(res);
+        res.on("close", () => current.listeners.delete(res));
+        return true;
+      }
       if (!["waiting", "doing", "failed"].includes(t.status)) return send(409, { error: `task ${t.id} is ${t.status}` }), true;
-      if (proving.has(t.id)) return send(409, { error: `a proof run for task ${t.id} is already running` }), true;
       const rewrite: string[] = Array.isArray(b.rewrite) ? b.rewrite.map(String) : [];
       const unknown = rewrite.filter((id) => !t.claims.some((c) => c.id === id));
       if (unknown.length) return send(400, { error: `no claim ${unknown.join(", ")} in task ${t.id}` }), true;
 
-      proving.add(t.id);
-      res.writeHead(200, { "content-type": "application/x-ndjson" });
-      const line = (o: Json) => res.write(JSON.stringify(o) + "\n");
+      const { line, end } = begin(t.id, "prove", res);
       const before = t.status;
       const ownedByRun = runner.owns(t.id);
       stacks.setStatus(t.id, "doing");
@@ -191,8 +215,7 @@ export function taskRoutes(
       } finally {
         stacks.endAttempt(attempt);
         if (!ownedByRun) stacks.setStatus(t.id, after);
-        proving.delete(t.id);
-        res.end();
+        end();
       }
       return true;
     }
@@ -202,11 +225,9 @@ export function taskRoutes(
       const t = stacks.taskForBranch(b.repo ?? "", b.branch ?? "");
       if (!t) return send(404, { error: "no task on this branch; run awb stack set first" }), true;
       if (!["waiting", "doing", "failed"].includes(t.status)) return send(409, { error: `task ${t.id} is ${t.status}: ${t.pr_url}` }), true;
-      if (proving.has(t.id)) return send(409, { error: `a proof run or ship for task ${t.id} is already running` }), true;
+      if (running.has(t.id)) return send(409, { error: `a proof run or ship for task ${t.id} is already running` }), true;
 
-      proving.add(t.id);
-      res.writeHead(200, { "content-type": "application/x-ndjson" });
-      const line = (o: Json) => res.write(JSON.stringify(o) + "\n");
+      const { line, end } = begin(t.id, "ship", res);
       try {
         log("info", "ship", "start", { task: t.id, branch: t.branch });
         const r = await ship(t, b.worktree, readRunFile(home, b.repo, b.worktree), (msg) => (line({ log: msg }), log("info", "ship", "step", { task: t.id, msg })), stacks.get(t.stack_id)?.tasks);
@@ -217,8 +238,7 @@ export function taskRoutes(
         log(err instanceof ShipRefused ? "warn" : "error", "ship", err instanceof ShipRefused ? "refused" : "error", { task: t.id, error: err });
         line({ error: (err as Error).message, table: err instanceof ShipRefused ? err.table : undefined });
       } finally {
-        proving.delete(t.id);
-        res.end();
+        end();
       }
       return true;
     }
