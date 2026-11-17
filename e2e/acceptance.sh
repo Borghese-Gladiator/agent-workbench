@@ -32,6 +32,14 @@ console.log("final message:\n" + (res?.result ?? "").slice(0, 3000));
   echo "time: $(( $(date +%s) - start )) s"
 }
 
+delete_base() {
+  local base=$1 pr
+  for pr in $(cd "$REPO" && gh pr list --base "$base" --state open --json number --jq '.[].number'); do
+    (cd "$REPO" && gh pr edit "$pr" --base main) > /dev/null && echo "retargeted PR #$pr to main"
+  done
+  git -C "$REPO" push -q origin --delete "$base" && echo "deleted the stack base $base"
+}
+
 case "${1:-}" in
 setup)
   rm -rf "$REPO"
@@ -84,6 +92,7 @@ stack)
   git -C "$REPO" checkout -q -b "$BASE"
   git -C "$REPO" push -q -u origin "$BASE"
   echo "stack base: $BASE"
+  trap 'delete_base "$BASE"' EXIT
   chat stack "Add a turn timer to Tic-Tac-Toe, built as a stack of three tasks with one PR each: (1) a \"Turn timer\" toggle that, when on, shows \"Time left: 10\" and counts down by 1 each second during a turn, and starts again at 10 after each move; (2) when the time reaches 0, the turn passes to the other player and the page shows \"X ran out of time\" (or O); (3) a \"Seconds per turn\" number field (3 to 30, default 10) that sets the start value of the timer. Run the stack and wait until awb run is no longer running, then report each task and its PR."
   ;;
 ask)
