@@ -131,9 +131,11 @@ git checkout <test sha>   # the test fails
 git checkout <fix sha>    # the test passes
 ```
 
-## 10. Draft a ticket
+## 10. Create a ticket
 
-If the repo PR template asks for a ticket link (the `app` template asks for a Linear link), draft a ticket with this template. Fill each section from the proof file. Show the draft to the user, and ask for the team and the project. Do not create the ticket until the user says to.
+If the repo PR template asks for a ticket link (the `app` template asks for a Linear link), find a ticket for the error first. Search with `mcp__linear-server__list_issues` for the Sentry issue ID. If a ticket exists, use its link and go to step 11.
+
+If no ticket exists, create one with `mcp__linear-server__save_issue`. Do not ask the user for the team, the project, or approval. Use team `Advanced Reporting`, project `Advanced Reporting Bugs and Tech Debt`, and state `Backlog`. Use a different team or project only when the user named one. Fill each section from the proof file with this template. Put the Sentry link in Resources. Then show the ticket link to the user, and use it in the PR body.
 
 ```md
 ## Description
