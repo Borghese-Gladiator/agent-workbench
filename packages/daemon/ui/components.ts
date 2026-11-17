@@ -41,3 +41,13 @@ export const taskOf = (d: Data, s: Session) =>
 export const State = ({ s }: { s: string }) => html`<span class=${"badge " + s}>${s}</span>`;
 export const Pass = ({ pass }: { pass: boolean }) => html`<span class=${pass ? "PASS" : "FAIL"}>${pass ? "PASS" : "FAIL"}</span>`;
 export const TaskLink = ({ t }: { t?: Json }) => (t ? html`<a href=${"#/task/" + t.id}>${t.title}</a>` : null);
+
+const LEVEL: Record<string, string> = { error: "FAIL", warn: "busy", info: "muted" };
+
+export function LogLine({ l }: { l: Json }) {
+  const { ts, level, source, event, ...rest } = l;
+  const text =
+    " " + ts.slice(0, 19).replace("T", " ") + " " + source + "." + event + " " +
+    Object.entries(rest).map(([k, v]) => k + "=" + (typeof v === "string" ? v : JSON.stringify(v))).join(" ");
+  return html`<span class=${"badge " + (LEVEL[level] ?? "")}>${level.toUpperCase()}</span><span class=${level === "error" ? "FAIL" : ""}>${text}</span>${"\n"}`;
+}

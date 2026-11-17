@@ -29,6 +29,7 @@ function Rows({ list, d }: { list: Json[]; d: Data }) {
 
 export function Prs({ d }: { d: Data }) {
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const prs = d.tasks
     .filter((t) => t.pr_number)
     .sort((a, b) => (a.status === "done" ? 0 : 1) - (b.status === "done" ? 0 : 1) || b.created_at.localeCompare(a.created_at));
@@ -36,9 +37,12 @@ export function Prs({ d }: { d: Data }) {
   const closed = prs.filter((t) => t.status !== "done");
   const sync = async () => {
     setBusy(true);
+    setError("");
     try {
       await post("/api/sync", {});
-    } catch {}
+    } catch (err) {
+      setError((err as Error).message);
+    }
     await d.reload();
     setBusy(false);
   };
@@ -47,6 +51,7 @@ export function Prs({ d }: { d: Data }) {
       <button class="plain" disabled=${busy} onClick=${sync}>Sync now</button>
       <span class="muted">The daemon reads the state of each open PR from GitHub every minute.</span>
     </div>
+    ${error ? html`<p class="FAIL" role="alert">Sync failed: ${error}</p>` : null}
     ${open.length ? html`<${Rows} list=${open} d=${d} />` : html`<p class="muted">No open PRs.</p>`}
     ${closed.length ? html`<details><summary>Merged and closed (${closed.length})</summary><${Rows} list=${closed} d=${d} /></details>` : null}`;
 }

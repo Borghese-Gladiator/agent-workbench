@@ -59,7 +59,7 @@ async function route(
   const parts = url.pathname.split("/").filter(Boolean);
 
   if (req.method === "GET" && url.pathname === "/health") {
-    return send(res, 200, { ok: true, pid: process.pid, home: info.home, startedAt: info.startedAt, sessions: store.list().length });
+    return send(res, 200, { ok: true, pid: process.pid, home: info.home, startedAt: info.startedAt, sessions: store.list().length, grafana: process.env.AWB_GRAFANA_URL || null });
   }
   if (req.method === "GET" && url.pathname === "/api/sessions") {
     return send(res, 200, store.feed());
