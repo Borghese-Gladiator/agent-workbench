@@ -25,7 +25,7 @@ async function daemon() {
   const store = openStore(":memory:");
   migrateStacks(store.db);
   const stacks = createStacks(store.db, (id) => `/tmp/awb-stop-test/${id}`);
-  const waiting: Session = (_t, _b, signal) => new Promise((ok) => signal!.addEventListener("abort", () => ok("exit 143")));
+  const waiting: Session = (_t, _b, _resume, signal) => new Promise((ok) => signal!.addEventListener("abort", () => ok("exit 143")));
   const runner = createRunner(stacks, () => waiting);
   const server = createApp(store, { home: "", startedAt: "" }, taskRoutes(stacks, {} as any, runner, () => null, "", store.db)).listen(0);
   await new Promise((r) => server.once("listening", r));

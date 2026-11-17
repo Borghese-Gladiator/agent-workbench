@@ -1,12 +1,14 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createServer, type AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runGate, claimTable, junitReport, type Claim, type GateResult, type Report } from "./gate.ts";
-import { parseRunMd, parseTest, fill, fillTest, type RunMd } from "./run-md.ts";
+import { runGate, claimTable, junitReport, type Carried, type Claim, type GateResult, type Report } from "./gate.ts";
+import { parseRunMd, parseSeed, parseTest, fill, fillTest, quote, type RunMd, type Seed } from "./run-md.ts";
 import type { Task } from "./stacks.ts";
+import { tokenTotals } from "./usage.ts";
 
 const PKG = fileURLToPath(new URL("..", import.meta.url));
 const PLAYWRIGHT = join(PKG, "..", "..", "node_modules", ".bin", "playwright");
@@ -16,6 +18,8 @@ const NODE_MODULES = join(PKG, "..", "..", "node_modules");
 export type ProveDeps = {
   claude: string;
   writerTimeoutMin?: number;
+  deadline?: number;
+  seedDir?: string;
   log: (line: string) => void;
   signal?: AbortSignal;
 };
@@ -108,12 +112,41 @@ async function waitReady(url: string, ms: number) {
   throw new Error(`the app did not answer at ${url} in ${ms / 1000} s`);
 }
 
-async function startApp(runMd: RunMd, cwd: string, log: (l: string) => void) {
+export async function seedCache(seed: Seed, worktree: string, dir: string, proof: string, log: (l: string) => void): Promise<string> {
+  const h = createHash("sha256").update(seed.cmd);
+  for (const f of seed.key) h.update("\0").update(f).update("\0").update(readFileSync(join(worktree, f)));
+  const cache = join(dir, h.digest("hex").slice(0, 16));
+  if (existsSync(cache)) return cache;
+  mkdirSync(dir, { recursive: true });
+  const tmp = mkdtempSync(join(dir, ".tmp-"));
+  log(`seed: ${seed.cmd}`);
+  const r = await run("sh", ["-c", seed.cmd.replaceAll("{seed}", quote(tmp))], worktree);
+  if (r.code !== 0) {
+    rmSync(tmp, { recursive: true, force: true });
+    writeFileSync(join(proof, "seed.log"), r.out);
+    throw new Error(`the seed command failed with exit ${r.code}; see ${join(proof, "seed.log")}`);
+  }
+  try {
+    renameSync(tmp, cache);
+  } catch (err) {
+    rmSync(tmp, { recursive: true, force: true });
+    if (!existsSync(cache)) throw err;
+  }
+  return cache;
+}
+
+export function seedCopy(cache: string): string {
+  const copy = mkdtempSync(join(tmpdir(), "awb-seed-"));
+  cpSync(cache, copy, { recursive: true });
+  return copy;
+}
+
+async function startApp(runMd: RunMd, cwd: string, log: (l: string) => void, seed?: string) {
   const port = await freePort();
   const url = fill(runMd.url, port).replace(/\/$/, "");
   let child: ChildProcess | null = null;
   if (runMd.start) {
-    const cmd = fill(runMd.start, port);
+    const cmd = fill(runMd.start, port, seed);
     log(`app: ${cmd}`);
     child = spawn("sh", ["-c", cmd], { cwd, stdio: "ignore", detached: true });
     if (child.pid) groups.add(child.pid);
@@ -125,6 +158,7 @@ async function startApp(runMd: RunMd, cwd: string, log: (l: string) => void) {
         process.kill(-child.pid, "SIGTERM");
       } catch {}
     }
+    if (seed) rmSync(seed, { recursive: true, force: true });
   };
   try {
     await waitReady(url + runMd.ready, 60_000);
@@ -180,11 +214,12 @@ export function run(cmd: string, args: string[], cwd: string, input?: string, ti
   });
 }
 
-export function writerPrompt(claims: Claim[], url: string, ready: string): string {
+export function writerPrompt(claims: Claim[], url: string, ready: string, seed?: string): string {
   return [
     `Use the playwright-test-generator agent to write one test for each of these claims in claims.md: ${claims.map((c) => c.id).join(", ")}.`,
     `The site is ${url}. Start from ${ready}.`,
     "Use the seed file proof-tests/seed.spec.ts.",
+    ...(seed ? [`Seed data: ${seed}`] : []),
     "Save each test as proof-tests/<claim id in lower case>.spec.ts, for example proof-tests/c1.spec.ts.",
     "Start each test title with its claim id, for example 'C1: ...'.",
     "Test what a user sees. Do not change a test to make it pass: if the page does not do what the claim says, the test must fail.",
@@ -205,19 +240,31 @@ export function writerEnd(out: string, timedOut: boolean, code: number, timeoutM
   return { end: `exit ${code}`, usd };
 }
 
+export function writerLimit(limitMin: number, deadline?: number, now = Date.now()): number {
+  if (!deadline) return limitMin;
+  return Math.min(limitMin, Math.floor((deadline - now) / 60_000));
+}
+
 async function runClaude(cwd: string, args: string[], prompt: string, deps: ProveDeps, logFile: string): Promise<WriterEnd> {
-  const timeoutMin = deps.writerTimeoutMin ?? 30;
+  const timeoutMin = writerLimit(deps.writerTimeoutMin ?? 30, deps.deadline);
+  if (deps.deadline && timeoutMin < 1) {
+    const w = { end: "no time left in the session", usd: null, timeoutMin };
+    writeFileSync(join(dirname(logFile), "writer-end.txt"), w.end + "\n");
+    deps.log(`test writer: ${w.end}`);
+    return w;
+  }
   deps.signal?.throwIfAborted();
   const r = await run(deps.claude, ["-p", ...args, "--output-format", "stream-json", "--verbose"], cwd, prompt, timeoutMin * 60_000, deps.signal);
   writeFileSync(logFile, r.out);
   deps.signal?.throwIfAborted();
   const w = { ...writerEnd(r.out, r.timedOut, r.code, timeoutMin), timeoutMin };
+  if (w.usd === null) w.usd = tokenTotals(logFile).cost_usd;
   writeFileSync(join(dirname(logFile), "writer-end.txt"), w.end + "\n");
   deps.log(`test writer: ${w.end}${w.usd === null ? "" : `, ${w.usd.toFixed(2)} USD`}`);
   return w;
 }
 
-async function runWriter(folder: string, claims: Claim[], url: string, ready: string, deps: ProveDeps): Promise<WriterEnd> {
+async function runWriter(folder: string, claims: Claim[], url: string, ready: string, deps: ProveDeps, seed?: string): Promise<WriterEnd> {
   const mcp = join(folder, "mcp.json");
   writeFileSync(
     mcp,
@@ -231,7 +278,7 @@ async function runWriter(folder: string, claims: Claim[], url: string, ready: st
   return runClaude(
     folder,
     ["--agents", AGENTS, "--mcp-config", mcp, "--strict-mcp-config", "--allowedTools", "Task", "Agent", "Read", "Glob", "Grep", "LS", "mcp__playwright-test__*"],
-    writerPrompt(claims, url, ready),
+    writerPrompt(claims, url, ready, seed),
     deps,
     join(folder, "proof", "writer.jsonl"),
   );
@@ -290,19 +337,43 @@ async function runTestWriter(folder: string, worktree: string, claims: Claim[], 
   }
 }
 
-async function runRepoTests(folder: string, worktree: string, testCmd: string, log: (l: string) => void, signal?: AbortSignal) {
-  const files = repoTests(join(folder, "proof-tests"));
+async function runRepoTests(folder: string, worktree: string, testCmd: string, log: (l: string) => void, from = folder, name = "junit", signal?: AbortSignal) {
+  const files = repoTests(join(from, "proof-tests"));
   const work = join(worktree, PROOF_DIR);
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work);
   try {
-    for (const f of files) copyFileSync(join(folder, "proof-tests", f), join(work, f));
-    const cmd = fillTest(testCmd, files.map((f) => `${PROOF_DIR}/${f}`), join(folder, "proof", "junit.xml"));
-    log(`proof run: ${cmd}`);
+    for (const f of files) copyFileSync(join(from, "proof-tests", f), join(work, f));
+    const cmd = fillTest(testCmd, files.map((f) => `${PROOF_DIR}/${f}`), join(folder, "proof", `${name}.xml`));
+    log(`proof run${name === "base-junit" ? " on the base commit" : ""}: ${cmd}`);
     const r = await run("sh", ["-c", `export PYTHONDONTWRITEBYTECODE=1\n${cmd}`], worktree, "", 0, signal);
-    writeFileSync(join(folder, "proof", "test.log"), r.out);
+    writeFileSync(join(folder, "proof", `${name.replace(/junit$/, "test")}.log`), r.out);
   } finally {
     rmSync(work, { recursive: true, force: true });
+  }
+}
+
+function mergeBase(worktree: string, base: string | null): string | null {
+  if (!base) return null;
+  for (const ref of [base, `origin/${base}`]) {
+    try {
+      return execFileSync("git", ["merge-base", "HEAD", ref], { cwd: worktree, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    } catch {}
+  }
+  return null;
+}
+
+async function runBaseTests(task: Task, folder: string, worktree: string, testCmd: string, log: (l: string) => void, signal?: AbortSignal) {
+  const sha = mergeBase(worktree, task.base);
+  if (!sha) return log(`base run skipped: no merge base with ${task.base ?? "(no base)"}`);
+  if (git(worktree, "status", "--porcelain") !== "") return log("base run skipped: the worktree has uncommitted changes");
+  const head = git(worktree, "rev-parse", "HEAD");
+  const branch = git(worktree, "rev-parse", "--abbrev-ref", "HEAD");
+  git(worktree, "switch", "-q", "--detach", sha);
+  try {
+    await runRepoTests(folder, worktree, testCmd, log, folder, "base-junit", signal);
+  } finally {
+    git(worktree, "switch", "-q", ...(branch === "HEAD" ? ["--detach", head] : [branch]));
   }
 }
 
@@ -321,16 +392,40 @@ export function gateFromDisk(claims: Claim[], folder: string, worktree: string):
     testHashNow: testHash(join(folder, "proof-tests")),
     fileExists: existsSync,
     writerEnd: read("writer-end.txt") || undefined,
+    baseReport: read("base-junit.xml") ? junitReport(read("base-junit.xml")) : undefined,
+    carried: (read("carried.json") ? (JSON.parse(read("carried.json")) as CarriedTask[]) : []).map(
+      (k): Carried => ({ label: k.label, claims: k.claims, report: read(`carried-${k.label}.xml`) ? junitReport(read(`carried-${k.label}.xml`)) : { suites: [] } }),
+    ),
   });
+}
+
+export type CarriedTask = { label: string; claims: Claim[]; folder: string };
+
+export function joinWriterEnds(a: WriterEnd, b: WriterEnd): WriterEnd {
+  const usd = a.usd === null && b.usd === null ? null : (a.usd ?? 0) + (b.usd ?? 0);
+  return { ...b, end: `${a.end}; rerun: ${b.end}`, usd };
+}
+
+async function writeMissing(claims: Claim[], tests: string, proof: string, log: (l: string) => void, write: (c: Claim[]) => Promise<WriterEnd>): Promise<WriterEnd | null> {
+  const missing = claimsWithoutTest(claims, tests);
+  if (!missing.length) return null;
+  const first = await write(missing);
+  const still = claimsWithoutTest(claims, tests);
+  if (!still.length || first.end.startsWith("timeout") || first.end.startsWith("no time left")) return first;
+  log(`test writer: rerun for ${still.map((c) => c.id).join(", ")}`);
+  const w = joinWriterEnds(first, await write(still));
+  writeFileSync(join(proof, "writer-end.txt"), w.end + "\n");
+  return w;
 }
 
 export type ProveResult = { gate: GateResult; table: string; folder: string; writer: WriterEnd | null };
 
-export async function prove(task: Task, worktree: string, runMdText: string, deps: ProveDeps, rewrite: string[] = []): Promise<ProveResult> {
+export async function prove(task: Task, worktree: string, runMdText: string, deps: ProveDeps, rewrite: string[] = [], carried: CarriedTask[] = []): Promise<ProveResult> {
   const browserClaims = task.claims.filter((c) => c.proof !== "test");
   const testClaims = task.claims.filter((c) => c.proof === "test");
   const runMd = browserClaims.length ? parseRunMd(runMdText) : null;
-  const testCmd = testClaims.length ? parseTest(runMdText) : null;
+  const testCmd = testClaims.length || carried.length ? parseTest(runMdText) : null;
+  const seed = runMd ? parseSeed(runMdText) : null;
 
   mkdirSync(task.folder, { recursive: true });
   const folder = realpathSync(task.folder);
@@ -349,12 +444,11 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
   if (removed.length) deps.log(`removed for a rewrite: ${removed.join(", ")}`);
 
   let writer: WriterEnd | null = null;
-  if (testCmd) {
-    const missing = claimsWithoutTest(testClaims, tests);
-    if (missing.length) writer = await runTestWriter(folder, worktree, missing, testCmd, deps);
-  }
+  if (testCmd) writer = await writeMissing(testClaims, tests, proof, deps.log, (c) => runTestWriter(folder, worktree, c, testCmd, deps));
 
-  const app = runMd ? await startApp(runMd, worktree, deps.log) : null;
+  if (seed && !deps.seedDir) throw new Error("run.md has a '## seed' section, but no seed folder is set");
+  const seedPath = seed ? seedCopy(await seedCache(seed, worktree, deps.seedDir!, proof, deps.log)) : undefined;
+  const app = runMd ? await startApp(runMd, worktree, deps.log, seedPath) : null;
   try {
     if (runMd && app) {
       writeFileSync(join(folder, "claims.md"), claimsMarkdown({ title: task.title, claims: browserClaims }, app.url));
@@ -365,8 +459,7 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
           `import { test } from "@playwright/test";\ntest("seed", async ({ page }) => {\n  await page.goto(${JSON.stringify(runMd.ready)});\n});\n`,
         );
       }
-      const missing = claimsWithoutTest(browserClaims, tests);
-      if (missing.length) writer = await runWriter(folder, missing, app.url, runMd.ready, deps);
+      writer = (await writeMissing(browserClaims, tests, proof, deps.log, (c) => runWriter(folder, c, app.url, runMd.ready, deps, seed?.about))) ?? writer;
     }
 
     writeFileSync(join(proof, "test-hash.txt"), testHash(tests) + "\n");
@@ -375,7 +468,14 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
       const pw = await run(PLAYWRIGHT, ["test", "--config", "playwright.config.ts"], folder, "", 0, deps.signal);
       writeFileSync(join(proof, "run.log"), pw.out);
     }
-    if (testCmd) await runRepoTests(folder, worktree, testCmd, deps.log, deps.signal);
+    if (testClaims.length && testCmd) {
+      await runRepoTests(folder, worktree, testCmd, deps.log, folder, "junit", deps.signal);
+      await runBaseTests(task, folder, worktree, testCmd, deps.log, deps.signal);
+    }
+    if (carried.length && testCmd) {
+      writeFileSync(join(proof, "carried.json"), JSON.stringify(carried));
+      for (const k of carried) await runRepoTests(folder, worktree, testCmd, deps.log, k.folder, `carried-${k.label}`, deps.signal);
+    }
     deps.signal?.throwIfAborted();
 
     const gate = gateFromDisk(task.claims, folder, worktree);

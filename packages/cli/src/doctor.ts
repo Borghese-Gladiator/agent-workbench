@@ -3,8 +3,43 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { findDaemon } from "./home.ts";
+import { readLog } from "../../daemon/src/log.ts";
 
-type Check = { name: string; ok: boolean; detail: string; fix?: string };
+export type Check = { name: string; ok: boolean; detail: string; fix?: string };
+
+const getJson = async (url: string) => {
+  const r = await fetch(url, { signal: AbortSignal.timeout(2000) });
+  if (!r.ok) throw new Error(`${url} answered ${r.status}`);
+  return r.json();
+};
+
+export async function logChecks(logDir: string, alloy: string, loki: string, maxLagMs = 120_000): Promise<Check[]> {
+  try {
+    const r = await fetch(`${alloy}/-/ready`, { signal: AbortSignal.timeout(2000) });
+    if (!r.ok) throw new Error(`answered ${r.status}`);
+  } catch {
+    return [{ name: "alloy", ok: true, detail: `off (no answer on ${alloy}); the remote log view is optional` }];
+  }
+  const checks: Check[] = [{ name: "alloy", ok: true, detail: `ready on ${alloy}` }];
+  const local = readLog(logDir, { limit: 1 }).at(-1);
+  if (!local) return [...checks, { name: "loki", ok: true, detail: "no local log line yet" }];
+  const start = (Date.parse(local.ts) - 86_400_000) * 1e6;
+  try {
+    const q = new URLSearchParams({ query: '{job="awb"}', limit: "1", direction: "backward", start: String(start) });
+    const res = await getJson(`${loki}/loki/api/v1/query_range?${q}`);
+    const newest = Math.max(0, ...res.data.result.flatMap((s: any) => s.values.map((v: [string, string]) => Number(v[0]) / 1e6)));
+    const lag = Date.parse(local.ts) - newest;
+    const ok = lag <= maxLagMs;
+    const detail = !newest
+      ? "has no awb line from the last day"
+      : ok
+        ? `current (newest line ${new Date(newest).toISOString()})`
+        : `${Math.round(lag / 60_000)} min behind the local log`;
+    return [...checks, { name: "loki", ok: !!newest && ok, detail, fix: "docker compose -f infra/logging/docker-compose.yml logs alloy" }];
+  } catch (err) {
+    return [...checks, { name: "loki", ok: false, detail: (err as Error).message, fix: "docker compose -f infra/logging/docker-compose.yml up -d" }];
+  }
+}
 
 function chromiumInstalled(): boolean {
   const dir = process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), "Library", "Caches", "ms-playwright");
@@ -37,6 +72,10 @@ export async function doctor(home: string): Promise<boolean> {
     detail: daemon ? `pid ${daemon.pid} on port ${daemon.port}` : "not running",
     fix: "awb daemon start",
   });
+
+  checks.push(
+    ...(await logChecks(join(home, "logs"), process.env.AWB_ALLOY_URL || "http://127.0.0.1:12345", process.env.AWB_LOKI_URL || "http://127.0.0.1:3100")),
+  );
 
   for (const c of checks) {
     console.log(`${c.ok ? "ok  " : "FAIL"} ${c.name.padEnd(9)} ${c.detail}${c.ok || !c.fix ? "" : `\n     fix: ${c.fix}`}`);

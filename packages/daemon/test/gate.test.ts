@@ -75,6 +75,17 @@ test("JUnit: a test claim passes with no video, and a failure or skip fails it",
   ]);
 });
 
+test("carried claims: a row for each claim of a task below, and a carried failure fails the gate", () => {
+  const claim = { id: "C1", text: "t", proof: "test" as const };
+  const carried = [
+    { label: "T1", claims: [claim], report: junitReport('<testcase name="C1: ok"/>') },
+    { label: "T2", claims: [claim], report: junitReport('<testcase name="C1: x"><failure/></testcase>') },
+  ];
+  const g = runGate(base(good, { carried }));
+  assert.equal(g.pass, false);
+  assert.deepEqual(g.rows.map((r) => [r.id, r.status]), [["C1", "PASS"], ["C2", "PASS"], ["T1/C1", "PASS"], ["T2/C1", "FAIL"]]);
+});
+
 test("JUnit: a browser claim still needs a video", () => {
   const g = runGate(base([], { claims: [{ id: "C1", text: "t" }], report: junitReport(junit) }));
   assert.deepEqual(g.rows[0].reasons, ["no video or trace"]);
@@ -112,5 +123,17 @@ test("junitReport reads a test name with an unescaped > in it, as node --test wr
   assert.deepEqual(specs.map((s) => [s.title, s.tests[0].results[0].status]), [
     ["C1: GET /api/x?id=<id> answers 200", "passed"],
     ["C2: a > b", "failed"],
+  ]);
+});
+
+test("a test claim that also passes on the base commit fails; one that fails or is missing there passes", () => {
+  const claims = testClaims(3);
+  const report = junitReport(`<testsuites><testcase name="C1: a"/><testcase name="C2: b"/><testcase name="C3: c"/></testsuites>`);
+  const baseReport = junitReport(`<testsuites><testcase name="C1: a"/><testcase name="C2: b"><failure message="x"/></testcase></testsuites>`);
+  const g = runGate(base([], { claims, report, baseReport }));
+  assert.deepEqual(g.rows.map((r) => [r.id, r.reasons]), [
+    ["C1", ["passes on the base commit"]],
+    ["C2", []],
+    ["C3", []],
   ]);
 });

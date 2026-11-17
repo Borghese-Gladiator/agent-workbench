@@ -2,10 +2,25 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 export type RunMd = { start: string | null; url: string; ready: string };
+export type Seed = { cmd: string; key: string[]; about: string };
+
+const BLOCK = /```(?:sh|bash|shell)?\n([\s\S]*?)```/;
+
+const sectionOf = (text: string, name: string) =>
+  text.match(new RegExp(`^##\\s+${name}\\s*$([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "im"))?.[1];
 
 function sectionCommand(text: string, name: string): string | null {
-  const section = text.match(new RegExp(`^##\\s+${name}\\s*$([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))`, "im"))?.[1];
-  return section?.match(/```(?:sh|bash|shell)?\n([\s\S]*?)```/)?.[1].trim() || null;
+  return sectionOf(text, name)?.match(BLOCK)?.[1].trim() || null;
+}
+
+export function parseSeed(text: string): Seed | null {
+  const section = sectionOf(text, "seed");
+  if (section === undefined) return null;
+  const cmd = section.match(BLOCK)?.[1].trim();
+  if (!cmd || !cmd.includes("{seed}")) throw new Error("run.md '## seed' needs a ```sh block that uses {seed}");
+  const key = section.match(/^key:(.*)$/m)?.[1].trim().split(/\s+/).filter(Boolean) ?? [];
+  const about = section.replace(BLOCK, "").replace(/^key:.*$/m, "").trim();
+  return { cmd, key, about };
 }
 
 export function parseSetup(text: string): string | null {
@@ -19,7 +34,7 @@ export function parseTest(text: string): string {
   return cmd;
 }
 
-const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
+export const quote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
 
 export function fillTest(cmd: string, tests: string[], report: string): string {
   return cmd.replaceAll("{tests}", tests.map(quote).join(" ")).replaceAll("{report}", quote(report));
@@ -35,12 +50,17 @@ export function parseRunMd(text: string): RunMd {
   return { start, url, ready };
 }
 
-export function fill(s: string, port: number): string {
-  return s.replaceAll("{port}", String(port));
+export function fill(s: string, port: number, seed?: string): string {
+  const out = s.replaceAll("{port}", String(port));
+  return seed ? out.replaceAll("{seed}", quote(seed)) : out;
 }
 
 export function runFilePath(home: string, repo: string): string {
   return join(home, "repos", `${basename(repo)}.run.md`);
+}
+
+export function seedDir(home: string, repo: string): string {
+  return join(home, "repos", `${basename(repo)}.seed`);
 }
 
 export function envFilePath(home: string, repo: string): string {

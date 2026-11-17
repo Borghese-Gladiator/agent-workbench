@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseSetup, parseRunMd, parseTest, fillTest, fill, findRunFile, readRunFile, runFilePath, envFilePath } from "../src/run-md.ts";
+import { parseSeed, parseSetup, parseRunMd, parseTest, fillTest, fill, findRunFile, readRunFile, runFilePath, envFilePath } from "../src/run-md.ts";
 
 const vite = `# Run
 
@@ -82,4 +82,12 @@ test("the run file in the worktree wins, the file in AWB_HOME is the fallback, a
 
 test("the env file of a repo is next to its run file in AWB_HOME", () => {
   assert.equal(envFilePath("/h", "/src/games"), join("/h", "repos", "games.env"));
+});
+
+test("parseSeed reads the command, the key files and the prose, and fill puts the seed path in the start command", () => {
+  const text = "## seed\nOne done task.\n```sh\nnode seed.ts {seed}\n```\nkey: a.ts  b/c.ts\n\n## start\nurl: http://x\n";
+  assert.deepEqual(parseSeed(text), { cmd: "node seed.ts {seed}", key: ["a.ts", "b/c.ts"], about: "One done task." });
+  assert.equal(parseSeed("## start\nurl: http://x\n"), null);
+  assert.throws(() => parseSeed("## seed\n```sh\nnode seed.ts\n```\n"), /\{seed\}/);
+  assert.equal(fill("AWB_HOME={seed} PORT={port}", 5, "/t/s"), "AWB_HOME='/t/s' PORT=5");
 });

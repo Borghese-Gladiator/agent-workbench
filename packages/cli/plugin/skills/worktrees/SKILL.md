@@ -28,12 +28,17 @@ The daemon keeps its own task worktrees in `$AWB_HOME/worktrees/`. Do not touch 
    git rev-parse --path-format=absolute --git-common-dir
    ```
    The repo name is the last part of the repo root path.
-2. If the target path exists, go to step 4. The same steps resume a worktree.
-3. Make the worktree. Run `git fetch origin` first. Then use the first case that applies:
+2. Run `git fetch origin`. Then look for a `WorktreeCreate` hook in `~/.claude/settings.json`:
+   ```sh
+   grep -n WorktreeCreate ~/.claude/settings.json
+   ```
+   If the hook exists, run `EnterWorktree({name: "<branch>"})` and go to step 5. The hook makes or resumes the worktree and chooses its folder. Do not use `path` in this case: since Claude Code 2.1.308, `EnterWorktree({path})` asks the user for approval every time, also when an allow rule matches.
+   If there is no hook, do steps 3 and 4. Do not use `name` without the hook: the worktree then goes in `.claude/worktrees/` inside the repo.
+3. If the target path exists, go to step 4. Else, make the worktree. Use the first case that applies:
    - The branch exists locally: `git worktree add <path> <branch>`
    - The branch exists only on origin: `git worktree add --track -b <branch> <path> origin/<branch>`
    - The branch is new: `git worktree add --no-track -b <branch> <path> origin/HEAD`. The first push needs `git push -u origin <branch>`.
-4. Enter it with `EnterWorktree({path: "<path>"})`. Do not use `cd`: the shell goes back to the launch folder after a `cd` outside it, and later commands then run in the wrong repo. If you are in a worktree already, run `ExitWorktree({action: "keep"})` first.
+4. Enter it with `EnterWorktree({path: "<path>"})`. The user must approve this call. Do not use `cd`: the shell goes back to the launch folder after a `cd` outside it, and later commands then run in the wrong repo. If you are in a worktree already, run `ExitWorktree({action: "keep"})` first.
    `EnterWorktree` refuses a worktree of a repo that is not the launch repo or inside it. In that case, do not enter it. Use absolute paths: `git -C <path> ...` for git, and the full path for each file and command.
 5. Run the setup:
    - If the run file has a `## setup` block, run it. The run file is `.awb/run.md` in the worktree, else `$AWB_HOME/repos/<repo name>.run.md`.
@@ -76,4 +81,4 @@ git worktree list
 - **direnv.** A new Bash call does not keep the env of the call before it. Run `direnv allow <worktree>` once. Then run `direnv export json` in the worktree, save the output to a file, and start each command with that env. A small script that loads the JSON and runs one command is the simplest way.
 - **fender.** Load direnv first, as above. Then run `yarn install`.
 - **Wrong folder.** Before each git command that changes state, run `pwd` and `git branch --show-current`.
-- **A WorktreeCreate hook.** Your settings can have a hook that moves `EnterWorktree({name})` worktrees. This skill uses `git worktree add` and `EnterWorktree({path})`, so the hook does not apply.
+- **Approval prompt.** `EnterWorktree({path})` gives a `safetyCheck` prompt that settings cannot allow. `EnterWorktree({name})` with a `WorktreeCreate` hook uses the allow rule and gives no prompt. To see which one a call got, read `permissionDecision` on its result in the session transcript.

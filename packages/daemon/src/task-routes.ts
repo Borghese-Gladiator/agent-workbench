@@ -4,12 +4,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, sep } from "node:path";
 import { parseSince, StackError, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
 import { LEVELS, logText, readLog, type Level, type Log, type LogFilter } from "./log.ts";
-import { prove, run, type ProveDeps } from "./prove.ts";
-import { readRunFile } from "./run-md.ts";
+import { prove, run, type CarriedTask, type ProveDeps } from "./prove.ts";
+import { readRunFile, seedDir } from "./run-md.ts";
 import { costReport, costText } from "./cost.ts";
 import type { DatabaseSync } from "node:sqlite";
 import { ship, ShipRefused, syncStatus } from "./ship.ts";
-import type { createRunner } from "./runner.ts";
+import { retryCount, type createRunner } from "./runner.ts";
 
 export function proofFile(home: string, path: string): string | null {
   try {
@@ -63,6 +63,16 @@ export const toolCallsOf = (transcript: string) => readFileSync(transcript, "utf
 
 type Json = Record<string, any>;
 
+export function carriedClaims(stacks: Stacks, t: Task): CarriedTask[] {
+  const below = stacks.get(t.stack_id)?.tasks.filter((x) => x.position < t.position) ?? [];
+  return below.flatMap((x) => {
+    const gate = stacks.history(x.id).flatMap((a) => a.gates).findLast((g) => g.pass);
+    const passed = new Set<string>(gate ? gate.result.rows.filter((r: any) => r.status === "PASS").map((r: any) => r.id) : []);
+    const claims = x.claims.filter((c) => c.proof === "test" && passed.has(c.id));
+    return claims.length ? [{ label: `T${x.position + 1}`, claims, folder: x.folder }] : [];
+  });
+}
+
 export function isAwbSession(pid: number): boolean {
   try {
     return /cli\/src\/main\.ts/.test(execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }));
@@ -93,8 +103,24 @@ export function taskRoutes(
   log: Log = () => {},
   logDir = "",
 ) {
-  const proving = new Set<string>();
   const proofs = new Map<string, AbortController>();
+  const running = new Map<string, { kind: "prove" | "ship"; lines: Json[]; listeners: Set<ServerResponse> }>();
+  const begin = (id: string, kind: "prove" | "ship", res: ServerResponse) => {
+    const r = { kind, lines: [] as Json[], listeners: new Set([res]) };
+    running.set(id, r);
+    res.on("close", () => r.listeners.delete(res));
+    res.writeHead(200, { "content-type": "application/x-ndjson" });
+    return {
+      line: (o: Json) => {
+        r.lines.push(o);
+        for (const l of r.listeners) l.write(JSON.stringify(o) + "\n");
+      },
+      end: () => {
+        running.delete(id);
+        for (const l of r.listeners) l.end();
+      },
+    };
+  };
 
   async function syncPrs() {
     for (const t of stacks.shipped()) {
@@ -172,17 +198,25 @@ export function taskRoutes(
       const b = await body();
       const t = stacks.taskForBranch(b.repo ?? "", b.branch ?? "");
       if (!t) return send(404, { error: "no task on this branch; run awb stack set first" }), true;
+      const current = running.get(t.id);
+      if (current?.kind === "ship") return send(409, { error: `a ship for task ${t.id} is already running` }), true;
+      if (current) {
+        res.writeHead(200, { "content-type": "application/x-ndjson" });
+        const ignored = Array.isArray(b.rewrite) && b.rewrite.length ? `; the --rewrite value ${b.rewrite.join(",")} is ignored` : "";
+        res.write(JSON.stringify({ log: `a proof run for task ${t.id} is already running; waiting for its result${ignored}` }) + "\n");
+        for (const o of current.lines) res.write(JSON.stringify(o) + "\n");
+        current.listeners.add(res);
+        res.on("close", () => current.listeners.delete(res));
+        return true;
+      }
       if (!["waiting", "doing", "failed"].includes(t.status)) return send(409, { error: `task ${t.id} is ${t.status}` }), true;
-      if (proving.has(t.id)) return send(409, { error: `a proof run for task ${t.id} is already running` }), true;
       const rewrite: string[] = Array.isArray(b.rewrite) ? b.rewrite.map(String) : [];
       const unknown = rewrite.filter((id) => !t.claims.some((c) => c.id === id));
       if (unknown.length) return send(400, { error: `no claim ${unknown.join(", ")} in task ${t.id}` }), true;
 
-      proving.add(t.id);
       const ctrl = new AbortController();
       proofs.set(t.id, ctrl);
-      res.writeHead(200, { "content-type": "application/x-ndjson" });
-      const line = (o: Json) => res.write(JSON.stringify(o) + "\n");
+      const { line, end } = begin(t.id, "prove", res);
       const before = t.status;
       const ownedByRun = runner.owns(t.id);
       stacks.setStatus(t.id, "doing");
@@ -191,7 +225,7 @@ export function taskRoutes(
       log("info", "prove", "start", { ...ids, rewrite: rewrite.length ? rewrite : undefined });
       let after: TaskStatus = before === "failed" ? "failed" : "waiting";
       try {
-        const r = await prove(t, b.worktree, readRunFile(home, b.repo, b.worktree), { ...proveDeps, signal: ctrl.signal, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite);
+        const r = await prove(t, b.worktree, readRunFile(home, b.repo, b.worktree), { ...proveDeps, deadline: Number(b.deadline) || undefined, seedDir: seedDir(home, b.repo), signal: ctrl.signal, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite, carriedClaims(stacks, t));
         stacks.saveGate(attempt, r.gate);
         if (r.writer?.usd != null) stacks.setWriterCost(attempt, r.writer.usd);
         const failed = r.gate.rows.filter((x) => x.status === "FAIL").map((x) => `${x.id}: ${x.reasons.join(", ")}`);
@@ -204,9 +238,8 @@ export function taskRoutes(
       } finally {
         stacks.endAttempt(attempt);
         if (!ownedByRun) stacks.setStatus(t.id, after);
-        proving.delete(t.id);
         proofs.delete(t.id);
-        res.end();
+        end();
       }
       return true;
     }
@@ -216,11 +249,9 @@ export function taskRoutes(
       const t = stacks.taskForBranch(b.repo ?? "", b.branch ?? "");
       if (!t) return send(404, { error: "no task on this branch; run awb stack set first" }), true;
       if (!["waiting", "doing", "failed"].includes(t.status)) return send(409, { error: `task ${t.id} is ${t.status}: ${t.pr_url}` }), true;
-      if (proving.has(t.id)) return send(409, { error: `a proof run or ship for task ${t.id} is already running` }), true;
+      if (running.has(t.id)) return send(409, { error: `a proof run or ship for task ${t.id} is already running` }), true;
 
-      proving.add(t.id);
-      res.writeHead(200, { "content-type": "application/x-ndjson" });
-      const line = (o: Json) => res.write(JSON.stringify(o) + "\n");
+      const { line, end } = begin(t.id, "ship", res);
       try {
         log("info", "ship", "start", { task: t.id, branch: t.branch });
         const r = await ship(t, b.worktree, readRunFile(home, b.repo, b.worktree), (msg) => (line({ log: msg }), log("info", "ship", "step", { task: t.id, msg })), stacks.get(t.stack_id)?.tasks);
@@ -231,8 +262,7 @@ export function taskRoutes(
         log(err instanceof ShipRefused ? "warn" : "error", "ship", err instanceof ShipRefused ? "refused" : "error", { task: t.id, error: err });
         line({ error: (err as Error).message, table: err instanceof ShipRefused ? err.table : undefined });
       } finally {
-        proving.delete(t.id);
-        res.end();
+        end();
       }
       return true;
     }
@@ -242,7 +272,7 @@ export function taskRoutes(
       const stack = b.stackId ? stacks.get(b.stackId) : stacks.newestStack(b.repo ?? "");
       if (!stack) return send(404, { error: "no stack for this repo; run awb stack set first" }), true;
       try {
-        return send(202, runner.start(stack.id)), true;
+        return send(202, runner.start(stack.id, retryCount(b.retries))), true;
       } catch (err) {
         return fail(err), true;
       }
@@ -321,6 +351,10 @@ export function taskRoutes(
       }
       if (db.prepare("SELECT 1 FROM sessions WHERE id = ?").get(id)) {
         return answer(pick("sessions s", "s.id = ?", "s.started_at", id), `session ${id} has no claude session id`);
+      }
+      const byClaude = db.prepare("SELECT session_id FROM events WHERE claude_session_id = ? ORDER BY id DESC LIMIT 1").get(id) as Json | undefined;
+      if (byClaude) {
+        return answer(pick("sessions s", "s.id = ?", "s.started_at", String(byClaude.session_id)), `no session for claude session ${id}`, { claude_session_id: id });
       }
       let t: Task | undefined;
       try {
@@ -413,11 +447,17 @@ export function taskRoutes(
         return fail(err), true;
       }
       if (!t) return send(404, { error: `no task ${b.taskId}` }), true;
+      let retries;
+      try {
+        retries = retryCount(b.retries);
+      } catch (err) {
+        return fail(err), true;
+      }
       if (t.status !== "failed") return send(409, { error: `task ${t.id} is ${t.status}; only a failed task can be retried` }), true;
       const reason = t.fail_reason ?? "";
       stacks.retry(t.id);
       try {
-        return send(202, runner.start(t.stack_id)), true;
+        return send(202, runner.start(t.stack_id, retries)), true;
       } catch (err) {
         stacks.fail(t.id, reason);
         return fail(err), true;
