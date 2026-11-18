@@ -5,59 +5,119 @@ Needs Node 24 or later. There is no build step: Node runs the TypeScript files d
 ```sh
 npm install                      # dev tools only (typescript, @types/node)
 npm install -g .                 # puts awb on the PATH as a link to this clone
-awb doctor                       # checks claude, Chromium and the daemon
+awb doctor                       # checks claude, Chromium, the daemon, the MCP servers and the logs
 awb                              # opens claude in the current repo
 awb ui                           # opens the session list in the browser
 ```
 
+A task id or a stack id can be a prefix of 6 or more characters in every command.
+
+## Chat and setup
+
 | Command | What it does |
 |---|---|
-| `awb [claude args]` | Starts the daemon if it is not up, registers a session, and starts `claude` with the playbook and `AWB_HOME`. Every argument goes to `claude`. |
-| `awb --resume [id] [claude args]` | Resumes a Claude Code session with `claude --resume`, in the worktree where it ran. The id is an awb session id or a task id (a prefix of 6 or more characters works); for a task, the newest attempt with a session wins. With no id, it resumes the newest session of the current branch. Exits 1 when no session matches. |
-| `awb ui [--no-open]` | Prints the UI URL and opens it. The header shows the cost of today. The UI has five views: Live (the current run, and every session with its state and cost), Session (its events and tokens), Stacks (each task with its status, cost and PR; you can edit a waiting task), PRs (each open PR with its gate result and state) and the proof page of a task (the claim table, a video for each claim, the trace, the logs, the proof tests and the diff). On the page of a failed task, Retry, Rewrite test and Drop call the same routes as `awb retry`, `awb prove --rewrite` and `awb task rm`. |
-| `awb sessions [--json]` | Lists the sessions. |
-| `awb doctor` | Checks the setup and prints a fix for each problem. |
-| `awb wt [repo] [--root <dir>] [--json]` | Lists the worktrees in `<root>/<repo>/<branch>`, grouped by repo, with the branch, the number of changed files and the last commit age. The root is `--root`, else `AWB_WORKTREES`, else `~/Klaviyo/Repos/LOCAL_worktrees` when the current folder is in `~/Klaviyo/Repos`, else `~/LOCAL_worktrees`. A folder without a `.git` file shows as `not a worktree`. |
-| `awb wt pick [repo] [--root <dir>]` | Opens a picker. Arrow keys or `j`/`k` move, Space marks, `d` then `y` removes the marked worktrees with `git worktree remove` (it refuses a worktree with changes), Enter prints the path, `q` quits. The picker draws on stderr, so `cd "$(awb wt pick)"` works. |
+| `awb [claude args]` | Starts the daemon if needed, registers a session, and starts `claude` with the playbook. Every argument goes to `claude`. |
+| `awb --resume [id]` | Resumes a Claude Code session in the worktree where it ran. The id is a session id or a task id. With no id, it resumes the newest session of the current branch. |
+| `awb ui [--no-open]` | Prints the UI URL and opens it. See "Web UI". |
+| `awb doctor` | Checks `claude`, Chromium, the daemon, the Slack, Sentry and Linear MCP servers, and the log pipeline. Prints a fix for each problem. |
 | `awb daemon start\|stop\|status` | Controls the daemon of the active `AWB_HOME`. |
-| `awb stack set [--json]` | Reads a stack as JSON on stdin and creates or replaces it. A stack of one binds to the current branch. In a stack of many, each task gets its own branch: task 1 starts from the current branch, and each later task starts from the task below. |
-| `awb run [stack] [--wait] [--json] [--retries N]` | Starts the runner on the stack (default: the newest stack of the repo). Without `--wait` it returns at once. With `--wait` it returns when the run is `done` or `stopped`, and exits 1 if it is not `done`. The runner makes a worktree in `AWB_HOME/worktrees/` for each task, runs the `## setup` block of the run file in it, and starts `awb -p` with the task prompt. If a session ends on a transient API error (connection refused or reset, overloaded, 429, 5xx, fetch failed), the runner resumes the same Claude session with `--resume` up to N times (`--retries`, 0 to 5, default 1). Each retry logs `session.retry`. If a task ends without a PR, the task is `failed` and the stack stops. |
-| `awb retry <task> [--wait] [--json] [--retries N]` | Sets a `failed` task back to `waiting` and starts the runner. `--wait` and `--retries` work as in `awb run`. The new session uses the same worktree and branch. |
-| `awb stop <stack \| task> [--json]` | Stops a run and its current task. A prefix of 6 or more characters works for both ids. With a stack id, it stops the run of the stack and the proof of its current task. With a task id, it stops the run if the run owns the task, and it stops the proof of the task. If no run owns the task, it also sends `SIGTERM` to each open `awb` session of the task. It kills only the process group of that session and of its test writer. The current task of a run becomes `failed` with the reason `stopped by awb stop`, and the later tasks stay `waiting`. Exits 1 if nothing runs for the id. |
-| `awb prove [--rewrite C1,C2] [--json]` | Starts the app from the run file, writes the missing proof tests with a fresh test-writer session, runs them, and runs the gate. It prints how the test writer ended, its cost and its time limit. `--rewrite` first deletes the tests of those claims, so that the writer writes them again. Prints the claim table. Exits 1 if the gate fails. |
-| `awb ship [--json]` | Runs the gate again from the files on disk. If it passes, scans the specs for secrets, pushes the branch, opens a draft PR, uploads each video to the prerelease `awb-proof-<PR>`, and writes the PR body. Sets the task to `done`. Refuses when the gate fails. |
-| `awb show [task] [--json]` | Shows a task: with no id, the task of the current branch. A prefix of 6 or more characters works. Shows the claims, the failure reason, every gate row, the cost, the transcripts and the PR. |
-| `awb tasks [--repo <path>] [--status a,b] [--since 7d\|12h\|30m\|date] [--json]` | Lists the tasks of all repos, newest first, with the failed claims of the last gate. |
-| `awb cost [--since 7d] [--repo <name or path>] [--json]` | The estimated cost for each day, repo and task, split into sessions and the test writer. The estimate comes from the token counts and the price table in `prices.ts`. A session with a model that is not in the table counts as unpriced. |
-| `awb logs [--task <id>] [--run <id>] [--session <id>] [--level debug\|info\|warn\|error] [--source <name>] [--since 1d] [--limit 200] [--follow] [--json]` | Reads the structured log of every awb part from `AWB_HOME/logs/`. `--level warn` shows warnings and errors. `--follow` (or `-f`) prints new lines as they come. A CLI command that fails also writes a `cli.error` line. |
-| `awb task rm <id...> [--json]` | Removes waiting or failed tasks in one transaction, with the attempts and gate results of each. If one id is doing, is shipped or does not exist, nothing is removed. |
+| `awb wt [repo] [--root <dir>]` | Lists the worktrees of a repo with the branch, the changed files and the last commit age. |
+| `awb wt pick [repo]` | Opens a picker. Space marks, `d` then `y` removes the marked worktrees (it refuses a dirty one), Enter prints the path, `q` quits. `cd "$(awb wt pick)"` works. |
 
-Stacks: the runner runs at most `AWB_MAX_STACKS` stacks at a time (default 2, never more than 5), and refuses a new one when the limit is full. `AWB_PORT` sets the daemon port (default: a free port).
+## Stacks and tasks
 
-Time limits: `AWB_TASK_TIMEOUT_MIN` for a task session (default 45) and `AWB_WRITER_TIMEOUT_MIN` for the test writer (default 30). awb sets no spend limit. It records the cost of each session and test writer. `AWB_CLAUDE` replaces `claude` in the launcher and the task sessions, and `AWB_WRITER_CLAUDE` replaces it in the test writer.
+| Command | What it does |
+|---|---|
+| `awb stack set` | Reads a stack as JSON on stdin and creates or replaces it. A stack of many tasks gets one branch for each task. Task 1 starts from the current branch, and each later task starts from the task below. |
+| `awb run [stack] [--wait] [--retries N]` | Starts the runner on a stack (default: the newest of the repo). `--wait` returns when the run is `done` or `stopped`, and exits 1 if it is not `done`. |
+| `awb retry <task> [--wait] [--retries N]` | Sets a `failed` task back to `waiting` and starts the runner. It uses the same worktree and branch. |
+| `awb stop <stack \| task>` | Stops the run and the proof of the current task. The task becomes `failed` with the reason `stopped by awb stop`, and the later tasks stay `waiting`. Exits 1 if nothing runs for the id. |
+| `awb task rm <id...>` | Removes waiting or failed tasks in one transaction. If one id is doing, is shipped or does not exist, nothing is removed. |
+| `awb prove [--rewrite C1,C2]` | Starts the app, writes the missing proof tests with a fresh test-writer session, runs them, and runs the gate. Prints the claim table. Exits 1 if the gate fails. `--rewrite` deletes the tests of those claims first. |
+| `awb ship` | Runs the gate again. If it passes, scans for secrets, pushes the branch, opens a draft PR, uploads each video, and sets the task to `done`. Refuses when the gate fails. |
 
-Logs: every part writes JSON lines to `AWB_HOME/logs/awb.<YYYY-MM-DD>.jsonl`, one file for each UTC day. At 50 MB the day continues in `awb.<YYYY-MM-DD>.1.jsonl`, then `.2`, and so on. No file is ever renamed. awb never deletes a log file unless you set `AWB_LOG_KEEP_DAYS` to a number of days (the default is `none`). `AWB_QUIET_MIN` (default 15) sets when a silent session shows `quiet`. A run that stops or finishes shows a desktop notice: `AWB_NOTIFY=0` turns it off, and `AWB_NOTIFY_CMD` runs your own command with the title and the text.
+How the runner works:
+- It makes a worktree in `AWB_HOME/worktrees/` for each task, runs the `## setup` block of the run file in it, and starts `awb -p` with the task prompt.
+- If a session ends on a transient API error (connection refused or reset, overloaded, 429, 5xx, fetch failed), it resumes the same Claude session up to `--retries` times (0 to 5, default 1).
+- If a task ends without a PR, the task is `failed` and the stack stops.
+- It runs at most `AWB_MAX_STACKS` stacks at a time, and refuses a new one when the limit is full.
+
+## Read the state
+
+| Command | What it does |
+|---|---|
+| `awb show [task]` | Shows a task: the claims, the failure reason, every gate row, the cost, the transcripts and the PR. With no id, it shows the task of the current branch. |
+| `awb tasks [--repo <path>] [--status a,b] [--since 7d]` | Lists the tasks of all repos, newest first, with the failed claims of the last gate. |
+| `awb sessions` | Lists the sessions. |
+| `awb cost [--since 7d] [--repo <name or path>]` | The estimated cost for each day, repo and task. The estimate uses the price table in `prices.ts`. A model that is not in the table counts as unpriced. |
+| `awb logs [--task <id>] [--run <id>] [--session <id>] [--level warn] [--source <name>] [--since 1d] [--limit 200] [-f]` | Reads the structured log from `AWB_HOME/logs/`. `-f` prints new lines as they come. |
+
+`awb sessions`, `awb wt`, `awb stack set`, `awb run`, `awb retry`, `awb stop`, `awb task rm`, `awb prove`, `awb ship`, `awb show`, `awb tasks`, `awb cost` and `awb logs` accept `--json`.
+
+## Web UI
+
+`awb ui` shows the cost of today in the header and these views:
+- **Live:** the current run, and every session with its state and cost.
+- **Session:** the events and tokens of one session.
+- **Stacks:** each task with its status, cost and PR. You can edit a waiting task.
+- **PRs:** each open PR with its gate result and state.
+- **Task:** the claim table, a video for each claim, the trace, the logs, the proof tests and the diff. On a failed task, Retry, Rewrite test and Drop call the same routes as `awb retry`, `awb prove --rewrite` and `awb task rm`.
+- **Logs:** the log lines, with a link to Grafana when Loki runs.
+
+## Settings
 
 `AWB_HOME` defaults to `~/.awb`. Each `AWB_HOME` has its own daemon, database and `daemon.json`. For a dev instance, use `AWB_HOME=~/.awb-dev`.
 
-A repo can replace the default playbook with `.awb/playbook.md`.
+| Variable | Default | Meaning |
+|---|---|---|
+| `AWB_HOME` | `~/.awb` | The folder of the daemon, the database, the logs and the task folders. |
+| `AWB_PORT` | a free port | The daemon port. |
+| `AWB_MAX_STACKS` | 2 (max 5) | The number of stacks that run at the same time. |
+| `AWB_TASK_TIMEOUT_MIN` | 45 | The time limit of a task session. |
+| `AWB_WRITER_TIMEOUT_MIN` | 30 | The time limit of the test writer. In a task session, it gets only the time left. |
+| `AWB_CLAUDE` | `claude` | Replaces `claude` in the launcher and the task sessions. |
+| `AWB_WRITER_CLAUDE` | `claude` | Replaces `claude` in the test writer. |
+| `AWB_LOG_KEEP_DAYS` | `none` | Deletes log files older than this number of days. `none` keeps every file. |
+| `AWB_QUIET_MIN` | 15 | The minutes of silence after which a session shows `quiet`. |
+| `AWB_NOTIFY` | on | `0` turns off the desktop notice when a run stops or finishes. |
+| `AWB_NOTIFY_CMD` | none | Runs your own command with the title and the text. |
+| `AWB_SYNC_MS` | 60000 | How often the daemon asks GitHub for the state of each shipped PR. |
+| `AWB_WORKTREES` | see `awb wt` | The root folder of `awb wt`. |
 
-The run file tells `awb` how to set up the worktree, start the app and run the tests. It is `$AWB_HOME/repos/<repo name>.run.md`, for example `~/.awb/repos/browser-games__ai.run.md`, so no awb file goes into the repo. The name comes from the main repo, so all worktrees of a repo use the same file. If a worktree has `.awb/run.md`, that file wins. Use it only for a branch that changes how the app starts.
+awb sets no spend limit. It records the cost of each session and test writer.
 
-A repo that cannot hold awb files can have its own rules in `$AWB_HOME/repos/<repo name>.md`, for example `~/.awb/repos/app.md`. `awb` adds the file to the end of the playbook when it starts in that repo or in one of its worktrees, because the name comes from the main repo. The runner starts task sessions with `awb -p`, so they get the rules too.
+Logs: every part writes JSON lines to `AWB_HOME/logs/awb.<YYYY-MM-DD>.jsonl`, one file for each UTC day. At 50 MB the day continues in `awb.<YYYY-MM-DD>.1.jsonl`, then `.2`, and so on.
 
-`awb` also loads the plugin in `packages/cli/plugin` with `--plugin-dir`. It has three skills: `awb:sentry-fix` (reproduce one Sentry issue with a test that fails with the same exception and frame, fix it, and write the before and after output to `$AWB_HOME/sentry/<id>/proof.md`), `awb:bug-triage` (a channel or a list of links becomes fix and skip verdicts, at most 5 fixes, and a report in `$AWB_HOME/triage/`), and `awb:worktrees` (worktrees in `~/LOCAL_worktrees/<repo>/<branch>`). The skills use the Slack and Sentry MCP servers in your `claude` settings. `awb ship` cannot ship a Sentry fix yet, because the gate proves only browser claims.
+## Files in a repo
 
-`awb` passes hooks to `claude` with `--settings`. Each hook runs `bin/awb-hook`, which sends the hook JSON to the daemon of `AWB_HOME` for the session in `AWB_SESSION_ID`. The sender prints nothing and waits at most 1 s. If the daemon is down, the event is dropped and the chat continues. On `Stop` and `SessionEnd`, the daemon reads the token totals from the transcript file that the hook names. The UI page gets live updates from `/api/feed` (server-sent events).
+- **Playbook:** a repo can replace the default playbook with `.awb/playbook.md`.
+- **Run file:** it tells `awb` how to set up the worktree, start the app, seed data and run the tests. It is `$AWB_HOME/repos/<repo name>.run.md`, so no awb file goes into the repo. All worktrees of a repo use the same file. If a worktree has `.awb/run.md`, that file wins. Use it only for a branch that changes how the app starts.
+- **Repo rules:** a repo that cannot hold awb files can have its own rules in `$AWB_HOME/repos/<repo name>.md`. `awb` adds the file to the end of the playbook, in the repo and in its worktrees. Task sessions get the rules too.
 
-The settings also deny file edits to the database, `daemon.json` and the task folders in `AWB_HOME` (an `Edit` rule covers every file tool; the worktrees stay writable). Every 60 s (`AWB_SYNC_MS`), the daemon asks GitHub for the state of each shipped PR and sets the task to `merged` or `closed`. Traces stay in the task folder and are not uploaded, because a trace can hold cookies.
+## Plugin and hooks
 
-To test:
+`awb` loads the plugin in `packages/cli/plugin` with `--plugin-dir`. It has three skills:
+- `awb:sentry-fix`: reproduces one Sentry issue with a test that fails with the same exception and frame, fixes it, and writes the before and after output to `$AWB_HOME/sentry/<id>/proof.md`. To ship the fix, the skill makes a task with one `"proof":"test"` claim, and then `awb prove` and `awb ship` run as for any task.
+- `awb:bug-triage`: turns a channel or a list of links into fix and skip verdicts (at most 5 fixes), and writes a report in `$AWB_HOME/triage/`.
+- `awb:worktrees`: makes worktrees in `~/LOCAL_worktrees/<repo>/<branch>`.
+
+The skills use the Slack, Sentry and Linear MCP servers in your `claude` settings. `awb doctor` checks them.
+
+`awb` passes hooks to `claude` with `--settings`. Each hook runs `bin/awb-hook`, which sends the hook JSON to the daemon for the session in `AWB_SESSION_ID`. The sender prints nothing and waits at most 1 s. If the daemon is down, the event is dropped and the chat continues. On `Stop` and `SessionEnd`, the daemon reads the token totals from the transcript file.
+
+The settings also deny file edits to the database, `daemon.json` and the task folders in `AWB_HOME`. Traces stay in the task folder and are not uploaded, because a trace can hold cookies.
+
+## Tests
 
 ```sh
 npm test
 npm run typecheck
-bash e2e/wt.sh                           # awb wt with real git worktrees and the picker in a pty (no cost)
-bash e2e/ui.sh                           # the web UI in a browser: a real stack run with a stub claude and gh (no cost, about 1 min)
-WORK=<dir> bash e2e/acceptance.sh setup   # then single, bug, stack, ask (real claude and GitHub, about 6 USD)
 ```
+
+| Script | What it covers | Cost |
+|---|---|---|
+| `bash e2e/wt.sh` | `awb wt` with real git worktrees and the picker in a pty | none |
+| `bash e2e/ui.sh` | The web UI in a browser, with a real stack run, a stub `claude` and a stub `gh` (about 1 min) | none |
+| `bash e2e/logging.sh` | The structured log, with a stub `claude` (about 70 s) | none |
+| `bash e2e/repo-test.sh` | Test claims and the run file outside the repo, with a stub test writer | none |
+| `WORK=<dir> bash e2e/acceptance.sh setup`, then `single`, `bug`, `stack`, `ask` | The full flow with the real `claude` and GitHub | about 6 USD |
