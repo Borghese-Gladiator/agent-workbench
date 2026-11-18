@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+staged_ts=$(git diff --cached --name-only --diff-filter=ACMR | grep -c '\.ts$' || true)
+for v in $(git rev-parse --local-env-vars); do unset "$v"; done
+npm run typecheck --silent
+if [ "$staged_ts" -gt 0 ]; then
+  npm test --silent
+fi
