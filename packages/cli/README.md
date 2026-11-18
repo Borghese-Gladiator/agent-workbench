@@ -83,6 +83,9 @@ How the runner works:
 | `AWB_NOTIFY_CMD` | none | Runs your own command with the title and the text. |
 | `AWB_SYNC_MS` | 60000 | How often the daemon asks GitHub for the state of each shipped PR. |
 | `AWB_WORKTREES` | see `awb wt` | The root folder of `awb wt`. |
+| `AWB_GRAFANA_URL` | none | The Grafana URL. The Logs tab shows a link to it. |
+| `AWB_ALLOY_URL` | `http://127.0.0.1:12345` | The Alloy URL that `awb doctor` checks. |
+| `AWB_LOKI_URL` | `http://127.0.0.1:3100` | The Loki URL that `awb doctor` checks. |
 
 awb sets no spend limit. It records the cost of each session and test writer.
 
