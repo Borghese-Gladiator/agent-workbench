@@ -161,9 +161,24 @@ Find each ticket that the PR body links (for example `Fixes https://linear.app/k
 
 Give the user: the result (fixed, skipped or not reproduced), the branch, the two commit SHAs, the proof file path, and the before and after output in short form.
 
-`awb ship` proves only browser claims today, so it cannot ship this branch. If the user asks for a PR, push the branch and open a draft PR with `gh pr create --draft`, with the PR body from the proof file. The `awb` hook blocks `gh pr create` without `--draft`. Then do step 11. Never open a PR that is not a draft, never run `gh pr ready`, and never request reviewers.
+If the user asks for a PR, ship the branch with `awb ship`. Do not run `gh pr create` yourself.
 
-For an error in fender with a browser path, the fix also needs a browser claim. Follow the playbook feature flow: write a claim for the correct behavior, then run `awb prove` and `awb ship`.
+1. Make sure that a run file with a `## test` section exists for the repo (see the playbook, step 4). The test command must write JUnit XML.
+2. Create a task with one test claim. Send it on stdin to `awb stack set`:
+   ```sh
+   awb stack set <<'EOF'
+   {"tasks":[{"title":"fix: <what changed> (<SHORT-ID>)","claims":[{"id":"C1","proof":"test","text":"<the input of the event> no longer raises <exception type> in <function>"}]}]}
+   EOF
+   ```
+3. Run `awb prove`. A separate session writes its own test from the claim. The gate runs that test on the base commit and on your fix. The claim passes only when the test fails on the base and passes on the fix.
+4. If the claim fails, fix the code, commit, and run `awb prove` again. Do not edit the proof tests.
+5. Run `awb ship`. It opens the draft PR.
+6. `awb ship` puts the repo PR template in the PR body unfilled. If the template asks for `Fixes <SHORT-ID>` or a ticket link, add them to the PR body with `gh pr edit --body-file`. Keep the claim table. Link the proof file from `$AWB_HOME/sentry/<SHORT-ID>/proof.md` in the body.
+7. Do step 11.
+
+Never run `gh pr ready`, and never request reviewers.
+
+For an error in fender with a browser path, the fix also needs a browser claim. Add it as a second claim (without `"proof":"test"`) to the same task.
 
 ## Rules
 

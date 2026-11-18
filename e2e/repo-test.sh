@@ -2,6 +2,7 @@
 # End-to-end check of repo-test claims and the run file outside the repo, with a stub test writer (no tokens, no GitHub).
 # The run file is in AWB_HOME/repos. The stub writes one passing and one failing test in .awb-proof.
 # Then awb prove must pass C1, fail C2, and leave no awb file in the repo.
+# add.mjs is new on the branch, so C1 fails on the base commit and passes on the head (the red-on-base rule).
 # Usage: bash e2e/repo-test.sh   (WORK=<dir> keeps the files)
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -17,10 +18,13 @@ fail() { echo "FAIL: $1"; exit 1; }
 REPO="$WORK/team/lib"
 mkdir -p "$REPO"
 git -C "$REPO" init -q -b main
+echo 'lib' > "$REPO/README.md"
+git -C "$REPO" add README.md
+git -C "$REPO" -c core.hooksPath=/dev/null -c user.email=a@b -c user.name=t commit -q -m "init"
+git -C "$REPO" checkout -q -b awb/add
 echo 'export const add = (a, b) => a + b;' > "$REPO/add.mjs"
 git -C "$REPO" add add.mjs
 git -C "$REPO" -c core.hooksPath=/dev/null -c user.email=a@b -c user.name=t commit -q -m "add"
-git -C "$REPO" checkout -q -b awb/add
 
 cat > "$WORK/writer" <<'EOF'
 #!/usr/bin/env bash
