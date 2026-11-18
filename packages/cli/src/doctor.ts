@@ -47,6 +47,34 @@ function chromiumInstalled(): boolean {
   return [dir, linux].some((d) => existsSync(d) && readdirSync(d).some((n) => n.startsWith("chromium")));
 }
 
+export const MCP_SERVERS = ["slack", "sentry", "linear-server"];
+
+export function mcpChecks(listing: string | null, servers = MCP_SERVERS): Check[] {
+  if (listing === null) {
+    return [{ name: "mcp", ok: false, detail: "claude mcp list failed", fix: "claude mcp list" }];
+  }
+  const state = new Map<string, string>();
+  for (const line of listing.split("\n")) {
+    const m = line.match(/^([\w-]+): .* - (✔|!|✘)/);
+    if (m) state.set(m[1], m[2]);
+  }
+  return servers.map((name) => {
+    const s = state.get(name);
+    if (s === "✔") return { name, ok: true, detail: "MCP server connected" };
+    if (s === "!") return { name, ok: false, detail: "MCP server needs authentication", fix: "run /mcp in claude and authenticate" };
+    if (s === "✘") return { name, ok: false, detail: "MCP server failed to connect", fix: "run /mcp in claude" };
+    return { name, ok: false, detail: "MCP server not configured", fix: `claude mcp add ${name}` };
+  });
+}
+
+function mcpListing(): string | null {
+  try {
+    return execFileSync("claude", ["mcp", "list"], { encoding: "utf8", timeout: 60_000 });
+  } catch {
+    return null;
+  }
+}
+
 export async function doctor(home: string): Promise<boolean> {
   const checks: Check[] = [];
 
@@ -72,6 +100,8 @@ export async function doctor(home: string): Promise<boolean> {
     detail: daemon ? `pid ${daemon.pid} on port ${daemon.port}` : "not running",
     fix: "awb daemon start",
   });
+
+  checks.push(...mcpChecks(mcpListing()));
 
   checks.push(
     ...(await logChecks(join(home, "logs"), process.env.AWB_ALLOY_URL || "http://127.0.0.1:12345", process.env.AWB_LOKI_URL || "http://127.0.0.1:3100")),
