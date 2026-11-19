@@ -98,8 +98,8 @@ The daemon runs the jobs in `$AWB_HOME/schedule.json`. It checks every 30 second
 
 ```json
 [
-  { "name": "standup", "at": "10:00", "prompt": "/slack:standup" },
-  { "name": "sentry-triage", "at": "09:00", "cwd": "/path/to/repo", "timeoutMin": 45, "prompt": "/awb:bug-triage <channel> last 24 hours. Skip each issue that already has a PR." }
+  { "name": "standup", "at": "09:30", "prompt": "/awb:standup", "timeoutMin": 10 },
+  { "name": "sentry-triage", "at": "09:00", "cwd": "/path/to/repo", "timeoutMin": 45, "prompt": "/awb:triage <channel> last 24 hours. Skip each issue that already has a PR." }
 ]
 ```
 
@@ -125,11 +125,12 @@ The **Schedule** tab of the UI shows the same data, a **Run now** button for eac
 
 ## Plugin and hooks
 
-`awb` loads the plugin in `packages/cli/plugin` with `--plugin-dir`. It has five skills. Each verb is one skill. The source (Sentry, Linear, GitHub, Slack) is a file inside the skill.
+`awb` loads the plugin in `packages/cli/plugin` with `--plugin-dir`. It has six skills. Each verb is one skill. The source (Sentry, Linear, GitHub, Slack) is a file inside the skill.
 - `awb:triage`: gives each item one verdict (`fix`, `answer`, `request`, `route`, `skip`) with evidence, and writes a report in `$AWB_HOME/triage/`. The item can be a Sentry issue, a Linear ticket, a GitHub issue, PR or comment, a Slack thread, a channel, or a list of links. It does not change code and does not post.
 - `awb:fix`: reproduces one Sentry issue with a test that fails with the same exception and frame, fixes it, and writes the before and after output to `$AWB_HOME/sentry/<id>/proof.md`. To ship the fix, the skill makes a task with one `"proof":"test"` claim, and then `awb prove` and `awb ship` run as for any task.
 - `awb:respond`: drafts one reply for a Slack thread, a GitHub comment or a Linear ticket. It posts only after the user approves that draft.
 - `awb:review`: posts one short review comment on a GitHub PR, after the user approves the draft.
+- `awb:standup`: prints the standup text (`:yesterday:`, `:today:`, `:construction:`) from commits, PRs, awb tasks and Linear tickets. It only reads and never posts. The skill file has the `schedule.json` job.
 - `awb:worktrees`: makes worktrees in `~/LOCAL_worktrees/<repo>/<branch>`.
 
 The skills use the Slack, Sentry and Linear MCP servers in your `claude` settings. `awb doctor` checks them.
