@@ -1,5 +1,5 @@
 import { html, useState } from "./vendor/htm-preact.js";
-import { post, repoName, usd, type Data, type Json } from "./components.ts";
+import { Branch, post, repoName, usd, type Data, type Json } from "./components.ts";
 
 const Gate = ({ t }: { t: Json }) =>
   !t.last_gate_at
@@ -18,7 +18,7 @@ function Rows({ list, d }: { list: Json[]; d: Data }) {
           <td class=${t.status}>${t.status === "done" ? "open" : t.status}</td>
           <td><a href=${"#/task/" + t.id}>${t.title}</a></td>
           <td>${repoName(t.repo)}</td>
-          <td class="mono">${t.branch}</td>
+          <td><${Branch} b=${t.branch} /></td>
           <td><${Gate} t=${t} /></td>
           <td class="mono num">${usd(d.taskUsd[t.id])}</td>
         </tr>`,

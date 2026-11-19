@@ -14,6 +14,29 @@ const NAV = [
   ["logs", "#/logs", "Logs", "M4 6h16M4 12h16M4 18h10"],
 ];
 
+const pref = (k: string, v: string) => {
+  try { return localStorage.getItem(k) ?? v; } catch { return v; }
+};
+const apply = (theme: string, density: string) => {
+  const r = document.documentElement;
+  theme === "system" ? r.removeAttribute("data-theme") : r.setAttribute("data-theme", theme);
+  r.setAttribute("data-density", density);
+};
+apply(pref("awb.theme", "system"), pref("awb.density", "comfortable"));
+
+function Prefs() {
+  const [theme, setTheme] = useState(pref("awb.theme", "system"));
+  const [density, setDensity] = useState(pref("awb.density", "comfortable"));
+  const set = (k: string, v: string) => {
+    try { localStorage.setItem(k, v); } catch {}
+    k === "awb.theme" ? setTheme(v) : setDensity(v);
+    apply(k === "awb.theme" ? v : theme, k === "awb.density" ? v : density);
+  };
+  const group = (label: string, key: string, cur: string, opts: string[]) => html`<div class="prefs" role="group" aria-label=${label}>
+    ${opts.map((o) => html`<button class="plain" aria-pressed=${cur === o} onClick=${() => set(key, o)}>${o}</button>`)}</div>`;
+  return html`${group("Theme", "awb.theme", theme, ["system", "light", "dark"])}${group("Density", "awb.density", density, ["comfortable", "compact"])}`;
+}
+
 function App() {
   const [hash, setHash] = useState(location.hash);
   const [status, setStatus] = useState("connecting…");
@@ -98,6 +121,7 @@ function App() {
         )}
       </nav>
       <div class="foot">
+<${Prefs} />
         <div class="muted mono home">${home}</div>
         <div><span class="muted">Daemon</span> <span id="status" class=${status === "live" ? "live" : ""}>${status}</span></div>
         <div><span class="muted">Today</span> <span class="mono">${today === null ? "" : usd(today) + " USD"}</span></div>

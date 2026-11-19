@@ -1,5 +1,5 @@
 import { html, useState } from "./vendor/htm-preact.js";
-import { ago, repoName, State, TaskLink, taskOf, time, tok, usd, type Data, type Json, type Session } from "./components.ts";
+import { ago, Branch, repoName, State, TaskLink, taskOf, time, tok, usd, type Data, type Json, type Session } from "./components.ts";
 
 const NOTE: Record<string, string> = { quiet: "no event in the quiet time", lost: "its awb process is gone" };
 
@@ -39,7 +39,7 @@ function Finished({ d }: { d: Data }) {
               (t) => html`<tr>
                 <td><${State} s=${t.status} /></td>
                 <td><${TaskLink} t=${t} /></td>
-                <td class="mono">${t.branch}</td>
+                <td><${Branch} b=${t.branch} /></td>
                 <td class="mono num">${usd(d.taskUsd[t.id] ?? 0)}</td>
                 <td>${t.pr_number ? html`<a href=${t.pr_url} target="_blank">PR #${t.pr_number}</a>` : t.status === "failed" ? html`<span class="FAIL">${t.fail_reason}</span>` : null}</td>
               </tr>`,
@@ -70,7 +70,7 @@ export function Live({ d }: { d: Data }) {
           (s) => html`<tr class="click" onClick=${(e: MouseEvent) => !(e.target as Element).closest("a") && (location.hash = "#/session/" + s.id)}>
             <td><${State} s=${s.state} />${NOTE[s.state] ? html`<span class="note">${NOTE[s.state]}</span>` : null}</td>
             <td>${repoName(s.repo)}</td>
-            <td class="mono">${s.branch}</td>
+            <td><${Branch} b=${s.branch} /></td>
             <td><${TaskLink} t=${taskOf(d, s)} /></td>
             <td><${Op} s=${s} /></td>
             <td>${s.last_hook} <span class="muted">${time(s.last_event_at)}</span></td>

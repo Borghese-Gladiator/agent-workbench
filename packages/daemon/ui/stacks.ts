@@ -1,5 +1,5 @@
 import { html, useEffect, useState } from "./vendor/htm-preact.js";
-import { get, post, repoName, usd, type Data, type Json } from "./components.ts";
+import { Branch, get, post, repoName, usd, type Data, type Json } from "./components.ts";
 
 function EditForm({ st, t, onSaved }: { st: Json; t: Json; onSaved: () => void }) {
   const [title, setTitle] = useState<string>(t.title);
@@ -61,7 +61,7 @@ export function Stacks({ d }: { d: Data }) {
                 <td>${i + 1}</td>
                 <td class=${t.status}>${t.status}</td>
                 <td><a href=${"#/task/" + t.id}>${t.title}</a>${t.fail_reason ? html`<div class="muted">${t.fail_reason}</div>` : null}</td>
-                <td class="mono">${t.branch}</td>
+                <td><${Branch} b=${t.branch} /></td>
                 <td class="mono num">${usd(d.taskUsd[t.id])}</td>
                 <td>${t.pr_url ? html`<a href=${t.pr_url}>#${t.pr_number}</a>` : null}</td>
                 <td>${t.status === "waiting" ? html`<${EditForm} st=${st} t=${t} onSaved=${saved} />` : null}</td>

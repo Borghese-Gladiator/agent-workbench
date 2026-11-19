@@ -40,7 +40,9 @@ export const taskOf = (d: Data, s: Session) =>
 
 export const State = ({ s }: { s: string }) => html`<span class=${"badge " + s}>${s}</span>`;
 export const Pass = ({ pass }: { pass: boolean }) => html`<span class=${pass ? "PASS" : "FAIL"}>${pass ? "PASS" : "FAIL"}</span>`;
-export const TaskLink = ({ t }: { t?: Json }) => (t ? html`<a href=${"#/task/" + t.id}>${t.title}</a>` : null);
+export const Branch = ({ b }: { b?: string | null }) =>
+  b ? html`<span class="mono trunc" title=${b}>${b}</span><button class="plain copy" aria-label=${"Copy branch " + b} onClick=${(e: Event) => (e.stopPropagation(), navigator.clipboard?.writeText(b))}>Copy</button>` : null;
+export const TaskLink =({ t }: { t?: Json }) => (t ? html`<a href=${"#/task/" + t.id}>${t.title}</a>` : null);
 
 const LEVEL: Record<string, string> = { error: "FAIL", warn: "busy", info: "muted" };
 
