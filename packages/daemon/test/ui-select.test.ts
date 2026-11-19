@@ -1,6 +1,44 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { barRows, costlyFailures, filterTasks, lastGate, matchLines, needsAttention, prGroup, stackCost, stackProgress, stepStates, timeline, toneOf } from "../ui/select.ts";
+import { barRows, costlyFailures, filterTasks, lastGate, matchLines, needsAttention, prGroup, relTime, sortTasks, splitStacks, stackCost, stackProgress, stepStates, timeline, toneOf } from "../ui/select.ts";
+
+test("relTime reads as minutes, hours, yesterday, days, then a short date", () => {
+  const now = new Date(2026, 10, 19, 15, 0, 0).getTime();
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+  const M = 60000, H = 60 * M;
+  assert.equal(relTime(ago(20_000), now), "Just now");
+  assert.equal(relTime(ago(12 * M), now), "12 min ago");
+  assert.equal(relTime(ago(3 * H), now), "3 h ago");
+  assert.equal(relTime(new Date(2026, 10, 18, 12, 0).toISOString(), now), "Yesterday");
+  assert.equal(relTime(new Date(2026, 10, 16, 12, 0).toISOString(), now), "3 days ago");
+  assert.equal(relTime(new Date(2026, 9, 2, 12, 0).toISOString(), now, "en-US"), "Oct 2");
+  assert.equal(relTime(new Date(2025, 9, 2, 12, 0).toISOString(), now, "en-US"), "Oct 2, 2025");
+  assert.equal(relTime(null, now), "");
+  assert.equal(relTime("not a date", now), "");
+});
+
+test("sortTasks sorts text, status rank, repo name and cost, in both directions", () => {
+  const tasks = [
+    { id: "a", title: "Task 10", status: "done", repo: "/r/zeta", created_at: "1" },
+    { id: "b", title: "Task 2", status: "failed", repo: "/r/alpha", created_at: "2" },
+    { id: "c", title: "Task 1", status: "waiting", repo: "/r/alpha", created_at: "3" },
+  ];
+  const usd = { a: 1, b: 9 };
+  const ids = (key: any, dir: any) => sortTasks(tasks, key, dir, usd).map((t) => t.id).join("");
+  assert.equal(ids("title", "asc"), "cba");
+  assert.equal(ids("title", "desc"), "abc");
+  assert.equal(ids("status", "asc"), "bca");
+  assert.equal(ids("usd", "desc"), "bac");
+  assert.equal(ids("usd", "asc"), "cab");
+  assert.equal(ids("repo", "asc"), "cba");
+});
+
+test("splitStacks hides archived stacks and stacks with no task, and keeps the rest", () => {
+  const stacks = [{ id: "a", tasks: [1] }, { id: "b", tasks: [] }, { id: "c", tasks: [1] }];
+  const { shown, hidden } = splitStacks(stacks, new Set(["c"]));
+  assert.deepEqual(shown.map((s) => s.id), ["a"]);
+  assert.deepEqual(hidden.map((s) => s.id), ["b", "c"]);
+});
 
 test("toneOf maps a status to a tone, and an unknown status to dim", () => {
   assert.deepEqual(["done", "failed", "doing", "waiting", "zzz"].map(toneOf), ["ok", "bad", "warn", "dim", "dim"]);
