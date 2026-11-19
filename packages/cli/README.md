@@ -130,7 +130,7 @@ The **Schedule** tab of the UI shows the same data, a **Run now** button for eac
 - `awb:fix`: reproduces one Sentry issue with a test that fails with the same exception and frame, fixes it, and writes the before and after output to `$AWB_HOME/sentry/<id>/proof.md`. To ship the fix, the skill makes a task with one `"proof":"test"` claim, and then `awb prove` and `awb ship` run as for any task.
 - `awb:respond`: drafts one reply for a Slack thread, a GitHub comment or a Linear ticket. It posts only after the user approves that draft.
 - `awb:review`: posts one short review comment on a GitHub PR, after the user approves the draft.
-- `awb:standup`: prints the standup text (`:yesterday:`, `:today:`, `:construction:`) from commits, PRs, awb tasks and Linear tickets. It only reads and never posts. The skill file has the `schedule.json` job.
+- `awb:standup`: prints the standup text (`:yesterday:`, `:today:`, `:construction:`) from commits, PRs and awb tasks. A PR is "Merged" only when GitHub says it is merged. It only reads and never posts. The skill file has the `schedule.json` job.
 - `awb:worktrees`: makes worktrees in `~/LOCAL_worktrees/<repo>/<branch>`.
 
 The skills use the Slack, Sentry and Linear MCP servers in your `claude` settings. `awb doctor` checks them.
