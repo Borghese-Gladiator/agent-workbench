@@ -86,6 +86,16 @@ Show log lines.
   rm   Delete the listed tasks.
 
   --json   Print the result as JSON.`,
+  schedule: `usage: awb schedule [status|runs|run <job>|output <run id>] [--limit N] [--json]
+
+Show and start scheduled jobs.
+
+  status          Show each job, its next start, and its last run. This is the default.
+  runs            List the newest runs.
+  run <job>       Start a job now.
+  output <run id> Print the output of a run.
+  --limit N       Set the number of runs to list. The default is 20.
+  --json          Print the result as JSON.`,
   sessions: `usage: awb sessions [--json]
 
 List sessions.
