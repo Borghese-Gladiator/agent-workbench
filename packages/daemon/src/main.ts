@@ -9,6 +9,7 @@ import { claudeSession, createRunner, lastSessionUsd, stackLimit } from "./runne
 import { notify, runMessage } from "./notify.ts";
 import { createLog } from "./log.ts";
 import { killChildren } from "./prove.ts";
+import { createScheduler, migrateJobs, scheduleRoutes } from "./schedule.ts";
 
 export async function startDaemon(home: string) {
   mkdirSync(home, { recursive: true });
@@ -55,7 +56,12 @@ export async function startDaemon(home: string) {
     log,
     logDir,
   );
-  const server = createApp(store, { home, startedAt, log }, routes);
+  migrateJobs(store.db);
+  const scheduler = createScheduler(home, store.db, log);
+  const stale = scheduler.recover();
+  if (stale) log("warn", "schedule", "recover", { runs: stale, reason: "the daemon restarted while a job ran" });
+  const jobRoutes = scheduleRoutes(scheduler);
+  const server = createApp(store, { home, startedAt, log }, async (req, res, url, body) => (await routes(req, res, url, body)) || jobRoutes(req, res, url, body));
   await new Promise<void>((resolve, reject) => server.once("error", reject).listen(Number(process.env.AWB_PORT || 0), "127.0.0.1", resolve));
   const port = (server.address() as AddressInfo).port;
   const sync = setInterval(
@@ -63,6 +69,8 @@ export async function startDaemon(home: string) {
     Number(process.env.AWB_SYNC_MS || 60_000),
   );
   sync.unref();
+  const schedule = setInterval(() => scheduler.tick().catch((err) => log("warn", "schedule", "error", { error: err })), 30_000);
+  schedule.unref();
   log("info", "daemon", "start", { pid: process.pid, port, home });
 
   const file = join(home, "daemon.json");
@@ -78,6 +86,7 @@ export async function startDaemon(home: string) {
       if (JSON.parse(readFileSync(file, "utf8")).pid === process.pid) rmSync(file);
     } catch {}
     clearInterval(sync);
+    clearInterval(schedule);
     server.close();
     log("info", "daemon", "stop", { pid: process.pid });
     store.close();

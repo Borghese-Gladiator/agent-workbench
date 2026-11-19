@@ -6,11 +6,13 @@ import { Stacks } from "./stacks.ts";
 import { Prs } from "./prs.ts";
 import { TaskView } from "./task.ts";
 import { Logs } from "./logs.ts";
+import { Schedule } from "./schedule.ts";
 
 const NAV = [
   ["live", "#/", "Live", "M22 12h-4l-3 9L9 3l-3 9H2"],
   ["stacks", "#/stacks", "Stacks", "M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"],
   ["prs", "#/prs", "PRs", "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9"],
+  ["schedule", "#/schedule", "Schedule", "M12 6v6l4 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0z"],
   ["logs", "#/logs", "Logs", "M4 6h16M4 12h16M4 18h10"],
 ];
 
@@ -77,6 +79,7 @@ function App() {
     : view === "stacks" ? html`<${Stacks} d=${data} />`
     : view === "prs" ? html`<${Prs} d=${data} />`
     : view === "task" ? html`<${TaskView} key=${id} d=${data} id=${id} />`
+    : view === "schedule" ? html`<${Schedule} />`
     : view === "logs" ? html`<${Logs} key=${id} task=${id ?? ""} />`
     : html`<${Live} d=${data} />`;
   const current = view === "session" ? "live" : view === "task" ? "stacks" : view;

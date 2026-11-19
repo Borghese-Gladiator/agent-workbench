@@ -91,6 +91,31 @@ awb sets no spend limit. It records the cost of each session and test writer.
 
 Logs: every part writes JSON lines to `AWB_HOME/logs/awb.<YYYY-MM-DD>.jsonl`, one file for each UTC day. At 50 MB the day continues in `awb.<YYYY-MM-DD>.1.jsonl`, then `.2`, and so on.
 
+## Scheduled jobs
+
+The daemon runs the jobs in `$AWB_HOME/schedule.json`. It checks every 30 seconds, and each job runs at most once a day. If the daemon is down at the set time, the job runs when the daemon starts, on the same day. The output goes to `$AWB_HOME/schedule/<name>/<YYYY-MM-DD>.md`, and a desktop notice shows the result.
+
+```json
+[
+  { "name": "standup", "at": "10:00", "prompt": "/slack:standup" },
+  { "name": "sentry-triage", "at": "09:00", "cwd": "/path/to/repo", "timeoutMin": 45, "prompt": "/awb:bug-triage <channel> last 24 hours. Skip each issue that already has a PR." }
+]
+```
+
+`days` is a list of 0 (Sunday) to 6, default `[1,2,3,4,5]`. `allowedTools` replaces the default `Read, Glob, Grep, Bash`.
+
+Each run is a row in the `job_runs` table of `awb.db`, with the state `running`, `done`, `failed` or `stopped`. A run that was open when the daemon stopped becomes `stopped`, and the job starts again the same day. A job that failed does not start again the same day. To start it again, use `awb schedule run`.
+
+| Command | Result |
+|---|---|
+| `awb schedule` | Each job with its next run and its last run. Exit code 1 if `schedule.json` is not valid. |
+| `awb schedule runs [--limit n]` | The history of runs. |
+| `awb schedule run <job>` | Starts a job now. |
+| `awb schedule output <run id>` | Prints the output of a run. The id can be the first 8 characters. |
+| `awb logs --source schedule -f` | The log lines of the scheduler. |
+
+The **Schedule** tab of the UI shows the same data, a **Run now** button for each job, and the output of each run.
+
 ## Files in a repo
 
 - **Playbook:** a repo can replace the default playbook with `.awb/playbook.md`.

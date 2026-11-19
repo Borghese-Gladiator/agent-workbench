@@ -1,7 +1,7 @@
 import { html, useEffect, useState } from "./vendor/htm-preact.js";
 import { get, LogLine, type Json } from "./components.ts";
 
-const SOURCES = ["", "daemon", "runner", "prove", "ship", "sync", "http", "cli", "notify", "usage"];
+const SOURCES = ["", "daemon", "runner", "prove", "ship", "sync", "http", "cli", "notify", "usage", "schedule"];
 
 export function Logs({ task }: { task: string }) {
   const [f, setF] = useState({ level: "info", source: "", task, since: task ? "3650d" : "1d" });
