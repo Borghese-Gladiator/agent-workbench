@@ -11,7 +11,9 @@ import { eventBody, sendHook, HOOK_EVENTS } from "../src/hook-send.ts";
 import { openStore } from "../../daemon/src/store.ts";
 import { createApp } from "../../daemon/src/server.ts";
 
-const HOOK_BIN = fileURLToPath(new URL("../bin/awb-hook", import.meta.url));
+const HOOK_SCRIPT = fileURLToPath(new URL("../src/hook-send.ts", import.meta.url));
+const hook = (input: string, env: NodeJS.ProcessEnv) =>
+  spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", HOOK_SCRIPT], { input, env: { PATH: process.env.PATH, ...env }, encoding: "utf8", windowsHide: true });
 const newHome = () => realpathSync(mkdtempSync(join(tmpdir(), "awb-hook-")));
 
 const store = openStore(":memory:");
@@ -52,7 +54,7 @@ for (const [name, env] of [
 ] as const) {
   test(`the hook sender exits 0 with no output when ${name}`, () => {
     const t = Date.now();
-    const r = spawnSync(HOOK_BIN, { input: '{"hook_event_name":"Stop"}', env: { PATH: process.env.PATH, ...env }, encoding: "utf8" });
+    const r = hook('{"hook_event_name":"Stop"}', env);
     assert.equal(r.status, 0);
     assert.equal(r.stdout, "");
     assert.ok(Date.now() - t < 3000, "it exits fast");
@@ -80,7 +82,7 @@ for (const [command, blocked] of [
 ] as const) {
   test(`the hook ${blocked ? "blocks" : "allows"} ${JSON.stringify(command)}`, () => {
     const input = JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command } });
-    const r = spawnSync(HOOK_BIN, { input, env: { PATH: process.env.PATH, AWB_HOME: newHome() }, encoding: "utf8" });
+    const r = hook(input, { AWB_HOME: newHome() });
     assert.equal(r.status, blocked ? 2 : 0);
     assert.equal(r.stdout, "");
     if (blocked) assert.match(r.stderr, /draft/);

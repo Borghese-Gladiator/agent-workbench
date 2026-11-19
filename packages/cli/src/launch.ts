@@ -2,16 +2,18 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { quote } from "../../daemon/src/run-md.ts";
 import { HOOK_EVENTS } from "./hook-send.ts";
 
 export const DEFAULT_PLAYBOOK = fileURLToPath(new URL("../playbook.md", import.meta.url));
 export const SKILLS_DIR = fileURLToPath(new URL("../skills", import.meta.url));
-export const HOOK_BIN = fileURLToPath(new URL("../bin/awb-hook", import.meta.url));
+export const HOOK_SCRIPT = fileURLToPath(new URL("./hook-send.ts", import.meta.url));
 export const PLUGIN_DIR = fileURLToPath(new URL("../plugin", import.meta.url));
 
-export function awbSettings(home: string, hookBin = HOOK_BIN) {
-  const quoted = `'${hookBin.replaceAll("'", `'\\''`)}'`;
-  const entry = (matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: quoted, timeout: 5 }] }];
+export const hookCommand = (node = process.execPath, script = HOOK_SCRIPT) => [node, "--disable-warning=ExperimentalWarning", script].map(quote).join(" ");
+
+export function awbSettings(home: string, command = hookCommand()) {
+  const entry = (matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command, timeout: 5 }] }];
   return {
     env: { AWB_HOME: home },
     permissions: {

@@ -107,7 +107,7 @@ Logs: every part writes JSON lines to `AWB_HOME/logs/awb.<YYYY-MM-DD>.jsonl`, on
 
 The skills use the Slack, Sentry and Linear MCP servers in your `claude` settings. `awb doctor` checks them.
 
-`awb` passes hooks to `claude` with `--settings`. Each hook runs `bin/awb-hook`, which sends the hook JSON to the daemon for the session in `AWB_SESSION_ID`. The sender prints nothing and waits at most 1 s. If the daemon is down, the event is dropped and the chat continues. On `Stop` and `SessionEnd`, the daemon reads the token totals from the transcript file.
+`awb` passes hooks to `claude` with `--settings`. Each hook runs `node src/hook-send.ts`, which sends the hook JSON to the daemon for the session in `AWB_SESSION_ID`. The sender prints nothing and waits at most 1 s. If the daemon is down, the event is dropped and the chat continues. On `Stop` and `SessionEnd`, the daemon reads the token totals from the transcript file.
 
 The settings also deny file edits to the database, `daemon.json` and the task folders in `AWB_HOME`. Traces stay in the task folder and are not uploaded, because a trace can hold cookies.
 
