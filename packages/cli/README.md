@@ -124,9 +124,11 @@ The **Schedule** tab of the UI shows the same data, a **Run now** button for eac
 
 ## Plugin and hooks
 
-`awb` loads the plugin in `packages/cli/plugin` with `--plugin-dir`. It has three skills:
-- `awb:sentry-fix`: reproduces one Sentry issue with a test that fails with the same exception and frame, fixes it, and writes the before and after output to `$AWB_HOME/sentry/<id>/proof.md`. To ship the fix, the skill makes a task with one `"proof":"test"` claim, and then `awb prove` and `awb ship` run as for any task.
-- `awb:bug-triage`: turns a channel or a list of links into fix and skip verdicts (at most 5 fixes), and writes a report in `$AWB_HOME/triage/`.
+`awb` loads the plugin in `packages/cli/plugin` with `--plugin-dir`. It has five skills. Each verb is one skill. The source (Sentry, Linear, GitHub, Slack) is a file inside the skill.
+- `awb:triage`: gives each item one verdict (`fix`, `answer`, `request`, `route`, `skip`) with evidence, and writes a report in `$AWB_HOME/triage/`. The item can be a Sentry issue, a Linear ticket, a GitHub issue, PR or comment, a Slack thread, a channel, or a list of links. It does not change code and does not post.
+- `awb:fix`: reproduces one Sentry issue with a test that fails with the same exception and frame, fixes it, and writes the before and after output to `$AWB_HOME/sentry/<id>/proof.md`. To ship the fix, the skill makes a task with one `"proof":"test"` claim, and then `awb prove` and `awb ship` run as for any task.
+- `awb:respond`: drafts one reply for a Slack thread, a GitHub comment or a Linear ticket. It posts only after the user approves that draft.
+- `awb:review`: posts one short review comment on a GitHub PR, after the user approves the draft.
 - `awb:worktrees`: makes worktrees in `~/LOCAL_worktrees/<repo>/<branch>`.
 
 The skills use the Slack, Sentry and Linear MCP servers in your `claude` settings. `awb doctor` checks them.
