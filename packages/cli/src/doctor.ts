@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { findDaemon } from "./home.ts";
 import { readLog } from "../../daemon/src/log.ts";
 
@@ -13,7 +13,7 @@ const getJson = async (url: string) => {
   return r.json();
 };
 
-export async function logChecks(logDir: string, alloy: string, loki: string, maxLagMs = 120_000): Promise<Check[]> {
+export async function logChecks(logDir: string, alloy: string, loki: string, maxLagMs = 120_000, tailed = logDir): Promise<Check[]> {
   try {
     const r = await fetch(`${alloy}/-/ready`, { signal: AbortSignal.timeout(2000) });
     if (!r.ok) throw new Error(`answered ${r.status}`);
@@ -21,6 +21,9 @@ export async function logChecks(logDir: string, alloy: string, loki: string, max
     return [{ name: "alloy", ok: true, detail: `off (no answer on ${alloy}); the remote log view is optional` }];
   }
   const checks: Check[] = [{ name: "alloy", ok: true, detail: `ready on ${alloy}` }];
+  if (resolve(tailed) !== resolve(logDir)) {
+    return [...checks, { name: "loki", ok: true, detail: `skipped: Alloy reads ${tailed}, not ${logDir}` }];
+  }
   const local = readLog(logDir, { limit: 1 }).at(-1);
   if (!local) return [...checks, { name: "loki", ok: true, detail: "no local log line yet" }];
   const start = (Date.parse(local.ts) - 86_400_000) * 1e6;
@@ -104,7 +107,7 @@ export async function doctor(home: string): Promise<boolean> {
   checks.push(...mcpChecks(mcpListing()));
 
   checks.push(
-    ...(await logChecks(join(home, "logs"), process.env.AWB_ALLOY_URL || "http://127.0.0.1:12345", process.env.AWB_LOKI_URL || "http://127.0.0.1:3100")),
+    ...(await logChecks(join(home, "logs"), process.env.AWB_ALLOY_URL || "http://127.0.0.1:12345", process.env.AWB_LOKI_URL || "http://127.0.0.1:3100", undefined, process.env.AWB_LOGS || join(homedir(), ".awb", "logs"))),
   );
 
   for (const c of checks) {

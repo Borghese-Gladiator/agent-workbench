@@ -42,6 +42,13 @@ for (const [name, lokiMsAgo, ok, detail] of [
   });
 }
 
+test("logChecks: skips the lag check when Alloy reads another folder", async () => {
+  const alloy = await serve(() => [200, "ready"]);
+  const [, l] = await logChecks(dir, alloy, await lokiWith(3_600_000), 120_000, join(dir, "other"));
+  assert.equal(l.ok, true);
+  assert.match(l.detail, /^skipped/);
+});
+
 test("logChecks: no Alloy is off, not a failure", async () => {
   const checks = await logChecks(dir, "http://127.0.0.1:9", "http://127.0.0.1:9");
   assert.equal(checks.length, 1);
