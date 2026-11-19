@@ -291,12 +291,12 @@ async function waitRun(d: Awaited<ReturnType<typeof ensureDaemon>>, r: any): Pro
   return r;
 }
 
-async function runCmd(stackId: string | undefined, json: boolean, wait: boolean, retries?: string): Promise<number> {
+async function runCmd(id: string | undefined, json: boolean, wait: boolean, retries?: string): Promise<number> {
   const git = here();
   if (!git) return 1;
   const d = await ensureDaemon(home);
   try {
-    let r = await api(d, "/api/run", { repo: git.repo, stackId, retries });
+    let r = await api(d, "/api/run", { repo: git.repo, id, retries });
     if (wait) r = await waitRun(d, r);
     printRun(r, json);
     return wait && r.state !== "done" ? 1 : 0;
@@ -306,14 +306,14 @@ async function runCmd(stackId: string | undefined, json: boolean, wait: boolean,
   }
 }
 
-async function retryCmd(taskId: string | undefined, json: boolean, wait: boolean, retries?: string): Promise<number> {
-  if (!taskId) {
-    console.error("usage: awb retry <task id> [--retries N]");
+async function retryCmd(id: string | undefined, json: boolean, wait: boolean, retries?: string): Promise<number> {
+  if (!id) {
+    console.error("usage: awb retry <stack id | task id> [--retries N]");
     return 2;
   }
   const d = await ensureDaemon(home);
   try {
-    let r = await api(d, "/api/retry", { taskId, retries });
+    let r = await api(d, "/api/retry", { id, retries });
     if (wait) r = await waitRun(d, r);
     printRun(r, json);
     return wait && r.state !== "done" ? 1 : 0;

@@ -29,8 +29,8 @@ A task id or a stack id can be a prefix of 6 or more characters in every command
 | Command | What it does |
 |---|---|
 | `awb stack set` | Reads a stack as JSON on stdin and creates or replaces it. A stack of many tasks gets one branch for each task. Task 1 starts from the current branch, and each later task starts from the task below. |
-| `awb run [stack] [--wait] [--retries N]` | Starts the runner on a stack (default: the newest of the repo). `--wait` returns when the run is `done` or `stopped`, and exits 1 if it is not `done`. |
-| `awb retry <task> [--wait] [--retries N]` | Sets a `failed` task back to `waiting` and starts the runner. It uses the same worktree and branch. |
+| `awb run [stack \| task] [--wait] [--retries N]` | Starts the runner on a stack (default: the newest of the repo), or on one `waiting` task. A task start fails if a task below it is not done. `--wait` returns when the run is `done` or `stopped`, and exits 1 if it is not `done`. |
+| `awb retry <stack \| task> [--wait] [--retries N]` | Sets a `failed` task, or every `failed` task of a stack, back to `waiting` and runs only those tasks. It uses the same worktree and branch. |
 | `awb stop <stack \| task>` | Stops the run and the proof of the current task. The task becomes `failed` with the reason `stopped by awb stop`, and the later tasks stay `waiting`. Exits 1 if nothing runs for the id. |
 | `awb task rm <id...>` | Removes waiting or failed tasks in one transaction. If one id is doing, is shipped or does not exist, nothing is removed. |
 | `awb prove [--rewrite C1,C2]` | Starts the app, writes the missing proof tests with a fresh test-writer session, runs them, and runs the gate. Prints the claim table. Exits 1 if the gate fails. `--rewrite` deletes the tests of those claims first. |
