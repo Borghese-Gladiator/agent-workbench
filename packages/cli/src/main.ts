@@ -6,6 +6,7 @@ import { awbHome, ensureDaemon, findDaemon, api, reportCliError } from "./home.t
 import { gitInfo, playbookPath, claudeArgs, awbSettings, repoRulesPath, splitResume, resumeArgs } from "./launch.ts";
 import { doctor } from "./doctor.ts";
 import { wtCmd } from "./wt.ts";
+import { helpFor, helpIndex } from "./help.ts";
 import { logText, type LogLine } from "../../daemon/src/log.ts";
 
 const home = awbHome();
@@ -15,6 +16,12 @@ const flag = (name: string) => {
   return i >= 0 ? rest[i + 1] : undefined;
 };
 const positional = () => rest.find((a, i) => !a.startsWith("-") && rest[i - 1] !== "--retries");
+
+const wantsHelp = rest.includes("--help") || rest.includes("-h");
+if (cmd === "--help" || cmd === "-h" || cmd === "help" || (wantsHelp && helpFor(cmd))) {
+  console.log((cmd === "help" ? helpFor(rest[0]) : wantsHelp ? helpFor(cmd) : undefined) ?? helpIndex());
+  process.exit(0);
+}
 
 console.error(`awb: AWB_HOME=${home}`);
 
