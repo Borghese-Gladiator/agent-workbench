@@ -1,5 +1,0 @@
-#!/bin/sh
-dir=$(cd "$(dirname "$(realpath "$0")")" && pwd)
-node "$dir/../src/hook-send.ts" >/dev/null
-[ $? -eq 2 ] && exit 2
-exit 0

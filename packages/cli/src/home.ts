@@ -35,12 +35,14 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+const same = (a: string, b: string) => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+
 export async function healthy(info: DaemonInfo, home: string): Promise<boolean> {
   if (!pidAlive(info.pid)) return false;
   try {
     const res = await fetch(`http://127.0.0.1:${info.port}/health`, { signal: AbortSignal.timeout(1000) });
     const body = await res.json();
-    return res.ok && body.pid === info.pid && resolve(body.home) === home;
+    return res.ok && body.pid === info.pid && same(resolve(body.home), home);
   } catch {
     return false;
   }
@@ -82,6 +84,7 @@ export async function ensureDaemon(home: string, timeoutMs = 10_000): Promise<Da
           spawn(process.execPath, ["--disable-warning=ExperimentalWarning", DAEMON_MAIN], {
             env: { ...process.env, AWB_HOME: home },
             detached: true,
+            windowsHide: true,
             stdio: ["ignore", log, log],
           }).unref();
           closeSync(log);

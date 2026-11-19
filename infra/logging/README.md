@@ -34,11 +34,10 @@ awb settings for this stack:
    ```
    - `GRAFANA_PASSWORD`: the Grafana admin password. Grafana does not start without it.
    - `GRAFANA_BIND`: the Tailscale address from step 1, for example `100.101.102.103`. With the default `127.0.0.1`, only this machine can open Grafana.
-   - `AWB_LOGS`: the folder with the `awb.*.jsonl` files. Change it only if `AWB_HOME` is not `~/.awb`.
    - `AWB_HOST`: a name for this machine in Grafana.
-3. Start the stack:
+3. Start the stack. The command sets `AWB_LOGS` to the `logs` folder of `AWB_HOME`, with the path format of your OS. To stop the stack, run `awb logging down`:
    ```sh
-   docker compose -f infra/logging/docker-compose.yml up -d
+   awb logging up
    ```
 4. Open `http://<GRAFANA_BIND>:3000` from a computer on the tailnet. Log in as `admin` with your password. Open the dashboard "awb".
 

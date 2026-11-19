@@ -1,11 +1,13 @@
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { needsShell, openCommand } from "../../daemon/src/platform.ts";
 import { runFilePath } from "../../daemon/src/run-md.ts";
 import { awbHome, ensureDaemon, findDaemon, api, reportCliError } from "./home.ts";
 import { gitInfo, playbookPath, claudeArgs, awbSettings, repoRulesPath, splitResume, resumeArgs } from "./launch.ts";
 import { doctor } from "./doctor.ts";
 import { wtCmd } from "./wt.ts";
+import { loggingCmd } from "./logging.ts";
 import { helpFor, helpIndex } from "./help.ts";
 import { logText, type LogLine } from "../../daemon/src/log.ts";
 
@@ -25,7 +27,7 @@ if (cmd === "--help" || cmd === "-h" || cmd === "help" || (wantsHelp && helpFor(
 
 console.error(`awb: AWB_HOME=${home}`);
 
-const COMMANDS = ["ui", "doctor", "daemon", "stack", "prove", "ship", "run", "retry", "stop", "show", "tasks", "cost", "logs", "task", "sessions", "wt", "schedule"];
+const COMMANDS = ["ui", "doctor", "daemon", "stack", "prove", "ship", "run", "retry", "stop", "show", "tasks", "cost", "logs", "task", "sessions", "wt", "schedule", "logging"];
 let lastError = "";
 const printError = console.error;
 console.error = (...args: unknown[]) => {
@@ -45,7 +47,10 @@ switch (cmd) {
     const d = await ensureDaemon(home);
     const url = `http://127.0.0.1:${d.port}/`;
     console.log(url);
-    if (!rest.includes("--no-open")) spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { stdio: "ignore", detached: true }).unref();
+    if (!rest.includes("--no-open")) {
+      const [cmd, args] = openCommand(url);
+      spawn(cmd, args, { stdio: "ignore", detached: true, windowsHide: true }).unref();
+    }
     break;
   }
   case "doctor":
@@ -53,6 +58,9 @@ switch (cmd) {
     break;
   case "wt":
     process.exitCode = await wtCmd(rest);
+    break;
+  case "logging":
+    process.exitCode = loggingCmd(home, rest[0] === "down" ? ["down"] : ["up", "-d"]);
     break;
   case "daemon":
     await daemonCmd(rest[0]);
@@ -215,7 +223,7 @@ async function stackSet(json: boolean): Promise<number> {
 
 function defaultBranch(cwd: string): string {
   try {
-    return execFileSync("git", ["rev-parse", "--abbrev-ref", "origin/HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+    return execFileSync("git", ["rev-parse", "--abbrev-ref", "origin/HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true })
       .trim()
       .replace(/^origin\//, "");
   } catch {
@@ -505,7 +513,7 @@ async function launch(passThrough: string[]): Promise<number> {
   const claude = process.env.AWB_CLAUDE || "claude";
   mkdirSync(join(home, "repos"), { recursive: true });
   const args = claudeArgs(passThrough, playbookPath(git.worktree), awbSettings(home), repoRulesPath(home, git.repo), runFilePath(home, git.repo));
-  const child = spawn(claude, args, { cwd, stdio: "inherit", env: { ...process.env, AWB_HOME: home, AWB_SESSION_ID: session.id } });
+  const child = spawn(claude, args, { cwd, stdio: "inherit", shell: needsShell(claude), env: { ...process.env, AWB_HOME: home, AWB_SESSION_ID: session.id } });
 
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(sig, () => child.kill(sig));
   const code: number = await new Promise((resolve) => {

@@ -175,7 +175,7 @@ export async function ship(task: Task, worktree: string, runMdText: string, log:
   const start = runMd ? runMd.start ?? runMd.url : "none (repo tests only)";
   const testsLine = [hasBrowser && "`playwright test`", hasTest && `\`${parseTest(runMdText)}\``].filter(Boolean).join(" and ");
   await run("git", ["fetch", "-q", "origin", `+refs/heads/${task.base}:refs/remotes/origin/${task.base}`], worktree);
-  const commits = execFileSync("git", ["log", "--format=%h %s", `origin/${task.base}..HEAD`], { cwd: worktree, encoding: "utf8" })
+  const commits = execFileSync("git", ["log", "--format=%h %s", `origin/${task.base}..HEAD`], { cwd: worktree, encoding: "utf8", windowsHide: true })
     .trim()
     .split("\n")
     .filter(Boolean);

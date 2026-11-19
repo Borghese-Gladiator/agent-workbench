@@ -4,17 +4,25 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeArgs, awbSettings, gitInfo, repoRulesPath, resumeArgs, splitResume, DEFAULT_PLAYBOOK, SKILLS_DIR, PLUGIN_DIR } from "../src/launch.ts";
+import { claudeArgs, awbSettings, hookCommand, gitInfo, repoRulesPath, resumeArgs, splitResume, DEFAULT_PLAYBOOK, SKILLS_DIR, PLUGIN_DIR } from "../src/launch.ts";
 import { HOOK_EVENTS } from "../src/hook-send.ts";
 
 test("settings register the hook sender for every hook type, with AWB_HOME", () => {
-  const s = awbSettings("/h", "/opt/it's/awb-hook");
+  const command = hookCommand("/opt/node/node", "/opt/awb/hook-send.ts");
+  const s = awbSettings("/h", command);
   assert.deepEqual(s.env, { AWB_HOME: "/h" });
   assert.deepEqual(Object.keys(s.hooks), [...HOOK_EVENTS]);
   for (const [name, [entry]] of Object.entries(s.hooks)) {
-    assert.equal(entry.hooks[0].command, `'/opt/it'\\''s/awb-hook'`);
+    assert.equal(entry.hooks[0].command, command);
     assert.equal("matcher" in entry, name.endsWith("ToolUse"));
   }
+});
+
+test("the hook command runs node on hook-send.ts, with each part quoted for the shell", () => {
+  assert.equal(
+    hookCommand("/opt/it's/node", "/opt/awb/hook-send.ts"),
+    `'/opt/it'\\''s/node' '--disable-warning=ExperimentalWarning' '/opt/awb/hook-send.ts'`,
+  );
 });
 
 test("settings deny writes to the daemon files and the proof, not to the worktrees", () => {

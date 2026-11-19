@@ -110,7 +110,7 @@ export async function runTestWriter(folder: string, worktree: string, claims: Cl
   const work = join(worktree, PROOF_DIR);
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work);
-  const script = join(folder, "writer-test.sh");
+  const script = join(folder, "writer-test.sh").replaceAll("\\", "/");
   const report = join(folder, "proof", "writer-junit.xml");
   const cmd = testCmd.replaceAll("{tests}", `${PROOF_DIR}/*`).replaceAll("{report}", JSON.stringify(report));
   writeFileSync(script, `cd ${JSON.stringify(worktree)}\nexport PYTHONDONTWRITEBYTECODE=1\n${cmd}\ncode=$?\ncat ${JSON.stringify(report)} 2>/dev/null\nexit $code\n`);

@@ -6,5 +6,5 @@
 - `packages/daemon`: one local process with SQLite, the gate, the stack runner and the web UI.
 - `docs/architecture.md`: the diagrams.
 - `e2e/acceptance.sh`: the end-to-end test with the real `claude` and GitHub.
-- `e2e/ui.sh`: the end-to-end test of the web UI, with a stub `claude` and `gh`.
+- `e2e/*.e2e.ts`: the end-to-end tests, in TypeScript so they run on macOS, Linux and Windows. Run them with `npm run e2e`.
 - `archive/`: v1 to v5, and the v6 build notes.
