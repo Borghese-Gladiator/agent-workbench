@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HOOK_EVENTS } from "./hook-send.ts";
 
@@ -27,10 +27,10 @@ export function awbSettings(home: string, hookBin = HOOK_BIN) {
 }
 
 export function gitInfo(cwd: string) {
-  const git = (...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  const git = (...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", windowsHide: true }).trim();
   const worktree = git("rev-parse", "--show-toplevel");
   const common = git("rev-parse", "--path-format=absolute", "--git-common-dir");
-  const repo = common.endsWith("/.git") ? common.slice(0, -5) : worktree;
+  const repo = /[\\/]\.git$/.test(common) ? resolve(common, "..") : resolve(worktree);
   const branch = git("rev-parse", "--abbrev-ref", "HEAD");
   return { repo, worktree, branch };
 }

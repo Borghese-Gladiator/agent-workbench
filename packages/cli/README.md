@@ -110,6 +110,13 @@ The skills use the Slack, Sentry and Linear MCP servers in your `claude` setting
 
 The settings also deny file edits to the database, `daemon.json` and the task folders in `AWB_HOME`. Traces stay in the task folder and are not uploaded, because a trace can hold cookies.
 
+## Windows
+
+- Use Node 24 and Git for Windows. Put `sh` and `git` on `PATH`.
+- Run `node packages/cli/src/main.ts` in place of `bin/awb`. The `bin` files are shell scripts.
+- The daemon starts every child process with `windowsHide`, so no console window takes focus.
+- The unit tests that use `#!/bin/sh` stubs and `/tmp` paths run only on macOS and Linux.
+
 ## Tests
 
 ```sh

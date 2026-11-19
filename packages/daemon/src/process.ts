@@ -3,12 +3,13 @@ import { rmSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hide, killTree, needsShell, WIN } from "./platform.ts";
 import { fill, type RunMd } from "./run-md.ts";
 
 const PKG = fileURLToPath(new URL("..", import.meta.url));
-export const PLAYWRIGHT = join(PKG, "..", "..", "node_modules", ".bin", "playwright");
+export const PLAYWRIGHT = join(PKG, "..", "..", "node_modules", ".bin", WIN ? "playwright.cmd" : "playwright");
 
-export const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+export const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", ...hide }).trim();
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -40,14 +41,14 @@ export async function startApp(runMd: RunMd, cwd: string, log: (l: string) => vo
   if (runMd.start) {
     const cmd = fill(runMd.start, port, seed);
     log(`app: ${cmd}`);
-    child = spawn("sh", ["-c", cmd], { cwd, stdio: "ignore", detached: true });
+    child = spawn("sh", ["-c", cmd], { cwd, stdio: "ignore", detached: true, ...hide });
     if (child.pid) groups.add(child.pid);
   }
   const stop = () => {
     if (child?.pid) {
       groups.delete(child.pid);
       try {
-        process.kill(-child.pid, "SIGTERM");
+        killTree(child.pid);
       } catch {}
     }
     if (seed) rmSync(seed, { recursive: true, force: true });
@@ -67,7 +68,7 @@ export function killChildren(): number {
   const n = groups.size;
   for (const pid of groups) {
     try {
-      process.kill(-pid, "SIGTERM");
+      killTree(pid);
     } catch {}
   }
   groups.clear();
@@ -76,12 +77,12 @@ export function killChildren(): number {
 
 export function run(cmd: string, args: string[], cwd: string, input?: string, timeoutMs = 0, signal?: AbortSignal): Promise<{ code: number; out: string; timedOut: boolean }> {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env, detached: true });
+    const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env, detached: true, shell: needsShell(cmd), ...hide });
     if (child.pid) groups.add(child.pid);
     let timedOut = false;
     const kill = () => {
       try {
-        process.kill(-child.pid!, "SIGTERM");
+        killTree(child.pid!);
       } catch {}
     };
     const timer = timeoutMs

@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { basenameOf } from "./platform.ts";
 
 export type CostRow = { day: string; repo: string; task_id: string | null; title: string | null; kind: "session" | "writer"; usd: number };
 export type CostReport = {
@@ -12,7 +13,7 @@ export type CostReport = {
   unpriced_sessions: number;
 };
 
-export const repoMatch = (repo: string, filter?: string) => !filter || repo === filter || repo.split("/").at(-1) === filter;
+export const repoMatch = (repo: string, filter?: string) => !filter || repo === filter || basenameOf(repo) === filter;
 
 export function costRows(db: DatabaseSync, since: string, repo?: string): { rows: CostRow[]; unpriced: number } {
   const sessions = db
@@ -81,7 +82,7 @@ export function costText(r: CostReport, taskLimit = 10): string {
   const days = Object.entries(r.by_day).sort(([a], [b]) => b.localeCompare(a));
   if (days.length) lines.push("", "by day:", ...days.map(([d, v]) => `  ${d}  ${usd(v).padStart(11)}`));
   const repos = Object.entries(r.by_repo).sort(([, a], [, b]) => b - a);
-  if (repos.length) lines.push("", "by repo:", ...repos.map(([k, v]) => `  ${usd(v).padStart(11)}  ${k.split("/").at(-1)}`));
+  if (repos.length) lines.push("", "by repo:", ...repos.map(([k, v]) => `  ${usd(v).padStart(11)}  ${basenameOf(k)}`));
   if (r.by_task.length) {
     lines.push("", "top tasks:", ...r.by_task.slice(0, taskLimit).map((t) => `  ${usd(t.usd).padStart(11)}  ${t.task_id.slice(0, 8)}  ${t.title}`));
     if (r.by_task.length > taskLimit) lines.push(`  ...and ${r.by_task.length - taskLimit} more (use --json)`);

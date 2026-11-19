@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
+import { basenameOf, hide } from "./platform.ts";
 import type { RunState, Stacks } from "./stacks.ts";
 import type { Log } from "./log.ts";
 
 export function runMessage(stacks: Stacks, r: RunState): { title: string; body: string } {
   const stack = stacks.get(r.stackId);
-  const repo = stack?.repo.split("/").at(-1) ?? "awb";
+  const repo = (stack && basenameOf(stack.repo)) || "awb";
   const task = r.current ? stacks.task(r.current) : undefined;
   if (r.state === "done") return { title: `awb: ${repo} stack done`, body: `${stack?.tasks.length ?? 0} task(s) shipped` };
   return { title: `awb: ${repo} stack stopped`, body: `${task ? task.title + ": " : ""}${r.reason ?? "no reason"}`.slice(0, 240) };
@@ -20,7 +21,7 @@ export function notify(title: string, body: string, env = process.env, log: Log 
       : ["notify-send", [title, body]];
   const failed = (err: unknown) => log("warn", "notify", "error", { cmd, error: err });
   try {
-    spawn(cmd, args, { stdio: "ignore", detached: true }).on("error", failed).unref();
+    spawn(cmd, args, { stdio: "ignore", detached: true, ...hide }).on("error", failed).unref();
     log("info", "notify", "sent", { title });
   } catch (err) {
     failed(err);
