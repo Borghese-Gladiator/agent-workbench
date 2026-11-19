@@ -1,5 +1,6 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { commandOf } from "./platform.ts";
 import { join, sep } from "node:path";
 import type { Stacks, Task } from "./stacks.ts";
 import type { CarriedTask } from "./prove.ts";
@@ -18,7 +19,7 @@ export function branchDiff(repo: string, base: string, branch: string): string {
   const ref = (r: string) => {
     for (const c of [r, `origin/${r}`]) {
       try {
-        execFileSync("git", ["rev-parse", "--verify", "-q", c], { cwd: repo, stdio: "ignore" });
+        execFileSync("git", ["rev-parse", "--verify", "-q", c], { cwd: repo, stdio: "ignore", windowsHide: true });
         return c;
       } catch {}
     }
@@ -27,7 +28,7 @@ export function branchDiff(repo: string, base: string, branch: string): string {
   const b = ref(base);
   const h = ref(branch);
   if (!b || !h) return "";
-  return execFileSync("git", ["diff", `${b}...${h}`], { cwd: repo, encoding: "utf8", maxBuffer: 20 * 1024 * 1024 });
+  return execFileSync("git", ["diff", `${b}...${h}`], { cwd: repo, encoding: "utf8", maxBuffer: 20 * 1024 * 1024, windowsHide: true });
 }
 
 export const TYPES: Record<string, string> = {
@@ -68,7 +69,7 @@ export function carriedClaims(stacks: Stacks, t: Task): CarriedTask[] {
 
 export function isAwbSession(pid: number): boolean {
   try {
-    return /cli\/src\/main\.ts/.test(execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }));
+    return /cli[\\/]src[\\/]main\.ts/.test(commandOf(pid));
   } catch {
     return false;
   }

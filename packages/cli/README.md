@@ -21,6 +21,7 @@ A task id or a stack id can be a prefix of 6 or more characters in every command
 | `awb ui [--no-open]` | Prints the UI URL and opens it. See "Web UI". |
 | `awb doctor` | Checks `claude`, Chromium, the daemon, the Slack, Sentry and Linear MCP servers, and the log pipeline. Prints a fix for each problem. |
 | `awb daemon start\|stop\|status` | Controls the daemon of the active `AWB_HOME`. |
+| `awb logging up\|down` | Starts or stops the Loki, Alloy and Grafana stack. It reads the logs of the active `AWB_HOME`. |
 | `awb wt [repo] [--root <dir>]` | Lists the worktrees of a repo with the branch, the changed files and the last commit age. |
 | `awb wt pick [repo]` | Opens a picker. Space marks, `d` then `y` removes the marked worktrees (it refuses a dirty one), Enter prints the path, `q` quits. `cd "$(awb wt pick)"` works. |
 
@@ -133,21 +134,30 @@ The **Schedule** tab of the UI shows the same data, a **Run now** button for eac
 
 The skills use the Slack, Sentry and Linear MCP servers in your `claude` settings. `awb doctor` checks them.
 
-`awb` passes hooks to `claude` with `--settings`. Each hook runs `bin/awb-hook`, which sends the hook JSON to the daemon for the session in `AWB_SESSION_ID`. The sender prints nothing and waits at most 1 s. If the daemon is down, the event is dropped and the chat continues. On `Stop` and `SessionEnd`, the daemon reads the token totals from the transcript file.
+`awb` passes hooks to `claude` with `--settings`. Each hook runs `node src/hook-send.ts`, which sends the hook JSON to the daemon for the session in `AWB_SESSION_ID`. The sender prints nothing and waits at most 1 s. If the daemon is down, the event is dropped and the chat continues. On `Stop` and `SessionEnd`, the daemon reads the token totals from the transcript file.
 
 The settings also deny file edits to the database, `daemon.json` and the task folders in `AWB_HOME`. Traces stay in the task folder and are not uploaded, because a trace can hold cookies.
+
+## Windows
+
+- Use Node 24 and Git for Windows. Put `sh` and `git` on `PATH`.
+- Run `node packages/cli/src/main.ts` in place of `bin/awb`. The `bin` files are shell scripts.
+- The daemon starts every child process with `windowsHide`, so no console window takes focus.
+- `npm run e2e` runs on Windows. `e2e/acceptance.sh` runs only on macOS, because it uses the real `claude` and `sed -i ''`.
+- The unit tests that use `#!/bin/sh` stubs and `/tmp` paths run only on macOS and Linux.
 
 ## Tests
 
 ```sh
 npm test
 npm run typecheck
+npm run e2e
 ```
 
-| Script | What it covers | Cost |
+| Test file | What it covers | Cost |
 |---|---|---|
-| `bash e2e/wt.sh` | `awb wt` with real git worktrees and the picker in a pty | none |
-| `bash e2e/ui.sh` | The web UI in a browser, with a real stack run, a stub `claude` and a stub `gh` (about 1 min) | none |
-| `bash e2e/logging.sh` | The structured log, with a stub `claude` (about 70 s) | none |
-| `bash e2e/repo-test.sh` | Test claims and the run file outside the repo, with a stub test writer | none |
+| `e2e/wt.e2e.ts` | `awb wt` with real git worktrees | none |
+| `e2e/ui.e2e.ts` | The web UI in a browser, with a real stack run, a stub `claude` and a stub `gh` (about 1 min) | none |
+| `e2e/logging.e2e.ts` | The structured log, with a stub `claude` (about 70 s) | none |
+| `e2e/repo-test.e2e.ts` | Test claims and the run file outside the repo, with a stub test writer | none |
 | `WORK=<dir> bash e2e/acceptance.sh setup`, then `single`, `bug`, `stack`, `ask` | The full flow with the real `claude` and GitHub | about 6 USD |

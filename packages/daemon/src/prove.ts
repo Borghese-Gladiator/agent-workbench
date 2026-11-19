@@ -54,7 +54,7 @@ function mergeBase(worktree: string, base: string | null): string | null {
   if (!base) return null;
   for (const ref of [base, `origin/${base}`]) {
     try {
-      return execFileSync("git", ["merge-base", "HEAD", ref], { cwd: worktree, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+      return execFileSync("git", ["merge-base", "HEAD", ref], { cwd: worktree, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
     } catch {}
   }
   return null;
