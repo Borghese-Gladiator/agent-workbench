@@ -9,6 +9,7 @@ import { Prs } from "./prs.ts";
 import { TaskView } from "./task.ts";
 import { Verification } from "./verification.ts";
 import { Logs } from "./logs.ts";
+import { Schedule } from "./schedule.ts";
 import { Usage } from "./usage.ts";
 import { Settings, applyPrefs } from "./settings.ts";
 
@@ -20,6 +21,7 @@ const NAV: [string, string, string, string, string][] = [
   ["stacks", "#/stacks", "Stacks", "M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5", ""],
   ["runs", "#/runs", "Runs", "M5 3l14 9-14 9V3z", ""],
   ["reviews", "#/reviews", "Reviews", "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9", ""],
+  ["schedule", "#/schedule", "Schedule", "M12 6v6l4 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0z", ""],
   ["verification", "#/verification", "Verification", "M22 11.08V12a10 10 0 1 1-5.93-9.14M22 4 12 14.01l-3-3", "Observability"],
   ["logs", "#/logs", "Logs", "M4 6h16M4 12h16M4 18h10", ""],
   ["usage", "#/usage", "Usage", "M18 20V10M12 20V4M6 20v-6", ""],
@@ -93,6 +95,7 @@ function App() {
     : view === "runs" ? html`<${Runs} d=${data} />`
     : view === "reviews" ? html`<${Prs} d=${data} />`
     : view === "verification" ? html`<${Verification} d=${data} />`
+    : view === "schedule" ? html`<${Schedule} />`
     : view === "logs" ? html`<${Logs} key=${id} task=${id ?? ""} />`
     : view === "usage" ? html`<${Usage} d=${data} />`
     : view === "settings" ? html`<${Settings} />`

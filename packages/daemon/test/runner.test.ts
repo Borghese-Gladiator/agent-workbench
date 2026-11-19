@@ -80,6 +80,21 @@ test("a task with no PR fails and stops the stack; a retry continues it", async 
   assert.equal(retry.state, "done");
 });
 
+test("a run with targets stops when the listed tasks are done, and refuses to pass an unlisted waiting task", async () => {
+  const s = setup();
+  const { stack } = s.set({ ...where, tasks: three });
+  const [a, b] = stack.tasks;
+  const seen: string[] = [];
+  const first = await runStack(s, stack.id, shipping(s, new Set(), seen), state(stack.id), { targets: [a.id] });
+  assert.deepEqual([first.state, seen], ["done", ["Accounts"]]);
+  assert.deepEqual(s.get(stack.id)!.tasks.map((t) => t.status), ["done", "waiting", "waiting"]);
+
+  const skip = await runStack(s, stack.id, shipping(s, new Set(), seen), state(stack.id), { targets: [stack.tasks[2].id] });
+  assert.equal(skip.state, "stopped");
+  assert.equal(skip.current, b.id);
+  assert.deepEqual(seen, ["Accounts"]);
+});
+
 test("a session that throws marks the task failed with the reason", async () => {
   const s = setup();
   const { stack } = s.set({ ...where, tasks: three });

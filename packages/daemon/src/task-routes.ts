@@ -2,7 +2,7 @@ import { createReadStream, existsSync, readFileSync, readdirSync, realpathSync, 
 import { execFileSync } from "node:child_process";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join, sep } from "node:path";
-import { parseSince, StackError, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
+import { FINISHED, parseSince, StackError, validateTasks, type Stacks, type Task, type TaskStatus } from "./stacks.ts";
 import { LEVELS, logText, readLog, type Level, type Log, type LogFilter } from "./log.ts";
 import { prove, run, type CarriedTask, type ProveDeps } from "./prove.ts";
 import { readRunFile, seedDir } from "./run-md.ts";
@@ -191,10 +191,17 @@ export function taskRoutes(
 
     if (req.method === "POST" && url.pathname === "/api/run") {
       const b = await body();
-      const stack = b.stackId ? stacks.get(b.stackId) : stacks.newestStack(b.repo ?? "");
-      if (!stack) return send(404, { error: "no stack for this repo; run awb stack set first" }), true;
       try {
-        return send(202, runner.start(stack.id, retryCount(b.retries))), true;
+        const retries = retryCount(b.retries);
+        const { stack, task } = b.id ? stacks.resolve(String(b.id)) : { stack: stacks.newestStack(b.repo ?? ""), task: undefined };
+        if (!stack) throw new StackError("no stack for this repo; run awb stack set first", 404);
+        if (task) {
+          const below = stack.tasks.slice(0, stack.tasks.findIndex((t) => t.id === task.id));
+          const blocker = below.find((t) => !FINISHED.includes(t.status));
+          if (task.status !== "waiting") throw new StackError(`task ${task.id} is ${task.status}; only a waiting task can be started`);
+          if (blocker) throw new StackError(`task ${blocker.id} is ${blocker.status}; it must be done before task ${task.id} can start`);
+        }
+        return send(202, runner.start(stack.id, retries, task && [task.id])), true;
       } catch (err) {
         return fail(err), true;
       }
@@ -362,26 +369,20 @@ export function taskRoutes(
 
     if (req.method === "POST" && url.pathname === "/api/retry") {
       const b = await body();
-      let t;
       try {
-        t = stacks.find(String(b.taskId ?? ""));
+        const retries = retryCount(b.retries);
+        const { stack, task } = stacks.resolve(String(b.id ?? b.taskId ?? ""));
+        const failed = (task ? [task] : stack.tasks).filter((t) => t.status === "failed");
+        if (!failed.length) throw new StackError(task ? `task ${task.id} is ${task.status}; only a failed task can be retried` : `stack ${stack.id} has no failed task`);
+        const reasons = failed.map((t) => t.fail_reason ?? "");
+        failed.forEach((t) => stacks.retry(t.id));
+        try {
+          return send(202, runner.start(stack.id, retries, failed.map((t) => t.id))), true;
+        } catch (err) {
+          failed.forEach((t, i) => stacks.fail(t.id, reasons[i]));
+          throw err;
+        }
       } catch (err) {
-        return fail(err), true;
-      }
-      if (!t) return send(404, { error: `no task ${b.taskId}` }), true;
-      let retries;
-      try {
-        retries = retryCount(b.retries);
-      } catch (err) {
-        return fail(err), true;
-      }
-      if (t.status !== "failed") return send(409, { error: `task ${t.id} is ${t.status}; only a failed task can be retried` }), true;
-      const reason = t.fail_reason ?? "";
-      stacks.retry(t.id);
-      try {
-        return send(202, runner.start(t.stack_id, retries)), true;
-      } catch (err) {
-        stacks.fail(t.id, reason);
         return fail(err), true;
       }
     }
@@ -389,23 +390,19 @@ export function taskRoutes(
     if (req.method === "POST" && url.pathname === "/api/stop") {
       const b = await body();
       const id = String(b.id ?? "");
-      let t: Task | undefined;
-      let stack;
+      let target;
       try {
-        stack = stacks.findStack(id);
-        if (!stack) t = stacks.find(id);
+        target = stacks.resolve(id);
       } catch (err) {
         return fail(err), true;
       }
-      if (!stack && !t) return send(404, { error: `no stack or task ${id}` }), true;
-      const tasks = stack ? stack.tasks : [t!];
-      const stackId = stack ? stack.id : t!.stack_id;
-      const done = stack || runner.owns(t!.id) ? runner.stop(stackId) : null;
-      const proof = tasks.filter((x) => proofs.has(x.id));
+      const { stack, task } = target;
+      const done = !task || runner.owns(task.id) ? runner.stop(stack.id) : null;
+      const proof = (task ? [task] : stack.tasks).filter((t) => proofs.has(t.id));
       for (const x of proof) proofs.get(x.id)!.abort();
-      const sessions = t && !done ? stopSessions(stacks.openSessionPids(t.id)) : [];
+      const sessions = task && !done ? stopSessions(stacks.openSessionPids(task.id)) : [];
       if (!done && !proof.length && !sessions.length) return send(409, { error: `nothing runs for ${id}` }), true;
-      log("info", "runner", "stop", { id, stack: stackId, proofs: proof.map((x) => x.id), sessions });
+      log("info", "runner", "stop", { id, stack: stack.id, proofs: proof.map((x) => x.id), sessions });
       return send(200, { run: done ? await done : null, proofs: proof.map((x) => x.id), sessions }), true;
     }
 

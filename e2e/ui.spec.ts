@@ -162,7 +162,7 @@ test("Rewrite test, in Verification, removes the test of a claim and runs the re
   expect(t.attempts[1].gates[0].result.rows.map((r: any) => r.status)).toEqual(["PASS", "FAIL"]);
 });
 
-test("Retry runs the stack again from the failed task, and the run view follows it", async ({ page }) => {
+test("Retry runs only the failed task, and the run view follows it", async ({ page }) => {
   writeFileSync(join(WORK, "fix-footer"), "");
   await page.goto(`/#/task/${T2}`);
   await page.getByRole("button", { name: "Retry" }).click();
@@ -172,10 +172,10 @@ test("Retry runs the stack again from the failed task, and the run view follows 
   await expect(newest).toContainText("running");
   await expect(newest).toContainText(/\d+ min/);
   await shot(page, "10-running");
-  await expect(newest).toContainText("stopped", { timeout: 150_000 });
-  await expect(newest).toContainText(/C3/);
-  await expect(newest.getByRole("link", { name: "Broken" })).toBeVisible();
-  await shot(page, "11-stopped-again");
+  await expect(newest).toContainText("done", { timeout: 150_000 });
+  await shot(page, "11-run-done");
+  await page.goto("/#/stacks");
+  await expect(row(page, "Broken")).toContainText("waiting");
 
   await page.goto("/#/reviews");
   await expect(row(page, "Footer").getByRole("link", { name: "#2" })).toBeVisible();
@@ -190,8 +190,11 @@ test("Retry runs the stack again from the failed task, and the run view follows 
 });
 
 test("Drop removes the failed task from its stack", async ({ page }) => {
+  expect((await page.request.post("/api/run", { data: { id: T3 } })).status()).toBe(202);
+  await expect.poll(async () => (await (await page.request.get(`/api/tasks/${T3}`)).json()).status, { timeout: 150_000 }).toBe("failed");
   await page.goto(`/#/task/${T3}`);
   await expect(h1(page)).toContainText("Broken");
+  await expect(page.getByRole("alert")).toContainText(/C3/);
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Drop" }).click();
   await expect(page).toHaveURL(/#\/stacks$/);
@@ -245,6 +248,16 @@ test("Logs filters, searches, expands an entry, and the task page links to its l
   expect(ids.every((id) => T1.startsWith(id))).toBe(true);
   await expect(nav(page, "Logs")).toHaveAttribute("aria-current", "page");
   await shot(page, "14-logs-task");
+});
+
+test("Schedule opens from the sidebar with the shared page layout", async ({ page }) => {
+  await page.goto("/");
+  await nav(page, "Schedule").click();
+  await expect(h1(page)).toHaveText("Schedule");
+  await expect(nav(page, "Schedule")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByText(/starts each job once a day/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
+  await shot(page, "15a-schedule");
 });
 
 test("Usage shows the cost for a range and by repository and task", async ({ page }) => {

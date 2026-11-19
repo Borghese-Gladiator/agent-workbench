@@ -2,7 +2,7 @@ import { html, useEffect, useState } from "./vendor/htm-preact.js";
 import { Empty, Failure, get, Loading, LogEntry, LogLine, Page, Seg, type Json } from "./components.ts";
 import { matchLines, timeline } from "./select.ts";
 
-const SOURCES = ["", "daemon", "runner", "prove", "ship", "sync", "http", "cli", "notify", "usage"];
+const SOURCES = ["", "daemon", "runner", "prove", "ship", "sync", "http", "cli", "notify", "usage", "schedule"];
 const VIEWS: [string, string][] = [["events", "Events"], ["timeline", "Timeline"], ["raw", "Raw"]];
 
 export function Logs({ task }: { task: string }) {

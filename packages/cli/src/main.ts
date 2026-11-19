@@ -6,6 +6,7 @@ import { awbHome, ensureDaemon, findDaemon, api, reportCliError } from "./home.t
 import { gitInfo, playbookPath, claudeArgs, awbSettings, repoRulesPath, splitResume, resumeArgs } from "./launch.ts";
 import { doctor } from "./doctor.ts";
 import { wtCmd } from "./wt.ts";
+import { helpFor, helpIndex } from "./help.ts";
 import { logText, type LogLine } from "../../daemon/src/log.ts";
 
 const home = awbHome();
@@ -16,9 +17,15 @@ const flag = (name: string) => {
 };
 const positional = () => rest.find((a, i) => !a.startsWith("-") && rest[i - 1] !== "--retries");
 
+const wantsHelp = rest.includes("--help") || rest.includes("-h");
+if (cmd === "--help" || cmd === "-h" || cmd === "help" || (wantsHelp && helpFor(cmd))) {
+  console.log((cmd === "help" ? helpFor(rest[0]) : wantsHelp ? helpFor(cmd) : undefined) ?? helpIndex());
+  process.exit(0);
+}
+
 console.error(`awb: AWB_HOME=${home}`);
 
-const COMMANDS = ["ui", "doctor", "daemon", "stack", "prove", "ship", "run", "retry", "stop", "show", "tasks", "cost", "logs", "task", "sessions", "wt"];
+const COMMANDS = ["ui", "doctor", "daemon", "stack", "prove", "ship", "run", "retry", "stop", "show", "tasks", "cost", "logs", "task", "sessions", "wt", "schedule"];
 let lastError = "";
 const printError = console.error;
 console.error = (...args: unknown[]) => {
@@ -85,6 +92,9 @@ switch (cmd) {
   case "logs":
     process.exitCode = await logsCmd(rest.includes("--json"), rest.includes("--follow") || rest.includes("-f"));
     break;
+  case "schedule":
+    process.exitCode = await scheduleCmd(rest);
+    break;
   case "task":
     if (rest[0] !== "rm" || rest.length < 2) {
       console.error("usage: awb task rm <id...>");
@@ -102,6 +112,49 @@ switch (cmd) {
   }
   default:
     process.exitCode = await launch(process.argv.slice(2));
+}
+
+async function scheduleCmd(args: string[]): Promise<number> {
+  const [sub, arg] = args.filter((a) => !a.startsWith("-"));
+  const json = args.includes("--json");
+  const d = await ensureDaemon(home);
+  const show = (v: unknown, text: () => void) => (json ? console.log(JSON.stringify(v, null, 2)) : text());
+  try {
+    if (!sub || sub === "status") {
+      const s = await api(d, "/api/schedule");
+      show(s, () => {
+        if (s.error) console.error(`awb: ${s.file} is not valid: ${s.error}`);
+        if (!s.jobs.length && !s.error) console.log(`no jobs; add them to ${s.file}`);
+        for (const j of s.jobs) {
+          const last = j.last ? `${j.last.state} ${j.last.started_at.slice(0, 16).replace("T", " ")} ${j.last.end ?? ""}` : "never ran";
+          console.log(`${j.name.padEnd(20)} ${j.at} ${j.running ? "RUNNING" : "idle   "} next ${j.next?.slice(0, 16).replace("T", " ") ?? "none"}  last: ${last}`);
+        }
+      });
+      return s.error ? 1 : 0;
+    }
+    if (sub === "runs") {
+      const runs = await api(d, `/api/schedule/runs?limit=${flag("--limit") ?? 20}`);
+      show(runs, () => runs.forEach((r: any) => console.log(`${r.id.slice(0, 8)}  ${r.job.padEnd(20)} ${r.state.padEnd(8)} ${r.started_at.slice(0, 16).replace("T", " ")}  ${r.end ?? ""}`)));
+      return 0;
+    }
+    if (sub === "run" && arg) {
+      await api(d, "/api/schedule/run", { name: arg });
+      console.log(`started ${arg}; follow it with: awb logs --source schedule -f`);
+      return 0;
+    }
+    if (sub === "output" && arg) {
+      const runs = await api(d, "/api/schedule/runs?limit=500");
+      const r = runs.find((x: any) => x.id.startsWith(arg));
+      if (!r) throw new Error(`no run ${arg}`);
+      console.log(await (await fetch(`http://127.0.0.1:${d.port}/api/schedule/runs/${r.id}/output`)).text());
+      return 0;
+    }
+  } catch (err) {
+    console.error(`awb: ${(err as Error).message}`);
+    return 1;
+  }
+  console.error("usage: awb schedule [status|runs [--limit n]|run <job>|output <run id>] [--json]");
+  return 2;
 }
 
 async function daemonCmd(sub: string | undefined) {
@@ -245,12 +298,12 @@ async function waitRun(d: Awaited<ReturnType<typeof ensureDaemon>>, r: any): Pro
   return r;
 }
 
-async function runCmd(stackId: string | undefined, json: boolean, wait: boolean, retries?: string): Promise<number> {
+async function runCmd(id: string | undefined, json: boolean, wait: boolean, retries?: string): Promise<number> {
   const git = here();
   if (!git) return 1;
   const d = await ensureDaemon(home);
   try {
-    let r = await api(d, "/api/run", { repo: git.repo, stackId, retries });
+    let r = await api(d, "/api/run", { repo: git.repo, id, retries });
     if (wait) r = await waitRun(d, r);
     printRun(r, json);
     return wait && r.state !== "done" ? 1 : 0;
@@ -260,14 +313,14 @@ async function runCmd(stackId: string | undefined, json: boolean, wait: boolean,
   }
 }
 
-async function retryCmd(taskId: string | undefined, json: boolean, wait: boolean, retries?: string): Promise<number> {
-  if (!taskId) {
-    console.error("usage: awb retry <task id> [--retries N]");
+async function retryCmd(id: string | undefined, json: boolean, wait: boolean, retries?: string): Promise<number> {
+  if (!id) {
+    console.error("usage: awb retry <stack id | task id> [--retries N]");
     return 2;
   }
   const d = await ensureDaemon(home);
   try {
-    let r = await api(d, "/api/retry", { taskId, retries });
+    let r = await api(d, "/api/retry", { id, retries });
     if (wait) r = await waitRun(d, r);
     printRun(r, json);
     return wait && r.state !== "done" ? 1 : 0;

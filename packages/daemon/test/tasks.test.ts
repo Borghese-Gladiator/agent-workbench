@@ -142,6 +142,45 @@ test("carriedClaims takes the test claims that passed in the last passing gate o
   assert.deepEqual(carriedClaims(s, a), []);
 });
 
+test("POST /api/run and /api/retry accept a stack or a task id and pass targets to the runner", async () => {
+  const { createApp } = await import("../src/server.ts");
+  const { taskRoutes } = await import("../src/task-routes.ts");
+  const store = openStore(":memory:");
+  migrateStacks(store.db);
+  const s = createStacks(store.db, (id) => `/home/tasks/${id}`);
+  const [a, b, c] = s.set({ repo: "/r", branch: "main", base: "main", tasks: [t("A"), t("B"), t("C")] }).stack.tasks;
+  const calls: (string[] | undefined)[] = [];
+  const runner = { start: (stackId: string, retries: number, targets?: string[]) => (calls.push(targets), { id: "run", stackId, state: "running", current: null, reason: null, retries }) };
+  const server = createApp(store, { home: "", startedAt: "" }, taskRoutes(s, {} as any, runner as any, () => null, "", store.db)).listen(0);
+  await new Promise((r) => server.once("listening", r));
+  const post = async (path: string, body: object) => {
+    const r = await fetch(`http://127.0.0.1:${(server.address() as any).port}${path}`, { method: "POST", body: JSON.stringify(body) });
+    return [r.status, await r.json()] as const;
+  };
+  try {
+    const [blocked, err] = await post("/api/run", { id: b.id });
+    assert.deepEqual([blocked, err.error.includes(a.id)], [409, true]);
+    assert.equal((await post("/api/run", { id: a.id }))[0], 202);
+    assert.equal((await post("/api/run", { id: a.stack_id }))[0], 202);
+    s.setStatus(a.id, "done");
+    assert.equal((await post("/api/run", { id: b.id }))[0], 202);
+    s.setStatus(b.id, "doing");
+    assert.equal((await post("/api/run", { id: b.id }))[0], 409);
+    assert.deepEqual(calls, [[a.id], undefined, [b.id]]);
+
+    assert.equal((await post("/api/retry", { id: a.stack_id }))[0], 409);
+    s.fail(b.id, "x");
+    s.fail(c.id, "y");
+    assert.equal((await post("/api/retry", { id: a.id }))[0], 409);
+    assert.equal((await post("/api/retry", { id: a.stack_id }))[0], 202);
+    assert.deepEqual(calls.at(-1), [b.id, c.id]);
+    assert.deepEqual(s.get(a.stack_id)!.tasks.map((x) => x.status), ["done", "waiting", "waiting"]);
+  } finally {
+    server.close();
+    store.close();
+  }
+});
+
 test("POST /api/run and /api/retry pass retries to the runner, and refuse a bad value", async () => {
   const { createApp } = await import("../src/server.ts");
   const { taskRoutes } = await import("../src/task-routes.ts");

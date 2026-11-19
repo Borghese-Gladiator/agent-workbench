@@ -33,6 +33,8 @@ export function parseSince(v: string, now = Date.now()): string {
 
 export type RunState = { id: string; stackId: string; state: "running" | "done" | "stopped"; current: string | null; reason: string | null; retries?: number };
 
+export const FINISHED: string[] = ["done", "merged", "closed"];
+
 export type Stack = { id: string; repo: string; base: string | null; version: number; created_at: string; tasks: Task[] };
 
 export type TaskInput = { id?: string; title: string; claims: Claim[] };
@@ -241,7 +243,7 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
           q.addStack.run(id, input.repo, input.base, now);
           if (input.tasks.length === 1) {
             const bound = this.taskForBranch(input.repo, input.branch);
-            if (bound && !["done", "merged", "closed"].includes(bound.status)) {
+            if (bound && !FINISHED.includes(bound.status)) {
               throw new StackError(`branch ${input.branch} already has task ${bound.id} (${bound.status})`);
             }
           }
@@ -314,6 +316,13 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
       const rows = q.stackByPrefix.all(idOrPrefix) as { id: string }[];
       if (rows.length > 1) throw new StackError(`stack id prefix ${idOrPrefix} matches more than one stack`, 400);
       return rows[0] && get(rows[0].id);
+    },
+    resolve(idOrPrefix: string): { stack: Stack; task?: Task } {
+      const stack = this.findStack(idOrPrefix);
+      if (stack) return { stack };
+      const task = this.find(idOrPrefix);
+      if (!task) throw new StackError(`no stack or task ${idOrPrefix}`, 404);
+      return { stack: get(task.stack_id)!, task };
     },
     openSessionPids(taskId: string): number[] {
       return (q.openSessionPids.all(taskId) as { pid: number }[]).map((s) => s.pid);
