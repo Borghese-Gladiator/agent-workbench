@@ -116,6 +116,7 @@ The settings also deny file edits to the database, `daemon.json` and the task fo
 - Use Node 24 and Git for Windows. Put `sh` and `git` on `PATH`.
 - Run `node packages/cli/src/main.ts` in place of `bin/awb`. The `bin` files are shell scripts.
 - The daemon starts every child process with `windowsHide`, so no console window takes focus.
+- `npm run e2e` runs on Windows. `e2e/acceptance.sh` runs only on macOS, because it uses the real `claude` and `sed -i ''`.
 - The unit tests that use `#!/bin/sh` stubs and `/tmp` paths run only on macOS and Linux.
 
 ## Tests
@@ -123,12 +124,13 @@ The settings also deny file edits to the database, `daemon.json` and the task fo
 ```sh
 npm test
 npm run typecheck
+npm run e2e
 ```
 
-| Script | What it covers | Cost |
+| Test file | What it covers | Cost |
 |---|---|---|
-| `bash e2e/wt.sh` | `awb wt` with real git worktrees and the picker in a pty | none |
-| `bash e2e/ui.sh` | The web UI in a browser, with a real stack run, a stub `claude` and a stub `gh` (about 1 min) | none |
-| `bash e2e/logging.sh` | The structured log, with a stub `claude` (about 70 s) | none |
-| `bash e2e/repo-test.sh` | Test claims and the run file outside the repo, with a stub test writer | none |
+| `e2e/wt.e2e.ts` | `awb wt` with real git worktrees | none |
+| `e2e/ui.e2e.ts` | The web UI in a browser, with a real stack run, a stub `claude` and a stub `gh` (about 1 min) | none |
+| `e2e/logging.e2e.ts` | The structured log, with a stub `claude` (about 70 s) | none |
+| `e2e/repo-test.e2e.ts` | Test claims and the run file outside the repo, with a stub test writer | none |
 | `WORK=<dir> bash e2e/acceptance.sh setup`, then `single`, `bug`, `stack`, `ask` | The full flow with the real `claude` and GitHub | about 6 USD |

@@ -6,7 +6,7 @@ npm ci
 ```
 
 ## seed
-The daemon has one stack in repo /tmp/seed-repo with two tasks. "Seed done task" is done, and its gate passed. "Seed failed task" is failed: its gate has C1 PASS and C2 FAIL. One ended session on branch awb/seed-done has Bash and Edit tool events and a cost of 0.42 USD.
+The daemon has one stack in a repo named seed-repo in the temp folder with two tasks. "Seed done task" is done, and its gate passed. "Seed failed task" is failed: its gate has C1 PASS and C2 FAIL. One ended session on branch awb/seed-done has Bash and Edit tool events and a cost of 0.42 USD.
 ```sh
 node --disable-warning=ExperimentalWarning e2e/seed.ts {seed}
 ```

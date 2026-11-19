@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const MAIN = fileURLToPath(new URL("../packages/cli/src/main.ts", import.meta.url));
@@ -79,13 +79,8 @@ export function stubCommand(dir: string, name: string, source: string): string {
   return file;
 }
 
-// An awb command for a stub that calls awb, such as a stub claude that runs awb prove.
-export const awbShim = (dir: string) =>
-  stubCommand(
-    dir,
-    "awb",
-    `import { spawnSync } from "node:child_process";
-const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", ${JSON.stringify(MAIN)}, ...process.argv.slice(2)], { stdio: "inherit" });
-process.exit(r.status ?? 1);
-`,
-  );
+// Windows names the variable Path. A second PATH key would not win, so find the existing key.
+export function withPath(env: NodeJS.ProcessEnv, dir: string): NodeJS.ProcessEnv {
+  const key = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+  return { ...env, [key]: dir + delimiter + (env[key] ?? "") };
+}
