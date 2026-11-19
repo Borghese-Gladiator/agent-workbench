@@ -98,12 +98,12 @@ The daemon runs the jobs in `$AWB_HOME/schedule.json`. It checks every 30 second
 
 ```json
 [
-  { "name": "standup", "at": "09:30", "prompt": "/awb:standup", "timeoutMin": 10 },
+  { "name": "standup", "at": "09:30", "cwd": "/path/to/repo", "prompt": "/awb:standup", "timeoutMin": 10 },
   { "name": "sentry-triage", "at": "09:00", "cwd": "/path/to/repo", "timeoutMin": 45, "prompt": "/awb:triage <channel> last 24 hours. Skip each issue that already has a PR." }
 ]
 ```
 
-`days` is a list of 0 (Sunday) to 6, default `[1,2,3,4,5]`. `allowedTools` replaces the default `Read, Glob, Grep, Bash`.
+`cwd` must be a git repo. The default is `$AWB_HOME`, which is not a repo, and `awb -p` exits at once there. `days` is a list of 0 (Sunday) to 6, default `[1,2,3,4,5]`. `allowedTools` replaces the default `Read, Glob, Grep, Bash`.
 
 Each run is a row in the `job_runs` table of `awb.db`, with the state `running`, `done`, `failed` or `stopped`. A run that was open when the daemon stopped becomes `stopped`, and the job starts again the same day. A job that failed does not start again the same day. To start it again, use `awb schedule run`.
 

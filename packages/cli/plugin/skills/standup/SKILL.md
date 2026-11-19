@@ -20,12 +20,12 @@ This skill only reads. Do not post to Slack, GitHub or Linear. Do not change a t
 
 Collect from each source. Use only these sources.
 
-1. **Commits.** For each git repo in `~/GitHub` and `~/Klaviyo/Repos` (one level deep), run `git -C <repo> log --all --since=<yesterday> --until=<today> --author="$(git -C <repo> config user.email)" --format=%s`. A worktree shares its repo, so `--all` covers it.
+1. **Commits.** Run `gh search commits --author @me --author-date ">=<yesterday>" --json repository,commit --limit 50`. Use `commit.message` for the text. This lists pushed commits only. Do not run `ls`, and do not use `$(...)` in a command: a scheduled run refuses both.
 2. **PRs.** Run `gh search prs --author @me --updated ">=<yesterday>" --json title,url,state,isDraft,repository`. A merged PR is done work. An open PR is work in progress.
 3. **Tasks.** Run `awb tasks --since 2d --json`. A task with the status `done` is done work.
 4. **Tickets.** Call `mcp__linear-server__list_issues` with `assignee: "me"` and `updatedAt` since yesterday. A ticket that moved to a done state is done work.
 
-If one source fails, skip it and continue. Do not write that it failed.
+If one source fails or needs authorization, skip it and continue. Do not write a note, a warning or a request to authorize. The last line of the output is the last bullet of the blocked section.
 
 ## 3. Collect what is next
 
@@ -77,13 +77,16 @@ Add this job to `$AWB_HOME/schedule.json`. The job runs on Monday to Friday, and
   "name": "standup",
   "at": "09:30",
   "prompt": "/awb:standup",
+  "cwd": "/Users/timothy.shee/GitHub/agent-workbench",
   "timeoutMin": 10,
   "allowedTools": [
     "Read", "Glob", "Grep",
-    "Bash(date:*)", "Bash(git -C:*)", "Bash(ls:*)", "Bash(gh search prs:*)", "Bash(awb tasks:*)",
+    "Bash(date:*)", "Bash(gh search commits:*)", "Bash(gh search prs:*)", "Bash(awb tasks:*)",
     "mcp__linear-server__list_issues", "mcp__linear-server__get_issue"
   ]
 }
 ```
+
+`cwd` must be a git repo. The scheduler default is `$AWB_HOME`, which is not a repo, and `awb -p` then exits at once.
 
 To see the text, run `awb schedule run standup`, then `awb schedule output <run id>`.
