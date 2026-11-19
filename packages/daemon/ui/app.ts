@@ -8,9 +8,9 @@ import { TaskView } from "./task.ts";
 import { Logs } from "./logs.ts";
 
 const NAV = [
-  ["live", "#/", "Live", "M22 12h-4l-3 9L9 3l-3 9H2"],
+  ["live", "#/", "Overview", "M22 12h-4l-3 9L9 3l-3 9H2"],
   ["stacks", "#/stacks", "Stacks", "M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"],
-  ["prs", "#/prs", "PRs", "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9"],
+  ["prs", "#/prs", "Reviews", "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9"],
   ["logs", "#/logs", "Logs", "M4 6h16M4 12h16M4 18h10"],
 ];
 

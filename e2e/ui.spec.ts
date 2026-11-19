@@ -11,7 +11,7 @@ test.describe.configure({ mode: "serial" });
 
 test("Live shows the stopped run, quiet and lost sessions, the USD column and the cost of today", async ({ page }) => {
   await page.goto("/");
-  const run = page.locator(".card").filter({ hasText: "Run" }).first();
+  const run = page.locator(".card:not(.stats)").filter({ hasText: "Run" }).first();
   await expect(run).toContainText("stopped");
   await expect(run).toContainText(/the gate failed at \w+: C2/);
   await expect(run.getByRole("link", { name: "Footer" })).toHaveAttribute("href", `#/task/${T2}`);
@@ -26,7 +26,7 @@ test("Live shows the stopped run, quiet and lost sessions, the USD column and th
   expect(await color(".badge.quiet")).not.toBe(fail);
 
   await expect(page.getByRole("columnheader", { name: "USD" }).first()).toBeVisible();
-  for (const branch of ["awb/scoreboard", "awb/footer"]) await expect(page.getByRole("table").first().getByRole("row").filter({ hasText: branch }).locator("td.num")).toHaveText("0.60");
+  for (const branch of ["awb/scoreboard", "awb/footer"]) await expect(page.getByRole("table").filter({ hasText: "Current operation" }).getByRole("row").filter({ hasText: branch }).locator("td.num")).toHaveText("0.60");
   await expect(page.locator("aside .foot")).toContainText("Today 2.70 USD");
   await shot(page, "1-live");
 });
@@ -56,8 +56,8 @@ test("the failed task page shows its logs, the setup log and the writer end", as
   await expect(page.getByRole("heading", { level: 2 })).toHaveText("Footer failed");
   await expect(page.getByText(/^the gate failed at \w+: C2 not passed/)).toBeVisible();
   await expect(page.getByText("success, 3 turns", { exact: true })).toHaveClass("PASS");
-  const logs = page.locator("details").filter({ has: page.getByText(/^Logs \(\d+ lines · \d+ errors?\)$/) });
-  await expect(logs).toHaveAttribute("open", "");
+  await page.getByRole("tab", { name: "Logs" }).click();
+  const logs = page.locator("main");
   await expect(logs.locator("pre").first()).toContainText("runner.session.start");
   await expect(logs.locator("pre").first()).toContainText("prove.gate");
   await expect(logs.locator("pre").first()).toContainText("runner.task.failed");
@@ -67,6 +67,7 @@ test("the failed task page shows its logs, the setup log and the writer end", as
   const res = await page.request.get((await writer.getAttribute("href"))!);
   expect(res.headers()["content-type"]).toContain("text/plain");
   expect(await res.text()).toContain('"subtype":"success"');
+  await page.getByRole("tab", { name: "Changes" }).click();
   await expect(page.locator("#diff")).toHaveText("no diff");
   await shot(page, "4-task-logs");
 });
@@ -93,8 +94,8 @@ test("Retry runs the stack again from the failed task, and the run view follows 
   await page.goto(`/#/task/${T2}`);
   await page.getByRole("button", { name: "Retry" }).click();
   await expect(page.getByText("Retried. The run starts again.")).toBeVisible();
-  await page.getByRole("link", { name: "Live" }).click();
-  const run = page.locator(".card").filter({ hasText: "Run" }).first();
+  await page.getByRole("link", { name: "Overview" }).click();
+  const run = page.locator(".card:not(.stats)").filter({ hasText: "Run" }).first();
   await expect(run).toContainText("running");
   await expect(run).toContainText(/running for \d+ min/);
   await shot(page, "6-running");
@@ -109,6 +110,7 @@ test("Retry runs the stack again from the failed task, and the run view follows 
 
   await page.goto(`/#/task/${T2}`);
   await expect(page.getByRole("heading", { level: 2 })).toHaveText("Footer done");
+  await page.getByRole("tab", { name: "Changes" }).click();
   const diff = await page.locator("#diff").textContent();
   expect(diff).toContain("+<footer>Footer</footer>");
   expect(diff).not.toContain('+<p id="score">');
@@ -147,7 +149,7 @@ test("Logs filters by level and task, and the task page links to its logs", asyn
   await shot(page, "9-logs-errors");
 
   await page.goto(`/#/task/${T1}`);
-  await page.getByText(/^Logs \(/).click();
+  await page.getByRole("tab", { name: "Logs" }).click();
   await page.getByRole("link", { name: "All logs of this task" }).click();
   await expect(page).toHaveURL(new RegExp(`#/logs/${T1}$`));
   await expect(page.getByLabel("Task")).toHaveValue(T1);

@@ -1,5 +1,6 @@
 import { html, useEffect, useState } from "./vendor/htm-preact.js";
 import { Branch, get, post, repoName, usd, type Data, type Json } from "./components.ts";
+import { stackProgress } from "./select.ts";
 
 function EditForm({ st, t, onSaved }: { st: Json; t: Json; onSaved: () => void }) {
   const [title, setTitle] = useState<string>(t.title);
@@ -26,7 +27,7 @@ function EditForm({ st, t, onSaved }: { st: Json; t: Json; onSaved: () => void }
       setMsg((err as Error).message);
     }
   };
-  return html`<details><summary>edit</summary>
+  return html`<details><summary>Edit title and claims</summary>
     <form onSubmit=${save}>
       <label>Title<input name="title" value=${title} onInput=${(e: Event) => setTitle((e.target as HTMLInputElement).value)} /></label>
       <label>Claims, one a line: <code>C1: text</code>
@@ -35,6 +36,11 @@ function EditForm({ st, t, onSaved }: { st: Json; t: Json; onSaved: () => void }
       <button>Save</button> <span class="msg muted">${msg}</span>
     </form>
   </details>`;
+}
+
+function Progress({ tasks }: { tasks: Json[] }) {
+  const { finished, total, current } = stackProgress(tasks);
+  return html`<p><progress max=${total} value=${finished} aria-label="Stack progress"></progress> ${finished} of ${total} tasks done${current ? html` · now: <a href=${"#/task/" + current.id}>${current.title}</a>` : null}</p>`;
 }
 
 export function Stacks({ d }: { d: Data }) {
@@ -53,6 +59,7 @@ export function Stacks({ d }: { d: Data }) {
     ${list.map(
       (st) => html`<div class="card" key=${st.id + ":" + st.version}>
         <h3>${repoName(st.repo)} <span class="muted mono">stack ${st.id.slice(0, 8)} · version ${st.version} · base ${st.base}</span></h3>
+        <${Progress} tasks=${st.tasks} />
         <table>
           <thead><tr><th>#</th><th>status</th><th>task</th><th>branch</th><th class="num">USD</th><th>PR</th><th></th></tr></thead>
           <tbody>

@@ -1,11 +1,13 @@
 import { html, useEffect, useState } from "./vendor/htm-preact.js";
 import { get, LogLine, type Json } from "./components.ts";
+import { timeline } from "./select.ts";
 
 const SOURCES = ["", "daemon", "runner", "prove", "ship", "sync", "http", "cli", "notify", "usage"];
 
 export function Logs({ task }: { task: string }) {
   const [f, setF] = useState({ level: "info", source: "", task, since: task ? "3650d" : "1d" });
   const [follow, setFollow] = useState(false);
+  const [mode, setMode] = useState("raw");
   const [lines, setLines] = useState<Json[] | null>(null);
   const [error, setError] = useState("");
 
@@ -39,9 +41,16 @@ export function Logs({ task }: { task: string }) {
       <label>Since <input value=${f.since} onChange=${set("since")} placeholder="1h, 1d, 7d" /></label>
       <label class="box"><input type="checkbox" checked=${follow} onChange=${(e: Event) => setFollow((e.target as HTMLInputElement).checked)} />Follow</label>
     </form>
+    <div class="actions filters" role="group" aria-label="Log mode">
+      ${["raw", "timeline"].map((m) => html`<button class="plain" aria-pressed=${mode === m} onClick=${() => setMode(m)}>${m}</button>`)}
+    </div>
     ${error ? html`<p class="FAIL" role="alert">${error}</p>` : null}
     ${lines === null
       ? html`<p class="muted">Loading…</p>`
-      : html`<p class="muted">${lines.length} ${lines.length === 1 ? "line" : "lines"}${lines.length === 500 ? " (the newest 500)" : ""}</p>
+      : mode === "timeline"
+        ? html`<ol aria-label="Timeline">${timeline(lines, f.level === "info" ? "warn" : f.level).map(
+            (x) => html`<li><b class=${x.level === "error" ? "FAIL" : ""}>${x.ts.slice(11, 19)} ${x.title}</b><span class="note">${x.detail}</span></li>`,
+          )}</ol>`
+        : html`<p class="muted">${lines.length} ${lines.length === 1 ? "line" : "lines"}${lines.length === 500 ? " (the newest 500)" : ""}</p>
           <pre aria-label="Log lines">${lines.length ? [...lines].reverse().map((l) => html`<${LogLine} l=${l} />`) : html`<span class="muted">no log lines</span>`}</pre>`}`;
 }

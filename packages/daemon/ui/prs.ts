@@ -1,7 +1,15 @@
 import { html, useState } from "./vendor/htm-preact.js";
 import { Branch, post, repoName, usd, type Data, type Json } from "./components.ts";
 
-const Gate = ({ t }: { t: Json }) =>
+import { prGroup, type PrGroup } from "./select.ts";
+
+const GROUPS: [PrGroup, string][] = [
+  ["review", "Ready to review"],
+  ["waiting", "Waiting for an earlier PR in the stack"],
+  ["blocked", "Blocked: no gate or a failed gate"],
+];
+
+const Gate =({ t }: { t: Json }) =>
   !t.last_gate_at
     ? html`<span class="muted">no gate</span>`
     : t.failed_claims.length
@@ -46,12 +54,18 @@ export function Prs({ d }: { d: Data }) {
     await d.reload();
     setBusy(false);
   };
-  return html`<h2>PRs</h2>
+  return html`<h2>Reviews</h2>
     <div class="actions">
       <button class="plain" disabled=${busy} onClick=${sync}>Sync now</button>
       <span class="muted">The daemon reads the state of each open PR from GitHub every minute.</span>
     </div>
     ${error ? html`<p class="FAIL" role="alert">Sync failed: ${error}</p>` : null}
-    ${open.length ? html`<${Rows} list=${open} d=${d} />` : html`<p class="muted">No open PRs.</p>`}
+    <p class="muted">A gate PASS shows that the AI proof passed. It does not show that a human reviewed the PR.</p>
+    ${open.length
+      ? GROUPS.map(([k, label]) => {
+          const list = open.filter((t) => prGroup(t, d.tasks) === k);
+          return list.length ? html`<h3>${label} (${list.length})</h3><${Rows} list=${list} d=${d} />` : null;
+        })
+      : html`<p class="muted">No open PRs.</p>`}
     ${closed.length ? html`<details><summary>Merged and closed (${closed.length})</summary><${Rows} list=${closed} d=${d} /></details>` : null}`;
 }
