@@ -7,6 +7,7 @@ import { awbHome, ensureDaemon, findDaemon, api, reportCliError } from "./home.t
 import { gitInfo, playbookPath, claudeArgs, awbSettings, repoRulesPath, splitResume, resumeArgs } from "./launch.ts";
 import { doctor } from "./doctor.ts";
 import { wtCmd } from "./wt.ts";
+import { loggingCmd } from "./logging.ts";
 import { logText, type LogLine } from "../../daemon/src/log.ts";
 
 const home = awbHome();
@@ -19,7 +20,7 @@ const positional = () => rest.find((a, i) => !a.startsWith("-") && rest[i - 1] !
 
 console.error(`awb: AWB_HOME=${home}`);
 
-const COMMANDS = ["ui", "doctor", "daemon", "stack", "prove", "ship", "run", "retry", "stop", "show", "tasks", "cost", "logs", "task", "sessions", "wt"];
+const COMMANDS = ["ui", "doctor", "daemon", "stack", "prove", "ship", "run", "retry", "stop", "show", "tasks", "cost", "logs", "task", "sessions", "wt", "logging"];
 let lastError = "";
 const printError = console.error;
 console.error = (...args: unknown[]) => {
@@ -50,6 +51,9 @@ switch (cmd) {
     break;
   case "wt":
     process.exitCode = await wtCmd(rest);
+    break;
+  case "logging":
+    process.exitCode = loggingCmd(home, rest[0] === "down" ? ["down"] : ["up", "-d"]);
     break;
   case "daemon":
     await daemonCmd(rest[0]);

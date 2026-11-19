@@ -107,7 +107,7 @@ export async function doctor(home: string): Promise<boolean> {
   checks.push(...mcpChecks(mcpListing()));
 
   checks.push(
-    ...(await logChecks(join(home, "logs"), process.env.AWB_ALLOY_URL || "http://127.0.0.1:12345", process.env.AWB_LOKI_URL || "http://127.0.0.1:3100", undefined, process.env.AWB_LOGS || join(homedir(), ".awb", "logs"))),
+    ...(await logChecks(join(home, "logs"), process.env.AWB_ALLOY_URL || "http://127.0.0.1:12345", process.env.AWB_LOKI_URL || "http://127.0.0.1:3100", undefined, process.env.AWB_LOGS || join(home, "logs"))),
   );
 
   for (const c of checks) {

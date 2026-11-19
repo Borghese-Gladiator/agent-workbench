@@ -21,6 +21,7 @@ A task id or a stack id can be a prefix of 6 or more characters in every command
 | `awb ui [--no-open]` | Prints the UI URL and opens it. See "Web UI". |
 | `awb doctor` | Checks `claude`, Chromium, the daemon, the Slack, Sentry and Linear MCP servers, and the log pipeline. Prints a fix for each problem. |
 | `awb daemon start\|stop\|status` | Controls the daemon of the active `AWB_HOME`. |
+| `awb logging up\|down` | Starts or stops the Loki, Alloy and Grafana stack. It reads the logs of the active `AWB_HOME`. |
 | `awb wt [repo] [--root <dir>]` | Lists the worktrees of a repo with the branch, the changed files and the last commit age. |
 | `awb wt pick [repo]` | Opens a picker. Space marks, `d` then `y` removes the marked worktrees (it refuses a dirty one), Enter prints the path, `q` quits. `cd "$(awb wt pick)"` works. |
 
