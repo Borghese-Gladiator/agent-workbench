@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { devNull, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,6 +27,13 @@ export function exec(cmd: string, args: string[], opts: { cwd?: string; env?: No
   });
 }
 
+export function start(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}): { child: ChildProcess; out: () => string } {
+  const child = spawn(cmd, args, { cwd: opts.cwd, env: clean(opts.env), stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+  let out = "";
+  child.stdout?.on("data", (d) => (out += d));
+  return { child, out: () => out };
+}
+
 export function makeWork(): { dir: string; remove: () => void } {
   const keep = process.env.WORK;
   if (keep) mkdirSync(keep, { recursive: true });
@@ -51,6 +58,9 @@ export async function git(cwd: string, ...args: string[]): Promise<string> {
   return r.stdout.trim();
 }
 
+export const startAwb = (args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) =>
+  start(process.execPath, ["--disable-warning=ExperimentalWarning", MAIN, ...args], opts);
+
 export const awb = (args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {}) =>
   exec(process.execPath, ["--disable-warning=ExperimentalWarning", MAIN, ...args], opts);
 
@@ -68,3 +78,14 @@ export function stubCommand(dir: string, name: string, source: string): string {
   chmodSync(file, 0o755);
   return file;
 }
+
+// An awb command for a stub that calls awb, such as a stub claude that runs awb prove.
+export const awbShim = (dir: string) =>
+  stubCommand(
+    dir,
+    "awb",
+    `import { spawnSync } from "node:child_process";
+const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", ${JSON.stringify(MAIN)}, ...process.argv.slice(2)], { stdio: "inherit" });
+process.exit(r.status ?? 1);
+`,
+  );
