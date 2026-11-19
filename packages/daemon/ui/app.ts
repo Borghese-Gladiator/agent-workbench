@@ -11,6 +11,7 @@ import { Verification } from "./verification.ts";
 import { Logs } from "./logs.ts";
 import { Schedule } from "./schedule.ts";
 import { Usage } from "./usage.ts";
+import { Palette } from "./palette.ts";
 import { Settings, applyPrefs } from "./settings.ts";
 
 applyPrefs();
@@ -127,7 +128,8 @@ function App() {
         <div><span class="muted">Today</span> <span class="mono">${today === null ? "" : usd(today) + " USD"}</span></div>
       </div>
     </aside>
-    <main>${body}</main>`;
+    <main>${body}</main>
+    <${Palette} pages=${NAV.map(([, href, label]) => [label, href])} tasks=${d.tasks} />`;
 }
 
 render(html`<${App} />`, document.getElementById("root")!);

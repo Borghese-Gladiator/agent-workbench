@@ -65,7 +65,17 @@ export const filterTasks = (tasks: Task[], q: string, status: string) => {
   );
 };
 
-export const matchLines = (lines: Task[], q: string) => {
+export type PaletteRow = { key: string; label: string; href: string; status?: string };
+
+export const paletteRows = (pages: [string, string][], tasks: Task[], q: string): PaletteRow[] => {
+  const needle = q.trim().toLowerCase();
+  return [
+    ...pages.filter(([label]) => label.toLowerCase().includes(needle)).map(([label, href]) => ({ key: "p" + href, label, href })),
+    ...filterTasks(tasks, q, "all").map((t) => ({ key: "t" + t.id, label: String(t.title), href: "#/task/" + t.id, status: String(t.status) })),
+  ];
+};
+
+export const matchLines =(lines: Task[], q: string) => {
   const needle = q.trim().toLowerCase();
   return needle ? lines.filter((l) => (l.source + "." + l.event + " " + JSON.stringify(l)).toLowerCase().includes(needle)) : lines;
 };
