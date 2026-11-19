@@ -53,6 +53,7 @@ function Finished({ d }: { d: Data }) {
 function Overview({ d, running }: { d: Data; running: number }) {
   const attention = needsAttention(d.tasks);
   const openPrs = d.tasks.filter((t) => t.pr_number && t.status === "done").length;
+  const recent = [...d.tasks].sort((a, b) => (b.last_gate_at ?? b.created_at).localeCompare(a.last_gate_at ?? a.created_at)).slice(0, 5);
   const spent = Object.values(d.taskUsd).reduce((a, b) => a + b, 0);
   return html`<div class="card stats" aria-label="Summary">
       <div><span class="muted">Running</span><b>${running}</b></div>
@@ -66,7 +67,13 @@ function Overview({ d, running }: { d: Data; running: number }) {
           ({ task, reason }) => html`<tr><td><${State} s=${task.status} /></td><td><${TaskLink} t=${task} /></td><td class="FAIL">${reason}</td>
             <td><a href=${"#/task/" + task.id}>Inspect</a></td></tr>`,
         )}</tbody></table>`
-      : html`<p class="muted">Nothing needs attention.</p>`}`;
+      : html`<p class="muted">Nothing needs attention.</p>`}
+    <h3>Recent activity</h3>
+    ${recent.length
+      ? html`<ul aria-label="Recent activity">${recent.map(
+          (t) => html`<li><${State} s=${t.status} /> <${TaskLink} t=${t} /> <span class="muted">${t.pr_number ? "PR #" + t.pr_number : t.fail_reason ?? ""} · ${time(t.last_gate_at ?? t.created_at)}</span></li>`,
+        )}</ul>`
+      : html`<p class="muted">No activity yet.</p>`}`;
 }
 
 export function Live({ d }: { d: Data }) {

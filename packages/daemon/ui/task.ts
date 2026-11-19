@@ -203,8 +203,23 @@ export function TaskView({ d, id }: { d: Data; id: string }) {
         </td></tr>`,
       )}
     </tbody></table>`;
-  const verification = html`<div class="claims">${t.claims.map((c: Json) => html`<${ClaimCard} c=${c} r=${rows.find((x) => x.id === c.id)} />`)}</div>
-    ${rows.length ? null : html`<p class="muted">No gate has run for this task.</p>`}`;
+  const verification = html`<h3>Gate history</h3>
+    ${t.attempts.flatMap((a: Json, i: number) => a.gates.map((x: Json) => ({ a, i, x }))).map(
+      ({ i, x }: Json) => html`<div class="card" aria-label=${"Attempt " + (i + 1) + " gate"}>
+        <h3>Attempt ${i + 1} · <${Pass} pass=${x.pass} /> <span class="muted mono">${x.commit_sha.slice(0, 10)}</span></h3>
+        <table><thead><tr><th>claim</th><th>result</th><th>tests</th><th>evidence</th></tr></thead><tbody>
+          ${x.result.rows.map(
+            (r: Json) => html`<tr><td class="mono">${r.id}</td><td><${Pass} pass=${r.status === "PASS"} />${r.reasons.length ? html`<span class="note FAIL">${r.reasons.join(", ")}</span>` : null}</td>
+              <td class="num">${r.tests}</td>
+              <td>${r.videos.length + " video, " + r.traces.length + " trace"}${r.videos.map((v: string) => html` <a href=${file(v)} target="_blank">video</a>`)}${r.traces.map((tr: string) => html` <a href=${file(tr)} download>trace</a>`)}</td></tr>`,
+          )}
+        </tbody></table>
+      </div>`,
+    )}
+    ${t.attempts.some((a: Json) => a.gates.length) ? null : html`<p class="muted">No gate has run for this task.</p>`}
+    <h3>Latest claims</h3>
+    <div class="claims">${t.claims.map((c: Json) => html`<${ClaimCard} c=${c} r=${rows.find((x) => x.id === c.id)} />`)}</div>
+`;
   const logs = html`<p class="muted">${t.log.length} lines · ${errors} ${errors === 1 ? "error" : "errors"}</p>
     <pre>${t.log.length ? t.log.map((l: Json) => html`<${LogLine} l=${l} />`) : html`<span class="muted">no log lines for this task</span>`}</pre>
     ${setupLog ? html`<h3>Setup log</h3><pre>${setupLog}</pre>` : null}

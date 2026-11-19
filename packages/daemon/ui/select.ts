@@ -24,6 +24,14 @@ export const stackProgress = (tasks: Task[]) => {
   return { finished, total: tasks.length, current: tasks.find((t) => t.status === "doing") ?? null };
 };
 
+export const stackCost = (tasks: Task[], usd: Record<string, number>) => tasks.reduce((n, t) => n + (usd[t.id] ?? 0), 0);
+
+export const costlyFailures = (tasks: Task[], usd: Record<string, number>): Set<string> => {
+  const priced = tasks.filter((t) => usd[t.id] > 0);
+  const avg = priced.reduce((n, t) => n + usd[t.id], 0) / (priced.length || 1);
+  return new Set(tasks.filter((t) => t.status === "failed" && usd[t.id] > 2 * avg).map((t) => t.id));
+};
+
 export type Step = { ts: string; title: string; detail: string; level: string };
 
 const TITLE: Record<string, string> = {

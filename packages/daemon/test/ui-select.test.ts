@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { needsAttention, prGroup, stackProgress, timeline } from "../ui/select.ts";
+import { costlyFailures, needsAttention, prGroup, stackCost, stackProgress, timeline } from "../ui/select.ts";
+
+test("stackCost sums task cost, and costlyFailures flags only failed tasks above twice the average", () => {
+  const usd = { a: 1, b: 1, c: 10 };
+  const tasks = [{ id: "a", status: "done" }, { id: "b", status: "failed" }, { id: "c", status: "failed" }, { id: "d", status: "done" }];
+  assert.equal(stackCost(tasks, usd), 12);
+  assert.deepEqual([...costlyFailures(tasks, usd)], ["c"]);
+});
 
 const t = (o: object) => ({ id: "x", stack_id: "s", position: 0, status: "done", failed_claims: [], last_gate_at: "now", ...o });
 

@@ -93,7 +93,8 @@ function App() {
   useEffect(() => void reload(), [hash]);
 
   const [, v, id] = hash.split("/");
-  const view = v || "live";
+  const ALIAS: Record<string, string> = { overview: "live", reviews: "prs", tasks: "stacks" };
+  const view = ALIAS[v] ?? (v || "live");
   const data: Data = { ...d, sessions, reload };
   const body =
     view === "session" ? html`<${SessionView} key=${id} d=${data} id=${id} />`

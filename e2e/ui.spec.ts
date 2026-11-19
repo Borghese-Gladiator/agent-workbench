@@ -67,9 +67,9 @@ test("the failed task page shows its logs, the setup log and the writer end", as
   const res = await page.request.get((await writer.getAttribute("href"))!);
   expect(res.headers()["content-type"]).toContain("text/plain");
   expect(await res.text()).toContain('"subtype":"success"');
+  await shot(page, "4-task-logs");
   await page.getByRole("tab", { name: "Changes" }).click();
   await expect(page.locator("#diff")).toHaveText("no diff");
-  await shot(page, "4-task-logs");
 });
 
 test("Rewrite test removes the test of a claim and runs the real proof again", async ({ page }) => {
@@ -160,4 +160,72 @@ test("Logs filters by level and task, and the task page links to its logs", asyn
   expect(ids.every((id) => T1.startsWith(id))).toBe(true);
   await expect(page.getByRole("link", { name: "Logs" })).toHaveAttribute("aria-current", "page");
   await shot(page, "10-logs-task");
+});
+
+test("Reviews groups the open PRs, and the PR of the second task waits for the first", async ({ page }) => {
+  await page.goto("/#/prs");
+  await expect(page.getByRole("heading", { level: 2 })).toHaveText("Reviews");
+  await expect(page.getByText("A gate PASS shows that the AI proof passed.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Ready to review \(1\)$/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Waiting for an earlier PR in the stack \(1\)$/ })).toBeVisible();
+  await shot(page, "11-reviews");
+});
+
+test("Verification tab lists each gate of each attempt with its claims and evidence", async ({ page }) => {
+  await page.goto(`/#/task/${T2}`);
+  await page.getByRole("tab", { name: "Verification" }).click();
+  await expect(page.getByRole("heading", { name: "Gate history" })).toBeVisible();
+  const gate = page.getByLabel(/^Attempt \d+ gate$/).first();
+  await expect(gate.getByRole("columnheader", { name: "evidence" })).toBeVisible();
+  await expect(gate.getByRole("row").filter({ hasText: "C2" })).toBeVisible();
+  await shot(page, "12-verification");
+});
+
+test("Stacks shows the cost of the stack, and Timeline shows the failure steps in order", async ({ page }) => {
+  await page.goto("/#/stacks");
+  await expect(page.getByText(/^Stack cost:/)).toContainText("USD");
+  await page.goto("/#/logs");
+  await page.getByRole("button", { name: "timeline" }).click();
+  const steps = page.getByLabel("Timeline").getByRole("listitem");
+  await expect(steps.filter({ hasText: "runner.task.failed" }).or(steps.filter({ hasText: "Task failed" })).first()).toBeVisible();
+  await expect(page.getByLabel("Timeline")).not.toContainText("daemon.start");
+  await shot(page, "13-timeline");
+});
+
+test("the old route names open the new pages", async ({ page }) => {
+  await page.goto("/#/reviews");
+  await expect(page.getByRole("heading", { level: 2 })).toHaveText("Reviews");
+  await page.goto("/#/overview");
+  await expect(page.getByRole("heading", { level: 2 })).toHaveText("Overview");
+});
+
+test("the theme choice sets dark colors and survives a reload, and compact density shrinks the rows", async ({ page }) => {
+  await page.goto("/#/stacks");
+  const bg = () => page.locator("body").evaluate((e) => getComputedStyle(e).backgroundColor);
+  const light = await bg();
+  await page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "dark" }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  const dark = await bg();
+  expect(dark).not.toBe(light);
+  await shot(page, "14-dark");
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  expect(await bg()).toBe(dark);
+  const cell = () => page.locator("td").first().evaluate((e) => e.getBoundingClientRect().height);
+  const tall = await cell();
+  await page.getByRole("group", { name: "Density" }).getByRole("button", { name: "compact" }).click();
+  expect(await cell()).toBeLessThan(tall);
+  await shot(page, "15-dark-compact");
+  await page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "system" }).click();
+  await page.getByRole("group", { name: "Density" }).getByRole("button", { name: "comfortable" }).click();
+});
+
+test("at phone width the page does not scroll sideways", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  for (const route of ["/#/", "/#/stacks", "/#/prs", `/#/task/${T2}`]) {
+    await page.goto(route);
+    await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  }
+  await shot(page, "16-phone");
 });

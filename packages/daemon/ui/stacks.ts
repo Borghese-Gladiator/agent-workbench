@@ -1,6 +1,6 @@
 import { html, useEffect, useState } from "./vendor/htm-preact.js";
 import { Branch, get, post, repoName, usd, type Data, type Json } from "./components.ts";
-import { stackProgress } from "./select.ts";
+import { costlyFailures, stackCost, stackProgress } from "./select.ts";
 
 function EditForm({ st, t, onSaved }: { st: Json; t: Json; onSaved: () => void }) {
   const [title, setTitle] = useState<string>(t.title);
@@ -50,6 +50,7 @@ export function Stacks({ d }: { d: Data }) {
   useEffect(() => void load(), []);
   if (error) return html`<p class="FAIL">${error}</p>`;
   if (!list) return html`<h2>Stacks</h2><p class="muted">Loading…</p>`;
+  const costly = costlyFailures(list.flatMap((st) => st.tasks), d.taskUsd);
   const saved = async () => {
     await d.reload();
     await load();
@@ -60,6 +61,7 @@ export function Stacks({ d }: { d: Data }) {
       (st) => html`<div class="card" key=${st.id + ":" + st.version}>
         <h3>${repoName(st.repo)} <span class="muted mono">stack ${st.id.slice(0, 8)} · version ${st.version} · base ${st.base}</span></h3>
         <${Progress} tasks=${st.tasks} />
+        <p>Stack cost: <b class="mono">${usd(stackCost(st.tasks, d.taskUsd))} USD</b></p>
         <table>
           <thead><tr><th>#</th><th>status</th><th>task</th><th>branch</th><th class="num">USD</th><th>PR</th><th></th></tr></thead>
           <tbody>
@@ -69,7 +71,7 @@ export function Stacks({ d }: { d: Data }) {
                 <td class=${t.status}>${t.status}</td>
                 <td><a href=${"#/task/" + t.id}>${t.title}</a>${t.fail_reason ? html`<div class="muted">${t.fail_reason}</div>` : null}</td>
                 <td><${Branch} b=${t.branch} /></td>
-                <td class="mono num">${usd(d.taskUsd[t.id])}</td>
+                <td class="mono num">${usd(d.taskUsd[t.id])}${costly.has(t.id) ? html`<span class="note FAIL">costly failure</span>` : null}</td>
                 <td>${t.pr_url ? html`<a href=${t.pr_url}>#${t.pr_number}</a>` : null}</td>
                 <td>${t.status === "waiting" ? html`<${EditForm} st=${st} t=${t} onSaved=${saved} />` : null}</td>
               </tr>`,
