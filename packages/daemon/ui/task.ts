@@ -1,5 +1,5 @@
 import { html, useEffect, useState } from "./vendor/htm-preact.js";
-import { ago, file, get, LogLine, Pass, post, State, time, usd, type Data, type Json } from "./components.ts";
+import { ago, Branch, file, get, LogLine, Pass, post, State, time, usd, type Data, type Json } from "./components.ts";
 
 function Buttons({ t, setMsg, reload }: { t: Json; setMsg: (m: [string, boolean]) => void; reload: () => void }) {
   const fail = (err: unknown) => setMsg([(err as Error).message, true]);
@@ -141,6 +141,7 @@ export function TaskView({ d, id }: { d: Data; id: string }) {
   const [data, setData] = useState<{ t: Json; diff: string; setupLog: string; grafana: string | null } | null>(null);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState<[string, boolean]>(["", false]);
+  const [tab, setTab] = useState("overview");
   const load = async () => {
     try {
       const [t, diff, health] = await Promise.all([get("/api/tasks/" + id), get("/api/tasks/" + id + "/diff").catch(() => ""), get("/health").catch(() => ({}))]);
@@ -160,17 +161,21 @@ export function TaskView({ d, id }: { d: Data; id: string }) {
   const rows: Json[] = g ? g.result.rows : [];
   const failed = t.status === "failed" ? rows.filter((r) => r.status === "FAIL") : [];
   const errors = t.log.filter((l: Json) => l.level === "error").length;
-  return html`<div class="head">
+  const tabs: [string, string][] = [["overview", "Overview"], ["attempts", "Attempts"], ["verification", "Verification"], ["changes", "Changes"], ["logs", "Logs"]];
+  const head = html`<div class="head">
       <h2>${t.title} <${State} s=${t.status} /></h2>
       ${t.status === "failed" ? html`<div class="actions"><${Buttons} t=${t} setMsg=${setMsg} reload=${load} /></div>` : null}
     </div>
-    ${t.pr_url ? html`<${Shipped} t=${t} />` : null}
+    ${t.fail_reason ? html`<div class="card banner" role="alert"><b class="FAIL">${t.fail_reason}</b>${t.status === "failed" ? html`<p class="muted">Next action: Retry the task, or Rewrite the proof tests.</p>` : null}</div>` : null}
+    <div class="actions filters" role="tablist" aria-label="Task sections">
+      ${tabs.map(([k, label]) => html`<button class="plain" role="tab" aria-selected=${tab === k} aria-pressed=${tab === k} onClick=${() => setTab(k)}>${label}</button>`)}
+    </div>`;
+  const overview = html`${t.pr_url ? html`<${Shipped} t=${t} />` : null}
     <div class="card">
-      <span class="mono">${t.branch}</span> → <span class="mono">${t.base}</span>
+      <${Branch} b=${t.branch} /> → <${Branch} b=${t.base} />
       ${t.pr_url ? html` · <a href=${t.pr_url}>PR #${t.pr_number}</a>` : " · no PR yet"}
       ${g ? html` · gate <${Pass} pass=${g.pass} /> at <span class="mono">${g.commit_sha.slice(0, 10)}</span>` : " · no gate run"}
       ${" · cost " + t.cost_usd.toFixed(2) + " USD · " + t.attempts.length + " attempt(s)"}
-      ${t.fail_reason ? html`<p class="FAIL">${t.fail_reason}</p>` : null}
       ${t.writer_end
         ? html`<p><span class="muted">test writer ended:</span> <span class=${t.writer_end.startsWith("success") ? "PASS" : "FAIL"}>${t.writer_end}</span></p>`
         : null}
@@ -182,34 +187,45 @@ export function TaskView({ d, id }: { d: Data; id: string }) {
         </div>`
       : null}
     ${t.status === "failed" ? html`<${Rewrite} t=${t} msg=${msg} setMsg=${setMsg} />` : null}
-    <div class="claims">${t.claims.map((c: Json) => html`<${ClaimCard} c=${c} r=${rows.find((x) => x.id === c.id)} />`)}</div>
-    <details open=${t.status === "failed"}>
-      <summary>Logs (${t.log.length} lines · ${errors} ${errors === 1 ? "error" : "errors"})</summary>
-      <pre>${t.log.length ? t.log.map((l: Json) => html`<${LogLine} l=${l} />`) : html`<span class="muted">no log lines for this task</span>`}</pre>
-      ${setupLog ? html`<h3>Setup log</h3><pre>${setupLog}</pre>` : null}
-      ${writer ? html`<p><a href=${file(writer)} target="_blank">Test writer log</a> <span class="muted mono">${writer}</span></p>` : null}
-      <p><a href=${"#/logs/" + t.id}>All logs of this task</a>${grafana
-        ? html` · <a href=${grafana.replace(/\/$/, "") + "/d/awb/awb?var-task=" + encodeURIComponent(t.id)} target="_blank">Open in Grafana</a>`
-        : null}</p>
-    </details>
-    <details>
-      <summary>Attempts (${t.attempts.length})</summary>
-      <table><tbody>
-        ${t.attempts.map(
-          (a: Json) => html`<tr><td class="muted">${time(a.started_at)}</td><td>
-            ${a.gates.map(
-              (x: Json) => html`<div><${Pass} pass=${x.pass} /> <span class="mono">${x.commit_sha.slice(0, 10)}</span> ${x.result.rows.map((r: Json) => r.id + "=" + r.status).join(" ")}</div>`,
-            )}
-          </td></tr>`,
-        )}
-      </tbody></table>
-    </details>
     <details open=${t.specs.length > 0}>
       <summary>Proof tests (${t.specs.length})</summary>
       ${t.specs.map((s: Json) => html`<h3 class="mono">${s.name}</h3><pre>${s.text}</pre>`)}
     </details>
-    <${ChangedFiles} diff=${diff} />
     ${t.transcripts.length
       ? html`<details><summary>Transcripts</summary>${t.transcripts.map((f: string) => html`<div class="mono"><a href=${file(f)} target="_blank">${f}</a></div>`)}</details>`
       : null}`;
+  const attempts = html`<table><tbody>
+      ${t.attempts.map(
+        (a: Json) => html`<tr><td class="muted">${time(a.started_at)}</td><td>
+          ${a.gates.map(
+            (x: Json) => html`<div><${Pass} pass=${x.pass} /> <span class="mono">${x.commit_sha.slice(0, 10)}</span> ${x.result.rows.map((r: Json) => r.id + "=" + r.status).join(" ")}</div>`,
+          )}
+        </td></tr>`,
+      )}
+    </tbody></table>`;
+  const verification = html`<h3>Gate history</h3>
+    ${t.attempts.flatMap((a: Json, i: number) => a.gates.map((x: Json) => ({ a, i, x }))).map(
+      ({ i, x }: Json) => html`<div class="card" aria-label=${"Attempt " + (i + 1) + " gate"}>
+        <h3>Attempt ${i + 1} · <${Pass} pass=${x.pass} /> <span class="muted mono">${x.commit_sha.slice(0, 10)}</span></h3>
+        <table><thead><tr><th>claim</th><th>result</th><th>tests</th><th>evidence</th></tr></thead><tbody>
+          ${x.result.rows.map(
+            (r: Json) => html`<tr><td class="mono">${r.id}</td><td><${Pass} pass=${r.status === "PASS"} />${r.reasons.length ? html`<span class="note FAIL">${r.reasons.join(", ")}</span>` : null}</td>
+              <td class="num">${r.tests}</td>
+              <td>${r.videos.length + " video, " + r.traces.length + " trace"}${r.videos.map((v: string) => html` <a href=${file(v)} target="_blank">video</a>`)}${r.traces.map((tr: string) => html` <a href=${file(tr)} download>trace</a>`)}</td></tr>`,
+          )}
+        </tbody></table>
+      </div>`,
+    )}
+    ${t.attempts.some((a: Json) => a.gates.length) ? null : html`<p class="muted">No gate has run for this task.</p>`}
+    <h3>Latest claims</h3>
+    <div class="claims">${t.claims.map((c: Json) => html`<${ClaimCard} c=${c} r=${rows.find((x) => x.id === c.id)} />`)}</div>
+`;
+  const logs = html`<p class="muted">${t.log.length} lines · ${errors} ${errors === 1 ? "error" : "errors"}</p>
+    <pre>${t.log.length ? t.log.map((l: Json) => html`<${LogLine} l=${l} />`) : html`<span class="muted">no log lines for this task</span>`}</pre>
+    ${setupLog ? html`<h3>Setup log</h3><pre>${setupLog}</pre>` : null}
+    ${writer ? html`<p><a href=${file(writer)} target="_blank">Test writer log</a> <span class="muted mono">${writer}</span></p>` : null}
+    <p><a href=${"#/logs/" + t.id}>All logs of this task</a>${grafana
+      ? html` · <a href=${grafana.replace(/\/$/, "") + "/d/awb/awb?var-task=" + encodeURIComponent(t.id)} target="_blank">Open in Grafana</a>`
+      : null}</p>`;
+  return html`${head}${tab === "attempts" ? attempts : tab === "verification" ? verification : tab === "changes" ? html`<${ChangedFiles} diff=${diff} />` : tab === "logs" ? logs : overview}`;
 }

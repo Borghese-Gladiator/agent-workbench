@@ -9,12 +9,35 @@ import { Logs } from "./logs.ts";
 import { Schedule } from "./schedule.ts";
 
 const NAV = [
-  ["live", "#/", "Live", "M22 12h-4l-3 9L9 3l-3 9H2"],
+  ["live", "#/", "Overview", "M22 12h-4l-3 9L9 3l-3 9H2"],
   ["stacks", "#/stacks", "Stacks", "M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"],
-  ["prs", "#/prs", "PRs", "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9"],
+  ["prs", "#/prs", "Reviews", "M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9"],
   ["schedule", "#/schedule", "Schedule", "M12 6v6l4 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0z"],
   ["logs", "#/logs", "Logs", "M4 6h16M4 12h16M4 18h10"],
 ];
+
+const pref = (k: string, v: string) => {
+  try { return localStorage.getItem(k) ?? v; } catch { return v; }
+};
+const apply = (theme: string, density: string) => {
+  const r = document.documentElement;
+  theme === "system" ? r.removeAttribute("data-theme") : r.setAttribute("data-theme", theme);
+  r.setAttribute("data-density", density);
+};
+apply(pref("awb.theme", "system"), pref("awb.density", "comfortable"));
+
+function Prefs() {
+  const [theme, setTheme] = useState(pref("awb.theme", "system"));
+  const [density, setDensity] = useState(pref("awb.density", "comfortable"));
+  const set = (k: string, v: string) => {
+    try { localStorage.setItem(k, v); } catch {}
+    k === "awb.theme" ? setTheme(v) : setDensity(v);
+    apply(k === "awb.theme" ? v : theme, k === "awb.density" ? v : density);
+  };
+  const group = (label: string, key: string, cur: string, opts: string[]) => html`<div class="prefs" role="group" aria-label=${label}>
+    ${opts.map((o) => html`<button class="plain" aria-pressed=${cur === o} onClick=${() => set(key, o)}>${o}</button>`)}</div>`;
+  return html`${group("Theme", "awb.theme", theme, ["system", "light", "dark"])}${group("Density", "awb.density", density, ["comfortable", "compact"])}`;
+}
 
 function App() {
   const [hash, setHash] = useState(location.hash);
@@ -72,7 +95,8 @@ function App() {
   useEffect(() => void reload(), [hash]);
 
   const [, v, id] = hash.split("/");
-  const view = v || "live";
+  const ALIAS: Record<string, string> = { overview: "live", reviews: "prs", tasks: "stacks" };
+  const view = ALIAS[v] ?? (v || "live");
   const data: Data = { ...d, sessions, reload };
   const body =
     view === "session" ? html`<${SessionView} key=${id} d=${data} id=${id} />`
@@ -101,6 +125,7 @@ function App() {
         )}
       </nav>
       <div class="foot">
+<${Prefs} />
         <div class="muted mono home">${home}</div>
         <div><span class="muted">Daemon</span> <span id="status" class=${status === "live" ? "live" : ""}>${status}</span></div>
         <div><span class="muted">Today</span> <span class="mono">${today === null ? "" : usd(today) + " USD"}</span></div>
