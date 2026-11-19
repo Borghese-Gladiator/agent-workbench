@@ -10,7 +10,7 @@ import type { Log } from "./log.ts";
 
 const AWB = fileURLToPath(new URL("../../cli/bin/awb", import.meta.url));
 
-export type Job = { name: string; at: string; days?: number[]; prompt: string; cwd?: string; allowedTools?: string[]; timeoutMin?: number };
+export type Job = { name: string; at: string; days?: number[]; prompt: string; cwd: string; allowedTools?: string[]; timeoutMin?: number };
 export type Exec = typeof run;
 export type JobRun = { id: string; job: string; day: string; state: "running" | "done" | "failed" | "stopped"; started_at: string; ended_at: string | null; end: string | null; output: string | null };
 
@@ -24,6 +24,7 @@ export function parseJobs(text: string): Job[] {
     names.add(j.name);
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(j.at ?? "")) throw new Error(`job ${j.name}: at must be HH:MM, not ${j.at}`);
     if (typeof j.prompt !== "string" || !j.prompt) throw new Error(`job ${j.name}: prompt is empty`);
+    if (typeof j.cwd !== "string" || !j.cwd) throw new Error(`job ${j.name}: cwd must be the path of a git repo, because awb -p does not run outside one`);
     if (j.days && !j.days.every((d: unknown) => Number.isInteger(d) && (d as number) >= 0 && (d as number) <= 6)) throw new Error(`job ${j.name}: days are 0 (Sunday) to 6`);
   }
   return jobs;
@@ -105,9 +106,9 @@ export function createScheduler(home: string, db: DatabaseSync, log: Log, exec: 
     log("info", "schedule", "job.start", { job: job.name, run: id });
     const args = ["-p", "--permission-mode", "acceptEdits", "--allowedTools", ...(job.allowedTools ?? ["Read", "Glob", "Grep", "Bash"])];
     const timeoutMin = job.timeoutMin ?? 30;
-    const r = await exec(AWB, args, job.cwd ?? home, job.prompt, timeoutMin * 60_000);
-    writeFileSync(out, r.out);
+    const r = await exec(AWB, args, job.cwd, job.prompt, timeoutMin * 60_000);
     const ok = r.code === 0 && !r.timedOut;
+    writeFileSync(out, ok ? (r.stdout ?? r.out) : r.out);
     const end = r.timedOut ? `timeout after ${timeoutMin} min` : ok ? "done" : `exit ${r.code}`;
     finish.run(ok ? "done" : "failed", new Date().toISOString(), end, out, id);
     log(ok ? "info" : "warn", "schedule", "job.end", { job: job.name, run: id, end, output: out });

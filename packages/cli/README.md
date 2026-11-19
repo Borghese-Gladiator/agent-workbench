@@ -103,7 +103,7 @@ The daemon runs the jobs in `$AWB_HOME/schedule.json`. It checks every 30 second
 ]
 ```
 
-`cwd` must be a git repo. The default is `$AWB_HOME`, which is not a repo, and `awb -p` exits at once there. `days` is a list of 0 (Sunday) to 6, default `[1,2,3,4,5]`. `allowedTools` replaces the default `Read, Glob, Grep, Bash`.
+`cwd` is required. It must be a git repo, because `awb -p` exits at once outside one. A job with no `cwd` makes the file not valid. A job that ends well keeps only its standard output in the output file. A failed job keeps the standard error too. `days` is a list of 0 (Sunday) to 6, default `[1,2,3,4,5]`. `allowedTools` replaces the default `Read, Glob, Grep, Bash`.
 
 Each run is a row in the `job_runs` table of `awb.db`, with the state `running`, `done`, `failed` or `stopped`. A run that was open when the daemon stopped becomes `stopped`, and the job starts again the same day. A job that failed does not start again the same day. To start it again, use `awb schedule run`.
 

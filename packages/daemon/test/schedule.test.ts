@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createScheduler, isDue, migrateJobs, nextRun, parseJobs, ScheduleError, type Exec } from "../src/schedule.ts";
 
-const job = { name: "standup", at: "10:00", prompt: "x" };
+const job = { name: "standup", at: "10:00", prompt: "x", cwd: "/repo" };
 const at = (iso: string) => new Date(iso);
 
 function setup(exec: Exec) {
@@ -40,8 +40,9 @@ test("nextRun skips today when it ran, and skips the weekend", () => {
   assert.equal(nextRun(job, at("2026-11-20T11:00:00"), "2026-11-20"), at("2026-11-23T10:00:00").toISOString());
 });
 
-test("parseJobs rejects a bad name, time, prompt, day or a duplicate", () => {
-  const bad = [{ ...job, name: "Bad Name" }, { ...job, at: "25:00" }, { ...job, prompt: "" }, { ...job, days: [7] }];
+test("parseJobs rejects a bad name, time, prompt, day, a missing cwd or a duplicate", () => {
+  const { cwd: _, ...noCwd } = job;
+  const bad = [{ ...job, name: "Bad Name" }, { ...job, at: "25:00" }, { ...job, prompt: "" }, { ...job, days: [7] }, noCwd, { ...job, cwd: "" }];
   for (const j of bad) assert.throws(() => parseJobs(JSON.stringify([j])));
   assert.throws(() => parseJobs(JSON.stringify([job, job])), /two jobs/);
   assert.throws(() => parseJobs("{}"));
@@ -60,6 +61,17 @@ test("a due job writes a running row, then a done row with its output, and does 
   await s.tick(at("2026-11-19T10:05:00"));
   await settle();
   assert.equal(rows().length, 1);
+});
+
+test("a done job keeps only stdout in its output, and a failed job keeps the merged stream", async () => {
+  const done = setup(async () => ({ code: 0, out: "warning\ntext", stdout: "text", timedOut: false }));
+  await done.s.tick(at("2026-11-19T10:01:00"));
+  await done.settle();
+  assert.equal(done.s.output(done.s.runs()[0].id), "text");
+  const failed = setup(async () => ({ code: 3, out: "warning\nboom", stdout: "", timedOut: false }));
+  await failed.s.tick(at("2026-11-19T10:01:00"));
+  await failed.settle();
+  assert.equal(failed.s.output(failed.s.runs()[0].id), "warning\nboom");
 });
 
 test("a failed job is recorded as failed and does not run again the same day", async () => {

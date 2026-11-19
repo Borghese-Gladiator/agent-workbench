@@ -75,7 +75,9 @@ export function killChildren(): number {
   return n;
 }
 
-export function run(cmd: string, args: string[], cwd: string, input?: string, timeoutMs = 0, signal?: AbortSignal): Promise<{ code: number; out: string; timedOut: boolean }> {
+export type RunResult = { code: number; out: string; stdout?: string; timedOut: boolean };
+
+export function run(cmd: string, args: string[], cwd: string, input?: string, timeoutMs = 0, signal?: AbortSignal): Promise<RunResult> {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env, detached: true, shell: needsShell(cmd), ...hide });
     if (child.pid) groups.add(child.pid);
@@ -94,14 +96,15 @@ export function run(cmd: string, args: string[], cwd: string, input?: string, ti
     if (signal?.aborted) kill();
     signal?.addEventListener("abort", kill, { once: true });
     let out = "";
-    child.stdout.on("data", (d) => (out += d));
+    let stdout = "";
+    child.stdout.on("data", (d) => ((out += d), (stdout += d)));
     child.stderr.on("data", (d) => (out += d));
-    child.on("error", (e) => resolve({ code: 127, out: String(e), timedOut }));
+    child.on("error", (e) => resolve({ code: 127, out: String(e), stdout: "", timedOut }));
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
       if (child.pid) groups.delete(child.pid);
       signal?.removeEventListener("abort", kill);
-      resolve({ code: code ?? 1, out, timedOut });
+      resolve({ code: code ?? 1, out, stdout, timedOut });
     });
     child.stdin.end(input ?? "");
   });

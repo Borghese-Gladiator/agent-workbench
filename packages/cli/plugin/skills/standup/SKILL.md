@@ -87,6 +87,6 @@ Add this job to `$AWB_HOME/schedule.json`. The job runs on Monday to Friday, and
 }
 ```
 
-`cwd` must be a git repo. The scheduler default is `$AWB_HOME`, which is not a repo, and `awb -p` then exits at once.
+`cwd` is required, and it must be a git repo. Change the path to a repo on your machine.
 
 To see the text, run `awb schedule run standup`, then `awb schedule output <run id>`.
