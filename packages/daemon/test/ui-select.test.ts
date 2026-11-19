@@ -1,6 +1,40 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { costlyFailures, needsAttention, prGroup, stackCost, stackProgress, timeline } from "../ui/select.ts";
+import { barRows, costlyFailures, filterTasks, lastGate, matchLines, needsAttention, prGroup, stackCost, stackProgress, stepStates, timeline, toneOf } from "../ui/select.ts";
+
+test("toneOf maps a status to a tone, and an unknown status to dim", () => {
+  assert.deepEqual(["done", "failed", "doing", "waiting", "zzz"].map(toneOf), ["ok", "bad", "warn", "dim", "dim"]);
+});
+
+test("stepStates: done, the running task, a failed task, then blocked tasks after it", () => {
+  const s = (status: string) => ({ status });
+  assert.deepEqual(stepStates([s("merged"), s("done"), s("failed"), s("waiting")]), ["done", "done", "failed", "blocked"]);
+  assert.deepEqual(stepStates([s("done"), s("doing"), s("waiting")]), ["done", "running", "waiting"]);
+});
+
+test("filterTasks matches the text in title, branch, repo and id, and the status", () => {
+  const tasks = [{ id: "a1", title: "Footer", branch: "awb/f", repo: "/r/demo", status: "failed" }, { id: "b2", title: "Header", branch: "awb/h", repo: "/r/demo", status: "done" }];
+  assert.deepEqual(filterTasks(tasks, "foot", "all").map((t) => t.id), ["a1"]);
+  assert.deepEqual(filterTasks(tasks, "", "done").map((t) => t.id), ["b2"]);
+  assert.equal(filterTasks(tasks, "DEMO", "all").length, 2);
+});
+
+test("matchLines searches every field of a log line, ignoring case", () => {
+  const lines = [{ event: "gate", reason: "C2 Not Passed" }, { event: "start" }];
+  assert.equal(matchLines(lines, "not passed").length, 1);
+  assert.equal(matchLines(lines, "  ").length, 2);
+  assert.equal(matchLines([{ source: "runner", event: "task.failed" }], "runner.task.failed").length, 1);
+});
+
+test("barRows sorts by cost, scales to the top row, and keeps the limit", () => {
+  assert.deepEqual(barRows({ a: 1, b: 4, c: 2 }, 2), [{ name: "b", usd: 4, pct: 100 }, { name: "c", usd: 2, pct: 50 }]);
+  assert.deepEqual(barRows({}), []);
+});
+
+test("lastGate gives the newest gate of the last attempt, or null", () => {
+  assert.equal(lastGate({ attempts: [] }), null);
+  assert.equal(lastGate({ attempts: [{ gates: [{ n: 1 }] }, { gates: [{ n: 2 }, { n: 3 }] }] })?.n, 3);
+});
 
 test("stackCost sums task cost, and costlyFailures flags only failed tasks above twice the average", () => {
   const usd = { a: 1, b: 1, c: 10 };

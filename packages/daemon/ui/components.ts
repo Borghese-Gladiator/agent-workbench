@@ -1,4 +1,5 @@
 import { html } from "./vendor/htm-preact.js";
+import { toneOf } from "./select.ts";
 
 export type Json = Record<string, any>;
 export type Usage = { input: number; output: number; cache_read: number; cache_creation: number; cost_usd?: number };
@@ -38,18 +39,49 @@ export async function post(u: string, body: unknown): Promise<any> {
 export const taskOf = (d: Data, s: Session) =>
   d.tasks.find((t) => t.id === d.bySession[s.id]) ?? d.tasks.find((t) => t.repo === s.repo && t.branch === s.branch);
 
-export const State = ({ s }: { s: string }) => html`<span class=${"badge " + s}>${s}</span>`;
-export const Pass = ({ pass }: { pass: boolean }) => html`<span class=${pass ? "PASS" : "FAIL"}>${pass ? "PASS" : "FAIL"}</span>`;
-export const Branch = ({ b }: { b?: string | null }) =>
-  b ? html`<span class="mono trunc" title=${b}>${b}</span><button class="plain copy" aria-label=${"Copy branch " + b} onClick=${(e: Event) => (e.stopPropagation(), navigator.clipboard?.writeText(b))}>Copy</button>` : null;
-export const TaskLink =({ t }: { t?: Json }) => (t ? html`<a href=${"#/task/" + t.id}>${t.title}</a>` : null);
+export const Chip = ({ s, label }: { s: string; label?: string }) =>
+  html`<span class=${"chip " + toneOf(s)}><i></i>${label ?? (s === "PASS" ? "Passed" : s === "FAIL" ? "Failed" : s)}</span>`;
+export const State = Chip;
+export const Pass = ({ pass }: { pass: boolean }) => html`<${Chip} s=${pass ? "PASS" : "FAIL"} />`;
 
-const LEVEL: Record<string, string> = { error: "FAIL", warn: "busy", info: "muted" };
+export const Branch = ({ b }: { b?: string | null }) =>
+  b ? html`<span class="mono trunc" title=${b}>${b}</span><button class="copy" aria-label=${"Copy branch " + b} onClick=${(e: Event) => (e.stopPropagation(), navigator.clipboard?.writeText(b))}>Copy</button>` : null;
+export const Id = ({ v }: { v?: string | null }) => (v ? html`<span class="id" title=${v}>${v.slice(0, 8)}</span>` : null);
+export const TaskLink = ({ t }: { t?: Json }) => (t ? html`<a href=${"#/task/" + t.id}>${t.title}</a>` : null);
+
+export const Stat = ({ label, value, tone }: { label: string; value: unknown; tone?: string }) =>
+  html`<div class="stat"><span>${label}</span><b class=${tone ?? ""}>${value}</b></div>`;
+export const Stats = ({ children }: { children?: unknown }) => html`<div class="stats" role="group" aria-label="Summary">${children}</div>`;
+export const Empty = ({ text }: { text: string }) => html`<p class="empty">${text}</p>`;
+export const Loading = () => html`<p class="empty" role="status">Loading…</p>`;
+export const Failure = ({ text }: { text: string }) => html`<p class="callout" role="alert"><b>${text}</b></p>`;
+
+export const Crumbs = ({ items }: { items: [string, string?][] }) =>
+  html`<nav class="crumbs" aria-label="Breadcrumb">${items.map(([label, href], i) => html`${i ? "/" : ""}${href ? html`<a href=${href}>${label}</a>` : html`<span>${label}</span>`}`)}</nav>`;
+
+export const Page = ({ title, crumbs, actions, children }: { title: unknown; crumbs?: [string, string?][]; actions?: unknown; children?: unknown }) =>
+  html`${crumbs ? html`<${Crumbs} items=${crumbs} />` : null}
+    <div class="page-head"><h1 class="title">${title}</h1>${actions ? html`<div class="actions">${actions}</div>` : null}</div>
+    ${children}`;
+
+export const Seg = ({ label, value, options, onPick }: { label: string; value: string; options: [string, string][]; onPick: (v: string) => void }) =>
+  html`<div class="seg" role="group" aria-label=${label}>${options.map(([k, text]) => html`<button aria-pressed=${value === k} onClick=${() => onPick(k)}>${text}</button>`)}</div>`;
+
+const LEVEL: Record<string, string> = { error: "error", warn: "warn" };
+const IDS = new Set(["task", "run", "stack", "session", "attempt", "sha", "repo"]);
+const val = (v: unknown) => (typeof v === "string" ? v : JSON.stringify(v));
 
 export function LogLine({ l }: { l: Json }) {
   const { ts, level, source, event, ...rest } = l;
-  const text =
-    " " + ts.slice(0, 19).replace("T", " ") + " " + source + "." + event + " " +
-    Object.entries(rest).map(([k, v]) => k + "=" + (typeof v === "string" ? v : JSON.stringify(v))).join(" ");
-  return html`<span class=${"badge " + (LEVEL[level] ?? "")}>${level.toUpperCase()}</span><span class=${level === "error" ? "FAIL" : ""}>${text}</span>${"\n"}`;
+  const text = " " + ts.slice(0, 19).replace("T", " ") + " " + source + "." + event + " " + Object.entries(rest).map(([k, v]) => k + "=" + val(v)).join(" ");
+  return html`<span class=${"lv " + (LEVEL[level] ?? "")}>${level.toUpperCase()}</span><span class=${level === "error" ? "FAIL" : ""}>${text}</span>${"\n"}`;
+}
+
+export function LogEntry({ l }: { l: Json }) {
+  const { ts, level, source, event, ...rest } = l;
+  const keys = Object.entries(rest);
+  const brief = String(keys.find(([k]) => k === "reason" || k === "error")?.[1] ?? keys.filter(([k]) => !IDS.has(k)).map(([k, v]) => k + "=" + val(v)).join(" "));
+  return html`<details class="ev"><summary><span class="muted mono">${ts.slice(11, 19)}</span><span class=${"lv " + (LEVEL[level] ?? "")}>${level}</span>
+    <span class="what"><b>${source}.${event}</b> <span class="muted">${brief.length > 140 ? brief.slice(0, 140) + "…" : brief}</span></span></summary>
+    <dl class="kv">${keys.map(([k, v]) => html`<dt>${k}</dt><dd>${val(v)}</dd>`)}<dt>time</dt><dd>${ts}</dd></dl></details>`;
 }
