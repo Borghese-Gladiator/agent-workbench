@@ -30,8 +30,8 @@ A task id or a stack id can be a prefix of 6 or more characters in every command
 | Command | What it does |
 |---|---|
 | `awb stack set` | Reads a stack as JSON on stdin and creates or replaces it. A stack of many tasks gets one branch for each task. Task 1 starts from the current branch, and each later task starts from the task below. |
-| `awb run [stack] [--wait] [--retries N]` | Starts the runner on a stack (default: the newest of the repo). `--wait` returns when the run is `done` or `stopped`, and exits 1 if it is not `done`. |
-| `awb retry <task> [--wait] [--retries N]` | Sets a `failed` task back to `waiting` and starts the runner. It uses the same worktree and branch. |
+| `awb run [stack \| task] [--wait] [--retries N]` | Starts the runner on a stack (default: the newest of the repo), or on one `waiting` task. A task start fails if a task below it is not done. `--wait` returns when the run is `done` or `stopped`, and exits 1 if it is not `done`. |
+| `awb retry <stack \| task> [--wait] [--retries N]` | Sets a `failed` task, or every `failed` task of a stack, back to `waiting` and runs only those tasks. It uses the same worktree and branch. |
 | `awb stop <stack \| task>` | Stops the run and the proof of the current task. The task becomes `failed` with the reason `stopped by awb stop`, and the later tasks stay `waiting`. Exits 1 if nothing runs for the id. |
 | `awb task rm <id...>` | Removes waiting or failed tasks in one transaction. If one id is doing, is shipped or does not exist, nothing is removed. |
 | `awb prove [--rewrite C1,C2]` | Starts the app, writes the missing proof tests with a fresh test-writer session, runs them, and runs the gate. Prints the claim table. Exits 1 if the gate fails. `--rewrite` deletes the tests of those claims first. |
@@ -92,6 +92,31 @@ awb sets no spend limit. It records the cost of each session and test writer.
 
 Logs: every part writes JSON lines to `AWB_HOME/logs/awb.<YYYY-MM-DD>.jsonl`, one file for each UTC day. At 50 MB the day continues in `awb.<YYYY-MM-DD>.1.jsonl`, then `.2`, and so on.
 
+## Scheduled jobs
+
+The daemon runs the jobs in `$AWB_HOME/schedule.json`. It checks every 30 seconds, and each job runs at most once a day. If the daemon is down at the set time, the job runs when the daemon starts, on the same day. The output goes to `$AWB_HOME/schedule/<name>/<YYYY-MM-DD>.md`, and a desktop notice shows the result.
+
+```json
+[
+  { "name": "standup", "at": "10:00", "prompt": "/slack:standup" },
+  { "name": "sentry-triage", "at": "09:00", "cwd": "/path/to/repo", "timeoutMin": 45, "prompt": "/awb:bug-triage <channel> last 24 hours. Skip each issue that already has a PR." }
+]
+```
+
+`days` is a list of 0 (Sunday) to 6, default `[1,2,3,4,5]`. `allowedTools` replaces the default `Read, Glob, Grep, Bash`.
+
+Each run is a row in the `job_runs` table of `awb.db`, with the state `running`, `done`, `failed` or `stopped`. A run that was open when the daemon stopped becomes `stopped`, and the job starts again the same day. A job that failed does not start again the same day. To start it again, use `awb schedule run`.
+
+| Command | Result |
+|---|---|
+| `awb schedule` | Each job with its next run and its last run. Exit code 1 if `schedule.json` is not valid. |
+| `awb schedule runs [--limit n]` | The history of runs. |
+| `awb schedule run <job>` | Starts a job now. |
+| `awb schedule output <run id>` | Prints the output of a run. The id can be the first 8 characters. |
+| `awb logs --source schedule -f` | The log lines of the scheduler. |
+
+The **Schedule** tab of the UI shows the same data, a **Run now** button for each job, and the output of each run.
+
 ## Files in a repo
 
 - **Playbook:** a repo can replace the default playbook with `.awb/playbook.md`.
@@ -100,9 +125,11 @@ Logs: every part writes JSON lines to `AWB_HOME/logs/awb.<YYYY-MM-DD>.jsonl`, on
 
 ## Plugin and hooks
 
-`awb` loads the plugin in `packages/cli/plugin` with `--plugin-dir`. It has three skills:
-- `awb:sentry-fix`: reproduces one Sentry issue with a test that fails with the same exception and frame, fixes it, and writes the before and after output to `$AWB_HOME/sentry/<id>/proof.md`. To ship the fix, the skill makes a task with one `"proof":"test"` claim, and then `awb prove` and `awb ship` run as for any task.
-- `awb:bug-triage`: turns a channel or a list of links into fix and skip verdicts (at most 5 fixes), and writes a report in `$AWB_HOME/triage/`.
+`awb` loads the plugin in `packages/cli/plugin` with `--plugin-dir`. It has five skills. Each verb is one skill. The source (Sentry, Linear, GitHub, Slack) is a file inside the skill.
+- `awb:triage`: gives each item one verdict (`fix`, `answer`, `request`, `route`, `skip`) with evidence, and writes a report in `$AWB_HOME/triage/`. The item can be a Sentry issue, a Linear ticket, a GitHub issue, PR or comment, a Slack thread, a channel, or a list of links. It does not change code and does not post.
+- `awb:fix`: reproduces one Sentry issue with a test that fails with the same exception and frame, fixes it, and writes the before and after output to `$AWB_HOME/sentry/<id>/proof.md`. To ship the fix, the skill makes a task with one `"proof":"test"` claim, and then `awb prove` and `awb ship` run as for any task.
+- `awb:respond`: drafts one reply for a Slack thread, a GitHub comment or a Linear ticket. It posts only after the user approves that draft.
+- `awb:review`: posts one short review comment on a GitHub PR, after the user approves the draft.
 - `awb:worktrees`: makes worktrees in `~/LOCAL_worktrees/<repo>/<branch>`.
 
 The skills use the Slack, Sentry and Linear MCP servers in your `claude` settings. `awb doctor` checks them.

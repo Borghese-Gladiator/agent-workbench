@@ -6,13 +6,13 @@ import { fileURLToPath } from "node:url";
 import { hide, killTree } from "./platform.ts";
 import { run } from "./prove.ts";
 import { envFilePath, findRunFile, parseSetup } from "./run-md.ts";
-import { StackError } from "./stacks.ts";
+import { FINISHED, StackError } from "./stacks.ts";
 import type { RunState, Stacks, Task } from "./stacks.ts";
 import type { Log } from "./log.ts";
 
 export type { RunState };
 export type Session = (task: Task, below: Task[], resume?: boolean, signal?: AbortSignal) => Promise<string | void>;
-export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log; sessionUsd?: (task: Task) => number | null; maxStacks?: number; signal?: AbortSignal };
+export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log; sessionUsd?: (task: Task) => number | null; maxStacks?: number; signal?: AbortSignal; targets?: string[] };
 
 export const STOPPED = "stopped by awb stop";
 
@@ -96,9 +96,14 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
   for (;;) {
     const stack = stacks.get(stackId);
     if (!stack) return end({ state: "stopped", reason: `no stack ${stackId}` });
-    const i = stack.tasks.findIndex((t) => !["done", "merged", "closed"].includes(t.status));
+    const i = stack.tasks.findIndex((t) => !FINISHED.includes(t.status));
     if (i < 0) return end({ state: "done", current: null });
     const task = stack.tasks[i];
+    if (opts.targets) {
+      const left = opts.targets.filter((id) => !FINISHED.includes(stack.tasks.find((t) => t.id === id)?.status ?? "done"));
+      if (!left.length) return end({ state: "done", current: null });
+      if (!left.includes(task.id)) return end({ state: "stopped", current: task.id, reason: `task ${task.id} is ${task.status} and is not a target of this run` });
+    }
     if (task.status !== "waiting") return end({ state: "stopped", current: task.id, reason: `task ${task.id} is ${task.status}` });
     if (opts.signal?.aborted) return end({ state: "stopped", reason: STOPPED });
 
@@ -223,7 +228,7 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
   const active = new Map<string, string>();
   const stops = new Map<string, { ctrl: AbortController; done: Promise<RunState> }>();
   return {
-    start(stackId: string, retries = 1): RunState {
+    start(stackId: string, retries = 1, targets?: string[]): RunState {
       const busy = active.get(stackId);
       if (busy) return runs.get(busy)!;
       const max = opts.maxStacks ?? 2;
@@ -237,7 +242,7 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
       stacks.saveRun(state);
       opts.log?.("info", "runner", "run.start", { run: state.id, stack: stackId, repo: stack.repo });
       const ctrl = new AbortController();
-      const done = runStack(stacks, stackId, session(stack.repo), state, { ...opts, signal: ctrl.signal })
+      const done = runStack(stacks, stackId, session(stack.repo), state, { ...opts, signal: ctrl.signal, targets })
         .catch((err) => {
           Object.assign(state, { state: "stopped", reason: (err as Error).message });
           stacks.saveRun(state);

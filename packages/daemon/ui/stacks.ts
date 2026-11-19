@@ -1,5 +1,6 @@
 import { html, useEffect, useState } from "./vendor/htm-preact.js";
-import { get, post, repoName, usd, type Data, type Json } from "./components.ts";
+import { Branch, Chip, Empty, Failure, get, Id, Loading, Page, post, repoName, usd, type Data, type Json } from "./components.ts";
+import { costlyFailures, stackCost, stackProgress, stepStates } from "./select.ts";
 
 function EditForm({ st, t, onSaved }: { st: Json; t: Json; onSaved: () => void }) {
   const [title, setTitle] = useState<string>(t.title);
@@ -26,15 +27,22 @@ function EditForm({ st, t, onSaved }: { st: Json; t: Json; onSaved: () => void }
       setMsg((err as Error).message);
     }
   };
-  return html`<details><summary>edit</summary>
+  return html`<details><summary>Edit title and claims</summary>
     <form onSubmit=${save}>
       <label>Title<input name="title" value=${title} onInput=${(e: Event) => setTitle((e.target as HTMLInputElement).value)} /></label>
       <label>Claims, one a line: <code>C1: text</code>
         <textarea name="claims" rows="4" value=${claims} onInput=${(e: Event) => setClaims((e.target as HTMLTextAreaElement).value)}></textarea>
       </label>
-      <button>Save</button> <span class="msg muted">${msg}</span>
+      <p><button class="primary">Save</button> <span class="msg muted">${msg}</span></p>
     </form>
   </details>`;
+}
+
+const STEP: Record<string, string> = { done: "done", running: "doing", failed: "failed", blocked: "Blocked", waiting: "waiting" };
+
+function Progress({ tasks }: { tasks: Json[] }) {
+  const { finished, total, current } = stackProgress(tasks);
+  return html`<p class="muted"><progress max=${total} value=${finished} aria-label="Stack progress"></progress> ${finished} of ${total} tasks done${current ? html` · now: <a href=${"#/task/" + current.id}>${current.title}</a>` : null}</p>`;
 }
 
 export function Stacks({ d }: { d: Data }) {
@@ -42,33 +50,36 @@ export function Stacks({ d }: { d: Data }) {
   const [error, setError] = useState("");
   const load = () => get("/api/stacks").then(setList, (e: Error) => setError(e.message));
   useEffect(() => void load(), []);
-  if (error) return html`<p class="FAIL">${error}</p>`;
-  if (!list) return html`<h2>Stacks</h2><p class="muted">Loading…</p>`;
+  if (error) return html`<${Page} title="Stacks"><${Failure} text=${error} /><//>`;
+  if (!list) return html`<${Page} title="Stacks"><${Loading} /><//>`;
+  const costly = costlyFailures(list.flatMap((st) => st.tasks), d.taskUsd);
   const saved = async () => {
     await d.reload();
     await load();
   };
-  return html`<h2>Stacks</h2>
-    ${list.length ? null : html`<p class="muted">No stacks yet.</p>`}
-    ${list.map(
-      (st) => html`<div class="card" key=${st.id + ":" + st.version}>
-        <h3>${repoName(st.repo)} <span class="muted mono">stack ${st.id.slice(0, 8)} · version ${st.version} · base ${st.base}</span></h3>
+  return html`<${Page} title="Stacks">
+    ${list.length ? null : html`<${Empty} text="No stacks yet." />`}
+    ${list.map((st) => {
+      const steps = stepStates(st.tasks);
+      return html`<section class="panel" key=${st.id + ":" + st.version}>
+        <h3>${repoName(st.repo)} <span class="muted">· base <span class="mono">${st.base}</span> · version ${st.version} · <${Id} v=${st.id} /></span></h3>
+        <${Progress} tasks=${st.tasks} />
+        <p class="muted">Stack cost <b class="mono">${usd(stackCost(st.tasks, d.taskUsd))} USD</b></p>
         <table>
-          <thead><tr><th>#</th><th>status</th><th>task</th><th>branch</th><th class="num">USD</th><th>PR</th><th></th></tr></thead>
-          <tbody>
-            ${st.tasks.map(
-              (t: Json, i: number) => html`<tr>
-                <td>${i + 1}</td>
-                <td class=${t.status}>${t.status}</td>
-                <td><a href=${"#/task/" + t.id}>${t.title}</a>${t.fail_reason ? html`<div class="muted">${t.fail_reason}</div>` : null}</td>
-                <td class="mono">${t.branch}</td>
-                <td class="mono num">${usd(d.taskUsd[t.id])}</td>
-                <td>${t.pr_url ? html`<a href=${t.pr_url}>#${t.pr_number}</a>` : null}</td>
-                <td>${t.status === "waiting" ? html`<${EditForm} st=${st} t=${t} onSaved=${saved} />` : null}</td>
-              </tr>`,
-            )}
-          </tbody>
+          <thead><tr><th>#</th><th>State</th><th>Task</th><th>Branch</th><th class="num">USD</th><th>PR</th><th></th></tr></thead>
+          <tbody>${st.tasks.map(
+            (t: Json, i: number) => html`<tr>
+              <td class="muted">${i + 1}</td>
+              <td><${Chip} s=${STEP[steps[i]]} label=${steps[i]} /></td>
+              <td><a href=${"#/task/" + t.id}>${t.title}</a>${t.fail_reason ? html`<span class="note FAIL">${t.fail_reason}</span>` : null}</td>
+              <td><${Branch} b=${t.branch} /></td>
+              <td class="mono num">${usd(d.taskUsd[t.id])}${costly.has(t.id) ? html`<span class="note FAIL">costly failure</span>` : null}</td>
+              <td>${t.pr_url ? html`<a href=${t.pr_url} target="_blank">#${t.pr_number}</a>` : null}</td>
+              <td>${t.status === "waiting" ? html`<${EditForm} st=${st} t=${t} onSaved=${saved} />` : null}</td>
+            </tr>`,
+          )}</tbody>
         </table>
-      </div>`,
-    )}`;
+      </section>`;
+    })}
+  <//>`;
 }

@@ -1,10 +1,12 @@
 ---
-name: sentry-fix
-description: Use when the user gives one Sentry issue (URL, id or short id) and asks to reproduce it, fix it, or prove a fix. Writes a regression test that fails with the same exception and frame as the Sentry event, fixes the code, and records the before and after output. Ends with a skip reason when no code fix is correct.
+name: fix
+description: Use when the user gives one Sentry issue (URL, id or short id), or a `fix` verdict from the triage skill, and asks to reproduce it, fix it, or prove a fix. Writes a regression test that fails with the same exception and frame as the Sentry event, fixes the code, and records the before and after output. Ends with a skip reason when no code fix is correct.
 argument-hint: "<sentry-url-or-short-id>"
 ---
 
-# Sentry fix
+# Fix
+
+The source today is a Sentry issue. If a triage record for the item exists in `$AWB_HOME/triage/`, read its owner and fault frame, and do not repeat steps 1 and 2 for them.
 
 The result is one of these:
 - **Fixed:** a branch with two commits (a test commit, then a fix commit) and a proof file with the before and after output.
@@ -28,7 +30,7 @@ Record these values. Quote them, do not paraphrase:
 
 The fault frame is the deepest frame in code that a Klaviyo repo owns. Third-party and stdlib frames are symptoms. Keep moving up the trace until you find an in-app frame.
 
-Map the path to a repo. For `app`, strip the runtime prefix (`/opt/app/`) to get `src/learning/app/...`. For k-repo, strip `/opt/venv/lib/python*/site-packages/` and add `python/` in front. If the `sentry-triage` skill is available, use its mapping table and its owner lookup.
+Map the path to a repo. For `app`, strip the runtime prefix (`/opt/app/`) to get `src/learning/app/...`. For k-repo, strip `/opt/venv/lib/python*/site-packages/` and add `python/` in front. Use the mapping table and the owner lookup in `../triage/sources/sentry.md`.
 
 The **match key** is the exception type, the file and the function of the fault frame. Step 6 uses it.
 
