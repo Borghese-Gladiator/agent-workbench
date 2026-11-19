@@ -52,4 +52,11 @@ stacks.saveGate(bad, {
 });
 stacks.endAttempt(bad);
 stacks.fail(failed.id, "C2: not passed");
+
+stacks.set({
+  repo: "/tmp/seed-repo-2",
+  branch: "awb/seed-waiting",
+  base: "main",
+  tasks: [{ title: "Seed waiting task", claims: [{ id: "C1", text: "The page shows Hi" }] }],
+});
 store.close();
