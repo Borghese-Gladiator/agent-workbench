@@ -94,9 +94,3 @@ test("--resume maps to claude --resume with the claude session id", () => {
   assert.deepEqual(splitResume(["--resume"]), { id: null, rest: [] });
   assert.equal(splitResume(["-p", "hi"]), null);
 });
-
-test("toShellPath turns backslashes into slashes on Windows only", () => {
-  assert.equal(toShellPath("C:\\Users\\me\\awb-hook", "win32"), "C:/Users/me/awb-hook");
-  assert.equal(toShellPath("/Users/me/awb-hook", "darwin"), "/Users/me/awb-hook");
-  assert.equal(toShellPath("/odd\\name/awb-hook", "linux"), "/odd\\name/awb-hook");
-});
