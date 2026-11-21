@@ -1,6 +1,7 @@
 import { html, useEffect, useRef, useState } from "./vendor/htm-preact.js";
-import { Branch, Chip, Empty, Failure, get, Id, Loading, Page, post, repoName, usd, type Data, type Json } from "./components.ts";
-import { costlyFailures, splitStacks, stackCost, stackProgress, stepStates } from "./select.ts";
+import { Branch, Chip, Empty, Failure, get, Id, Loading, Page, post, repoName, Seg, usd, type Data, type Json } from "./components.ts";
+import { costlyFailures, filterTasks, splitStacks, stackCost, stackProgress, stepStates } from "./select.ts";
+import { STATUS } from "./tasks.ts";
 
 function EditModal({ st, t, onSaved }: { st: Json; t: Json; onSaved: () => void }) {
   const dlg = useRef<HTMLDialogElement | null>(null);
@@ -61,7 +62,7 @@ const readArchived = (): Set<string> => {
   try { return new Set(JSON.parse(localStorage.getItem(KEY) ?? "[]")); } catch { return new Set(); }
 };
 
-function StackPanel({ st, d, costly, onSaved, action }: { st: Json; d: Data; costly: Set<string>; onSaved: () => void; action: unknown }) {
+function StackPanel({ st, d, costly, onSaved, action, rows }: { st: Json; d: Data; costly: Set<string>; onSaved: () => void; action: unknown; rows: Json[] }) {
   const steps = stepStates(st.tasks);
   return html`<section class="panel" key=${st.id + ":" + st.version}>
     <div class="panel-head">
@@ -73,8 +74,10 @@ function StackPanel({ st, d, costly, onSaved, action }: { st: Json; d: Data; cos
     ${st.tasks.length
       ? html`<table class="list">
           <thead><tr><th>#</th><th>State</th><th>Task</th><th>Branch</th><th class="num">USD</th><th>PR</th><th></th></tr></thead>
-          <tbody>${st.tasks.map(
-            (t: Json, i: number) => html`<tr>
+          <tbody>${rows.map(
+            (t: Json) => {
+              const i = st.tasks.indexOf(t);
+              return html`<tr>
               <td class="muted">${i + 1}</td>
               <td class="nowrap"><${Chip} s=${STEP[steps[i]]} label=${steps[i]} /></td>
               <td><a href=${"#/task/" + t.id}>${t.title}</a>${t.fail_reason ? html`<span class="note FAIL">${t.fail_reason}</span>` : null}</td>
@@ -82,7 +85,8 @@ function StackPanel({ st, d, costly, onSaved, action }: { st: Json; d: Data; cos
               <td class="mono num">${usd(d.taskUsd[t.id])}${costly.has(t.id) ? html`<span class="note FAIL">costly failure</span>` : null}</td>
               <td class="pr">${t.pr_url ? html`<a href=${t.pr_url} target="_blank">#${t.pr_number}</a>` : null}</td>
               <td class="end">${t.status === "waiting" ? html`<${EditModal} st=${st} t=${t} onSaved=${onSaved} />` : null}</td>
-            </tr>`,
+            </tr>`;
+            },
           )}</tbody>
         </table>`
       : html`<p class="muted">This stack has no tasks.</p>`}
@@ -93,6 +97,7 @@ export function Stacks({ d }: { d: Data }) {
   const [list, setList] = useState<Json[] | null>(null);
   const [error, setError] = useState("");
   const [archived, setArchived] = useState(readArchived);
+  const [status, setStatus] = useState("all");
   const load = () => get("/api/stacks").then(setList, (e: Error) => setError(e.message));
   useEffect(() => void load(), []);
   if (error) return html`<${Page} title="Stacks"><${Failure} text=${error} /><//>`;
@@ -109,12 +114,19 @@ export function Stacks({ d }: { d: Data }) {
     setArchived(next);
   };
   const { shown, hidden } = splitStacks(list, archived);
+  const rowsOf = (st: Json) => filterTasks(st.tasks, "", status);
+  const matching = shown.filter((st) => rowsOf(st).length || status === "all");
+  const count = matching.reduce((n, st) => n + rowsOf(st).length, 0);
   return html`<${Page} title="Stacks">
-    ${shown.length ? null : html`<${Empty} text=${list.length ? "Every stack is archived." : "No stacks yet."} />`}
-    ${shown.map((st) => html`<${StackPanel} st=${st} d=${d} costly=${costly} onSaved=${saved} action=${html`<button onClick=${() => toggle(st.id)} aria-label=${"Archive stack " + st.id.slice(0, 8)}>Archive</button>`} />`)}
+    <div class="toolbar">
+      <${Seg} label="Status" value=${status} options=${STATUS} onPick=${setStatus} />
+      <span class="muted">${count} ${count === 1 ? "task" : "tasks"}</span>
+    </div>
+    ${matching.length ? null : html`<${Empty} text=${!list.length ? "No stacks yet." : shown.length ? "No task matches." : "Every stack is archived."} />`}
+    ${matching.map((st) => html`<${StackPanel} st=${st} rows=${rowsOf(st)} d=${d} costly=${costly} onSaved=${saved} action=${html`<button onClick=${() => toggle(st.id)} aria-label=${"Archive stack " + st.id.slice(0, 8)}>Archive</button>`} />`)}
     ${hidden.length
       ? html`<details><summary>Archived (${hidden.length})</summary>
-          ${hidden.map((st) => html`<${StackPanel} st=${st} d=${d} costly=${costly} onSaved=${saved} action=${archived.has(st.id) ? html`<button onClick=${() => toggle(st.id)} aria-label=${"Restore stack " + st.id.slice(0, 8)}>Restore</button>` : null} />`)}
+          ${hidden.map((st) => html`<${StackPanel} st=${st} rows=${st.tasks} d=${d} costly=${costly} onSaved=${saved} action=${archived.has(st.id) ? html`<button onClick=${() => toggle(st.id)} aria-label=${"Restore stack " + st.id.slice(0, 8)}>Restore</button>` : null} />`)}
         </details>`
       : null}
   <//>`;

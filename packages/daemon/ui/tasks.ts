@@ -2,7 +2,7 @@ import { html, useState } from "./vendor/htm-preact.js";
 import { Branch, Chip, Empty, Page, repoName, Seg, usd, type Data } from "./components.ts";
 import { filterTasks, SORT_START, sortTasks, type SortDir, type SortKey } from "./select.ts";
 
-const STATUS: [string, string][] = [["all", "All"], ["doing", "Running"], ["failed", "Failed"], ["waiting", "Waiting"], ["done", "Done"], ["merged", "Merged"]];
+export const STATUS: [string, string][] = [["all", "All"], ["waiting", "Waiting"], ["doing", "Running"], ["failed", "Failed"], ["done", "Done"], ["merged", "Merged"], ["closed", "Closed"]];
 
 function Th({ k, label, sort, onSort, cls }: { k: SortKey; label: string; sort: [SortKey, SortDir | "none"]; onSort: (k: SortKey) => void; cls?: string }) {
   const on = sort[0] === k && sort[1] !== "none";

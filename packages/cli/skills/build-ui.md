@@ -23,7 +23,7 @@ Unless something else is specified:
 When the app has no theme, use the awb default design system in the `theme/` folder next to this file:
 
 1. Run `npx shadcn@latest init`.
-2. Replace the token blocks (`:root`, `.dark`, `@theme inline`) in the generated CSS file with `theme/globals.css`.
+2. Replace the token blocks (`:root`, `.dark`, `@theme inline`) and the `@layer base` block in the generated CSS file with `theme/globals.css`. The `@layer base` block sets the 13px base size.
 3. Copy `theme/design.md` to `design.md` at the app root. Change the product name. Change the accent only if the task asks for a brand color.
 4. Every color, radius and size in a component comes from those tokens. No hex values and no arbitrary values like `mt-[13px]` in components.
 
@@ -31,21 +31,22 @@ Dark mode: toggle the `dark` class on `<html>`. Default to the system setting.
 
 ## 4. Design rules
 
-The look is restrained and product-like: neutral surfaces, one accent, strong type, thin borders. Coherent beats novel.
+The look is dense and quiet, in the style of Linear: neutral surfaces, one accent, small type, thin borders. Coherent beats novel. When this section and `design.md` differ, `design.md` wins.
 
 Composition:
 - Build the shell first: sidebar + header + main, or top nav + constrained main.
-- Page title and description top-left. The one primary action top-right.
+- A breadcrumb top-left in a 40px header. The one primary action top-right.
 - Every screen answers: where am I, what matters most, what can I do next.
 - Exactly one filled primary button per region.
 - Use whitespace and separators first. Use a Card only for a real distinct object.
-- Use a table for tabular data, not a card grid. Right-align numbers, use `tabular-nums`.
+- Show records as dense 32px rows, not a card grid. Right-align numbers, use `tabular-nums`.
+- Add a Command palette on `Cmd+K`.
 
 Type and space:
-- Sizes 12 / 14 / 16 / 20 / 24 px. 30+ only on marketing pages.
+- Use the type ramp in `design.md`. The base size is 13px. 30+ only on marketing pages.
 - Weights: normal for body, medium for labels and controls, semibold for headings.
 - 4px rhythm: 4, 8, 12, 16, 24, 32, 48, 64. Use `gap-*`, not ad hoc margins.
-- Radius: 6–8px controls, 8–12px panels. Pills only for badges and segmented controls.
+- Radius: 6px controls, 8px panels. Pills only for badges and segmented controls.
 
 Do not use: decorative gradients, glassmorphism, glows, background blobs, heavy shadows, rainbow palettes, giant hero text in an app, centered dashboards, cards inside cards, a border around every region, icons in colored circles, fake charts, decorative animation.
 
@@ -108,3 +109,4 @@ Add these claims to the task, so `awb prove` checks the PWA:
 - 360px and 1440px both look intentional.
 - Loading, empty and error states exist.
 - You removed every decoration that adds no meaning.
+- You took a screenshot of each main screen, in dark mode at 1440px, and compared it with the checks in `design.md`. Fix each difference before you commit.

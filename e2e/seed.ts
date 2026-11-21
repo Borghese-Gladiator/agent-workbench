@@ -53,4 +53,23 @@ stacks.saveGate(bad, {
 });
 stacks.endAttempt(bad);
 stacks.fail(failed.id, "C2: not passed");
+
+stacks.set({
+  repo: "/tmp/seed-repo-2",
+  branch: "awb/seed-waiting",
+  base: "main",
+  tasks: [{ title: "Seed waiting task", claims: [{ id: "C1", text: "The page shows Hi" }] }],
+});
+
+const { stack: shipped } = stacks.set({
+  repo: "/tmp/seed-repo-3",
+  branch: "awb/seed-shipped",
+  base: "main",
+  tasks: [
+    { title: "Seed merged task", claims: [{ id: "C1", text: "The page shows Yes" }] },
+    { title: "Seed closed task", claims: [{ id: "C1", text: "The page shows No" }] },
+  ],
+});
+stacks.setStatus(shipped.tasks[0].id, "merged");
+stacks.setStatus(shipped.tasks[1].id, "closed");
 store.close();
