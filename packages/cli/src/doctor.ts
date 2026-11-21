@@ -1,8 +1,10 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { findDaemon } from "./home.ts";
+import { hookCommand } from "./launch.ts";
+import { createRequire } from "node:module";
 import { readLog } from "../../daemon/src/log.ts";
 
 export type Check = { name: string; ok: boolean; detail: string; fix?: string };
@@ -78,6 +80,44 @@ function mcpListing(): string | null {
   }
 }
 
+const playwrightCli = () => {
+  try {
+    return createRequire(import.meta.url).resolve("@playwright/test/cli");
+  } catch {
+    return "@playwright/test/cli.js";
+  }
+};
+
+export function toolCheck(name: string, cmd: string, args: string[], fix: string): Check {
+  const r = spawnSync(cmd, args, { encoding: "utf8", timeout: 20_000, windowsHide: true });
+  if (r.error || r.status !== 0) return { name, ok: false, detail: r.error ? r.error.message : `exit ${r.status}: ${(r.stderr || r.stdout).trim().slice(0, 200)}`, fix };
+  return { name, ok: true, detail: (r.stdout || r.stderr).trim().split("\n")[0] };
+}
+
+export async function hookCheck(home: string, daemon: { port: number } | null): Promise<Check> {
+  const fix = "install Git for Windows and run awb from a shell where sh is on the PATH";
+  if (!daemon) return { name: "hook", ok: false, detail: "the daemon is not running, so the hook cannot be tested", fix: "awb daemon start" };
+  const session = await fetch(`http://127.0.0.1:${daemon.port}/api/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ repo: "/doctor", worktree: "/doctor", branch: "doctor", pid: process.pid }),
+  }).then((r) => r.json() as Promise<{ id: string }>);
+  try {
+    const r = spawnSync("sh", ["-c", `${hookCommand()}`], {
+      input: JSON.stringify({ hook_event_name: "Notification" }),
+      env: { ...process.env, AWB_HOME: home, AWB_SESSION_ID: session.id },
+      encoding: "utf8",
+      timeout: 15_000,
+      windowsHide: true,
+    });
+    const events = (await (await fetch(`http://127.0.0.1:${daemon.port}/api/sessions/${session.id}/events`)).json()) as unknown[];
+    const ok = r.status === 0 && events.length === 1;
+    return { name: "hook", ok, detail: ok ? "the hook script ran under sh and the event reached the daemon" : `exit ${r.status}, ${events.length} events: ${(r.error?.message ?? r.stderr ?? "").trim().slice(0, 200)}`, fix };
+  } finally {
+    await fetch(`http://127.0.0.1:${daemon.port}/api/sessions/${session.id}/end`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => {});
+  }
+}
+
 export async function doctor(home: string): Promise<boolean> {
   const checks: Check[] = [];
 
@@ -87,6 +127,10 @@ export async function doctor(home: string): Promise<boolean> {
   } catch {
     checks.push({ name: "claude", ok: false, detail: "not found on PATH", fix: "npm i -g @anthropic-ai/claude-code" });
   }
+
+  checks.push(toolCheck("sh", "sh", ["-c", "echo sh"], "install Git for Windows and put its usr/bin on the PATH"));
+  checks.push(toolCheck("git", "git", ["--version"], "install git and put it on the PATH"));
+  checks.push(toolCheck("playwright", process.execPath, [playwrightCli(), "--version"], "npm ci, then npx playwright install chromium"));
 
   const chromium = chromiumInstalled();
   checks.push({
@@ -103,6 +147,8 @@ export async function doctor(home: string): Promise<boolean> {
     detail: daemon ? `pid ${daemon.pid} on port ${daemon.port}` : "not running",
     fix: "awb daemon start",
   });
+
+  checks.push(await hookCheck(home, daemon));
 
   checks.push(...mcpChecks(mcpListing()));
 

@@ -1,6 +1,6 @@
 import { spawn, execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { needsShell, openCommand } from "../../daemon/src/platform.ts";
 import { runFilePath } from "../../daemon/src/run-md.ts";
 import { awbHome, ensureDaemon, findDaemon, api, reportCliError } from "./home.ts";
@@ -27,7 +27,7 @@ if (cmd === "--help" || cmd === "-h" || cmd === "help" || (wantsHelp && helpFor(
 
 console.error(`awb: AWB_HOME=${home}`);
 
-const COMMANDS = ["ui", "doctor", "daemon", "stack", "prove", "ship", "run", "retry", "stop", "show", "tasks", "cost", "logs", "task", "sessions", "wt", "schedule", "logging"];
+const COMMANDS = ["ui", "doctor", "daemon", "stack", "prove", "ship", "run", "retry", "stop", "show", "tasks", "cost", "logs", "task", "sessions", "wt", "schedule", "logging", "limit", "stacks", "cleanup"];
 let lastError = "";
 const printError = console.error;
 console.error = (...args: unknown[]) => {
@@ -63,16 +63,27 @@ switch (cmd) {
     process.exitCode = loggingCmd(home, rest[0] === "down" ? ["down"] : ["up", "-d"]);
     break;
   case "daemon":
-    await daemonCmd(rest[0]);
+    await daemonCmd(rest[0], rest.includes("--when-idle"));
     break;
   case "stack":
-    if (rest[0] !== "set") {
-      console.error("usage: awb stack set < stack.json");
+    if (rest[0] === "show") process.exitCode = await stacksCmd(rest.slice(1).find((a) => !a.startsWith("-")), rest.includes("--json"));
+    else if (rest[0] === "set") process.exitCode = await stackSet(rest.includes("--json"));
+    else {
+      console.error("usage: awb stack set < stack.json | awb stack show <stack id>");
       process.exitCode = 2;
-      break;
     }
-    process.exitCode = await stackSet(rest.includes("--json"));
     break;
+  case "stacks":
+    process.exitCode = await stacksCmd(undefined, rest.includes("--json"));
+    break;
+  case "limit":
+    process.exitCode = await limitCmd(positional(), rest.includes("--json"));
+    break;
+  case "cleanup": {
+    const { killLeftovers } = await import("../../daemon/src/process.ts");
+    console.log(`stopped ${killLeftovers(join(home, "apps.json"))} leftover app servers`);
+    break;
+  }
   case "prove":
     process.exitCode = await proveCmd(rest.includes("--json"), flag("--rewrite")?.split(",").filter(Boolean) ?? []);
     break;
@@ -80,13 +91,15 @@ switch (cmd) {
     process.exitCode = await shipCmd(rest.includes("--json"));
     break;
   case "run":
-    process.exitCode = await runCmd(positional(), rest.includes("--json"), rest.includes("--wait"), flag("--retries"));
+    process.exitCode = rest.includes("--all-stopped")
+      ? await resumeAllCmd(rest.includes("--json"), flag("--retries"))
+      : await runCmd(positional(), rest.includes("--json"), rest.includes("--wait"), flag("--retries"));
     break;
   case "retry":
     process.exitCode = await retryCmd(positional(), rest.includes("--json"), rest.includes("--wait"), flag("--retries"));
     break;
   case "stop":
-    process.exitCode = await stopCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"));
+    process.exitCode = await stopCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"), rest.includes("--after-task"));
     break;
   case "show":
     process.exitCode = await showCmd(rest.find((a) => !a.startsWith("-")), rest.includes("--json"));
@@ -165,13 +178,21 @@ async function scheduleCmd(args: string[]): Promise<number> {
   return 2;
 }
 
-async function daemonCmd(sub: string | undefined) {
+async function daemonCmd(sub: string | undefined, whenIdle = false) {
   if (sub === "start") {
     const d = await ensureDaemon(home);
     console.log(`daemon pid ${d.pid} on port ${d.port}`);
   } else if (sub === "stop") {
     const d = await findDaemon(home);
     if (!d) return console.log("daemon is not running");
+    if (whenIdle) {
+      for (;;) {
+        const idle = await api(d, "/api/idle").catch(() => null);
+        if (!idle || idle.running + idle.proofs + idle.busy === 0) break;
+        console.error(`awb: waiting for ${idle.running} runs, ${idle.proofs} proofs and ${idle.busy} prove or ship calls to end`);
+        await new Promise((ok) => setTimeout(ok, 5000));
+      }
+    }
     process.kill(d.pid, "SIGTERM");
     console.log(`stopped daemon pid ${d.pid}`);
   } else if (sub === "status") {
@@ -179,7 +200,7 @@ async function daemonCmd(sub: string | undefined) {
     console.log(d ? `daemon pid ${d.pid} on port ${d.port}` : "daemon is not running");
     process.exitCode = d ? 0 : 1;
   } else {
-    console.error("usage: awb daemon start|stop|status");
+    console.error("usage: awb daemon start|stop [--when-idle]|status");
     process.exitCode = 2;
   }
 }
@@ -338,19 +359,84 @@ async function retryCmd(id: string | undefined, json: boolean, wait: boolean, re
   }
 }
 
-async function stopCmd(id: string | undefined, json: boolean): Promise<number> {
+async function stopCmd(id: string | undefined, json: boolean, afterTask = false): Promise<number> {
   if (!id) {
-    console.error("usage: awb stop <stack id | task id>");
+    console.error("usage: awb stop <stack id | task id> [--after-task]");
     return 2;
   }
   const d = await ensureDaemon(home);
   try {
-    const r = await api(d, "/api/stop", { id });
+    const r = await api(d, "/api/stop", { id, afterTask });
     if (json) console.log(JSON.stringify(r, null, 2));
     else {
       if (r.run) printRun(r.run, false);
+      if (r.afterTask) console.log("the run ends after the current task");
       for (const t of r.proofs) console.log(`stopped the proof of task ${t}`);
       for (const pid of r.sessions ?? []) console.log(`sent SIGTERM to session pid ${pid}`);
+    }
+    return 0;
+  } catch (err) {
+    console.error(`awb: ${(err as Error).message}`);
+    return 1;
+  }
+}
+
+async function limitCmd(n: string | undefined, json: boolean): Promise<number> {
+  const d = await ensureDaemon(home);
+  try {
+    const r = n === undefined ? await api(d, "/api/limit") : await api(d, "/api/limit", { limit: n });
+    console.log(json ? JSON.stringify(r, null, 2) : `stack limit ${r.limit}, ${r.running} running`);
+    return 0;
+  } catch (err) {
+    console.error(`awb: ${(err as Error).message}`);
+    return 1;
+  }
+}
+
+async function resumeAllCmd(json: boolean, retries?: string): Promise<number> {
+  const d = await ensureDaemon(home);
+  try {
+    const r = await api(d, "/api/resume-runs", { retries });
+    if (json) console.log(JSON.stringify(r, null, 2));
+    else {
+      for (const x of r.started) printRun(x, false);
+      for (const x of r.skipped) console.log(`skipped stack ${x.stack}: ${x.reason}`);
+      if (!r.started.length && !r.skipped.length) console.log("no run was stopped by a daemon restart");
+    }
+    return 0;
+  } catch (err) {
+    console.error(`awb: ${(err as Error).message}`);
+    return 1;
+  }
+}
+
+async function stacksCmd(id: string | undefined, json: boolean): Promise<number> {
+  const d = await ensureDaemon(home);
+  try {
+    const all = (await api(d, "/api/stacks")) as any[];
+    const runs = (await api(d, "/api/runs?limit=200")) as any[];
+    const lastRun = (stackId: string) => runs.find((r) => r.stackId === stackId);
+    if (id) {
+      const matches = all.filter((s) => s.id.startsWith(id));
+      if (matches.length !== 1) throw new Error(matches.length ? `stack id prefix ${id} matches more than one stack` : `no stack ${id}`);
+      const s = matches[0];
+      const out = { ...s, runs: runs.filter((r) => r.stackId === s.id) };
+      if (json) console.log(JSON.stringify(out, null, 2));
+      else {
+        console.log(`stack ${s.id}  ${s.repo}  base ${s.base}  version ${s.version}`);
+        for (const t of s.tasks) console.log(`  task ${t.id}  ${t.status.padEnd(7)} ${t.branch}  ${t.title}${t.fail_reason ? `  (${t.fail_reason})` : ""}`);
+        for (const r of out.runs) console.log(`  run ${r.id}  ${r.state}  ${r.started_at.slice(0, 16)}${r.reason ? `  (${r.reason})` : ""}`);
+      }
+      return 0;
+    }
+    if (json) console.log(JSON.stringify(all.map((s) => ({ ...s, run: lastRun(s.id) ?? null })), null, 2));
+    else {
+      if (!all.length) console.log("no stacks");
+      for (const s of all) {
+        const r = lastRun(s.id);
+        const states = s.tasks.map((t: any) => t.status).join(",");
+        console.log(`${s.id.slice(0, 8)}  ${basename(s.repo).padEnd(16)} ${r ? `run ${r.id.slice(0, 8)} ${r.state}`.padEnd(24) : "no run".padEnd(24)} ${states}`);
+      }
     }
     return 0;
   } catch (err) {

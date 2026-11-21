@@ -7,16 +7,33 @@ Start the daemon and print the UI address. Open the UI in a browser.
   doctor: `usage: awb doctor
 
 Check the setup. Exit with code 1 if a check fails.`,
-  daemon: `usage: awb daemon start|stop|status
+  daemon: `usage: awb daemon start|stop [--when-idle]|status
 
   start    Start the daemon. Print its pid and port.
   stop     Stop the daemon.
+           --when-idle  Wait until no run, proof or ship is active, then stop.
   status   Print the pid and port. Exit with code 1 if the daemon is not running.`,
   stack: `usage: awb stack set [--json] < stack.json
+       awb stack show <stack id> [--json]
 
-Read a stack as JSON on standard input. Send it to the daemon.
+  set    Read a stack as JSON on standard input. Send it to the daemon.
+  show   Show the tasks and the runs of one stack.
 
   --json   Print the result as JSON.`,
+  stacks: `usage: awb stacks [--json]
+
+List the stacks with their ids, their last run and their task states.
+
+  --json   Print the result as JSON.`,
+  limit: `usage: awb limit [n] [--json]
+
+Show or set the number of stacks that run at the same time. The daemon keeps the value in AWB_HOME/config.json.
+The value is from 1 to 5. A lower limit never stops a run. It refuses new runs until fewer are left.
+
+  --json   Print the result as JSON.`,
+  cleanup: `usage: awb cleanup
+
+Stop the app servers that an earlier proof left running.`,
   prove: `usage: awb prove [--json] [--rewrite a,b]
 
 Run the proof checks.
@@ -29,8 +46,11 @@ Ship the work.
 
   --json   Print the result as JSON.`,
   run: `usage: awb run <stack id | task id> [--json] [--wait] [--retries N]
+       awb run --all-stopped [--retries N] [--json]
 
 Start a run for a stack or a task.
+With --all-stopped, start again every run that a daemon restart stopped, from its first waiting task.
+The setting AWB_AUTORESUME=1 does this when the daemon starts.
 
   --wait        Wait for the run to end.
   --retries N   Set the number of retries.
@@ -42,10 +62,11 @@ Retry a failed stack or task.
   --wait        Wait for the run to end.
   --retries N   Set the number of retries.
   --json        Print the result as JSON.`,
-  stop: `usage: awb stop <stack id | task id> [--json]
+  stop: `usage: awb stop <stack id | task id> [--after-task] [--json]
 
 Stop a stack or a task.
 
+  --after-task   Let the current task end. Start no next task. The run ends with the reason "stopped by you".
   --json   Print the result as JSON.`,
   show: `usage: awb show <stack id | task id> [--json]
 

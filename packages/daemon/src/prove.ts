@@ -79,7 +79,9 @@ export function gateFromDisk(claims: Claim[], folder: string, worktree: string):
   const read = (f: string) => (existsSync(join(proof, f)) ? readFileSync(join(proof, f), "utf8").trim() : "");
   const report: Report = read("report.json") ? JSON.parse(read("report.json")) : { suites: [] };
   if (read("junit.xml")) report.suites.push(...junitReport(read("junit.xml")).suites);
+  const startError = read("report.json") ? undefined : read("run.log").split("\n").filter(Boolean).slice(0, 3).join(" ").slice(0, 300) || undefined;
   return runGate({
+    startError,
     claims,
     report,
     head: git(worktree, "rev-parse", "HEAD"),

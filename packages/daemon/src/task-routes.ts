@@ -9,7 +9,8 @@ import { readRunFile, seedDir } from "./run-md.ts";
 import { costReport, costText } from "./cost.ts";
 import type { DatabaseSync } from "node:sqlite";
 import { ship, ShipRefused, syncStatus } from "./ship.ts";
-import { retryCount, type createRunner } from "./runner.ts";
+import { resumeStopped, retryCount, type createRunner } from "./runner.ts";
+import { currentLimit, setStackLimit } from "./config.ts";
 
 import { TYPES, branchDiff, carriedClaims, costOf, proofFile, stopSessions, toolCallsOf, type Json } from "./task-helpers.ts";
 
@@ -387,6 +388,35 @@ export function taskRoutes(
       }
     }
 
+    if (req.method === "GET" && url.pathname === "/api/limit") {
+      return send(200, { limit: currentLimit(home), running: runner.count() }), true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/limit") {
+      const b = await body();
+      try {
+        const limit = setStackLimit(home, b.limit);
+        log("info", "runner", "limit", { limit });
+        return send(200, { limit, running: runner.count() }), true;
+      } catch (err) {
+        return fail(err), true;
+      }
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/idle") {
+      return send(200, { running: runner.count(), proofs: proofs.size, busy: running.size }), true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/resume-runs") {
+      const b = await body();
+      try {
+        const r = resumeStopped(stacks, runner, retryCount(b.retries));
+        return send(200, r), true;
+      } catch (err) {
+        return fail(err), true;
+      }
+    }
+
     if (req.method === "POST" && url.pathname === "/api/stop") {
       const b = await body();
       const id = String(b.id ?? "");
@@ -397,6 +427,12 @@ export function taskRoutes(
         return fail(err), true;
       }
       const { stack, task } = target;
+      if (b.afterTask) {
+        const r = runner.stopAfterTask(stack.id);
+        if (!r) return send(409, { error: `no run is active for stack ${stack.id}` }), true;
+        log("info", "runner", "stop.after-task", { id, stack: stack.id, task: r.current });
+        return send(200, { run: r, proofs: [], sessions: [], afterTask: true }), true;
+      }
       const done = !task || runner.owns(task.id) ? runner.stop(stack.id) : null;
       const proof = (task ? [task] : stack.tasks).filter((t) => proofs.has(t.id));
       for (const x of proof) proofs.get(x.id)!.abort();

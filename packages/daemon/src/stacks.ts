@@ -33,6 +33,8 @@ export function parseSince(v: string, now = Date.now()): string {
 
 export type RunState = { id: string; stackId: string; state: "running" | "done" | "stopped"; current: string | null; reason: string | null; retries?: number };
 
+export const RESTART_REASON = "the daemon restarted while the task ran";
+
 export const FINISHED: string[] = ["done", "merged", "closed"];
 
 export type Stack = { id: string; repo: string; base: string | null; version: number; created_at: string; tasks: Task[] };
@@ -186,6 +188,8 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
        FROM runs r LEFT JOIN tasks t ON t.id = r.current LEFT JOIN stacks s ON s.id = r.stack_id ORDER BY r.started_at DESC, r.rowid DESC LIMIT ?`,
     ),
     stopRuns: db.prepare("UPDATE runs SET state = 'stopped', reason = ?, ended_at = ? WHERE state = 'running'"),
+    restarted: db.prepare("SELECT DISTINCT stack_id FROM runs WHERE state = 'stopped' AND reason = 'daemon restart'"),
+    resumed: db.prepare("UPDATE runs SET reason = 'daemon restart, resumed' WHERE state = 'stopped' AND reason = 'daemon restart'"),
     doingTasks: db.prepare("SELECT * FROM tasks WHERE status = 'doing'"),
     openSessionPids: db.prepare(
       `SELECT DISTINCT s.pid FROM attempts a JOIN sessions s ON s.id = a.session_id
@@ -404,8 +408,14 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
       const live = (t: Task) => (q.openSessionPids.all(t.id) as { pid: number }[]).some((s) => isAlive(s.pid));
       const alive = doing.filter(live);
       const tasks = doing.filter((t) => !alive.includes(t));
-      for (const t of tasks) q.setFail.run("the daemon restarted while the task ran", t.id);
+      for (const t of tasks) q.setFail.run(RESTART_REASON, t.id);
       return { runs, tasks: tasks.map((t) => t.id), alive: alive.map((t) => t.id) };
+    },
+    restartedStacks(): string[] {
+      return (q.restarted.all() as { stack_id: string }[]).map((r) => r.stack_id);
+    },
+    markResumed() {
+      q.resumed.run();
     },
     saveGate(attemptId: string, g: GateResult) {
       q.addGate.run(attemptId, g.head, g.pass ? 1 : 0, JSON.stringify(g), new Date().toISOString());

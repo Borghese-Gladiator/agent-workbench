@@ -6,15 +6,17 @@ import { fileURLToPath } from "node:url";
 import { hide, killTree } from "./platform.ts";
 import { run } from "./prove.ts";
 import { envFilePath, findRunFile, parseSetup } from "./run-md.ts";
-import { FINISHED, StackError } from "./stacks.ts";
+import { FINISHED, RESTART_REASON, StackError } from "./stacks.ts";
 import type { RunState, Stacks, Task } from "./stacks.ts";
 import type { Log } from "./log.ts";
 
 export type { RunState };
 export type Session = (task: Task, below: Task[], resume?: boolean, signal?: AbortSignal) => Promise<string | void>;
-export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log; sessionUsd?: (task: Task) => number | null; maxStacks?: number; signal?: AbortSignal; targets?: string[] };
+export type RunOpts = { onEnd?: (r: RunState) => void; log?: Log; sessionUsd?: (task: Task) => number | null; maxStacks?: number | (() => number); signal?: AbortSignal; targets?: string[]; softStop?: () => boolean };
 
 export const STOPPED = "stopped by awb stop";
+
+export const STOPPED_BY_YOU = "stopped by you";
 
 export const RESUME_PROMPT = "Continue the task. The last session stopped on an API error.";
 
@@ -98,6 +100,7 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
     if (!stack) return end({ state: "stopped", reason: `no stack ${stackId}` });
     const i = stack.tasks.findIndex((t) => !FINISHED.includes(t.status));
     if (i < 0) return end({ state: "done", current: null });
+    if (opts.softStop?.()) return end({ state: "stopped", current: stack.tasks[i].id, reason: STOPPED_BY_YOU });
     const task = stack.tasks[i];
     if (opts.targets) {
       const left = opts.targets.filter((id) => !FINISHED.includes(stack.tasks.find((t) => t.id === id)?.status ?? "done"));
@@ -227,13 +230,14 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
   const runs = new Map<string, RunState>();
   const active = new Map<string, string>();
   const stops = new Map<string, { ctrl: AbortController; done: Promise<RunState> }>();
+  const soft = new Set<string>();
   return {
     start(stackId: string, retries = 1, targets?: string[]): RunState {
       const busy = active.get(stackId);
       if (busy) return runs.get(busy)!;
-      const max = opts.maxStacks ?? 2;
+      const max = (typeof opts.maxStacks === "function" ? opts.maxStacks() : opts.maxStacks) ?? 2;
       if (active.size >= max) {
-        throw new StackError(`${active.size} stacks are running and the limit is ${max} (AWB_MAX_STACKS, at most ${MAX_STACKS}); wait for one to end`);
+        throw new StackError(`${active.size} stacks are running and the limit is ${max} (awb limit <n>, at most ${MAX_STACKS}); wait for one to end`);
       }
       const stack = stacks.get(stackId)!;
       const state: RunState = { id: randomUUID(), stackId, state: "running", current: null, reason: null, retries };
@@ -242,7 +246,7 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
       stacks.saveRun(state);
       opts.log?.("info", "runner", "run.start", { run: state.id, stack: stackId, repo: stack.repo });
       const ctrl = new AbortController();
-      const done = runStack(stacks, stackId, session(stack.repo), state, { ...opts, signal: ctrl.signal, targets })
+      const done = runStack(stacks, stackId, session(stack.repo), state, { ...opts, signal: ctrl.signal, targets, softStop: () => soft.has(stackId) })
         .catch((err) => {
           Object.assign(state, { state: "stopped", reason: (err as Error).message });
           stacks.saveRun(state);
@@ -250,6 +254,7 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
         .finally(() => {
           active.delete(stackId);
           stops.delete(stackId);
+          soft.delete(stackId);
           const level = state.state === "done" ? "info" : "warn";
           opts.log?.(level, "runner", "run.end", { run: state.id, stack: stackId, task: state.current, state: state.state, reason: state.reason });
           try {
@@ -268,6 +273,15 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
       s.ctrl.abort();
       return s.done;
     },
+    stopAfterTask(stackId: string): RunState | null {
+      const busy = active.get(stackId);
+      if (!busy) return null;
+      soft.add(stackId);
+      return runs.get(busy)!;
+    },
+    count() {
+      return active.size;
+    },
     get(id: string) {
       return runs.get(id) ?? stacks.run(id);
     },
@@ -275,4 +289,26 @@ export function createRunner(stacks: Stacks, session: (repo: string) => Session,
       return [...active.values()].some((runId) => runs.get(runId)?.current === taskId);
     },
   };
+}
+
+export function resumeStopped(stacks: Stacks, runner: ReturnType<typeof createRunner>, retries = 1) {
+  const started: RunState[] = [];
+  const skipped: { stack: string; reason: string }[] = [];
+  for (const stackId of stacks.restartedStacks()) {
+    const stack = stacks.get(stackId);
+    if (!stack) continue;
+    stack.tasks.filter((t) => t.status === "failed" && t.fail_reason?.startsWith(RESTART_REASON)).forEach((t) => stacks.retry(t.id));
+    const next = stacks.get(stackId)!.tasks.find((t) => !FINISHED.includes(t.status));
+    if (!next || next.status !== "waiting") {
+      skipped.push({ stack: stackId, reason: next ? `task ${next.id} is ${next.status}` : "every task is finished" });
+      continue;
+    }
+    try {
+      started.push(runner.start(stackId, retries));
+    } catch (err) {
+      skipped.push({ stack: stackId, reason: (err as Error).message });
+    }
+  }
+  stacks.markResumed();
+  return { started, skipped };
 }

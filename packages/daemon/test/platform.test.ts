@@ -31,13 +31,13 @@ test("AWB_NOTIFY_CMD wins on every platform", () => {
   assert.deepEqual(notifyCommand("t", "b", "/my/cmd", "win32"), { cmd: "/my/cmd", args: ["t", "b"] });
 });
 
-test("every spawn and execFileSync call in src passes windowsHide, unless it shares the terminal", () => {
+test("every spawn, spawnSync, execFile and execFileSync call in src passes windowsHide, unless it shares the terminal", () => {
   const files = execFileSync("git", ["ls-files", "packages/*/src/*.ts"], { encoding: "utf8" }).split("\n").filter(Boolean);
   const bad = files.flatMap((f) => {
     const lines = readFileSync(f, "utf8").split("\n");
     return lines.flatMap((l, i) => {
-      if (!/\b(spawn|execFileSync)\(/.test(l) || l.startsWith("import ")) return [];
-      const call = lines.slice(i, i + 5).join(" ");
+      if (!/\b(spawn|spawnSync|execFile|execFileSync)\(/.test(l) || l.startsWith("import ")) return [];
+      const call = lines.slice(i, i + 8).join(" ");
       return /windowsHide|\.\.\.hide|stdio: "inherit"/.test(call) ? [] : [`${f}:${i + 1}`];
     });
   });

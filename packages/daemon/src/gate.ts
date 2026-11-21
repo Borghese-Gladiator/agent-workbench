@@ -15,6 +15,7 @@ export type GateInput = {
   testHashNow: string;
   fileExists: (path: string) => boolean;
   writerEnd?: string;
+  startError?: string;
   baseReport?: Report;
   carried?: Carried[];
 };
@@ -45,7 +46,8 @@ export function runGate(input: GateInput): GateResult {
     const tests = mine.flatMap((s) => s.tests);
     const results = tests.flatMap((t) => t.results);
     const reasons: string[] = [];
-    if (mine.length === 0) reasons.push(input.writerEnd ? `no test (test writer: ${input.writerEnd})` : "no test");
+    if (mine.length === 0 && c.proof !== "test" && input.startError) reasons.push(`Playwright did not start: ${input.startError}`);
+    else if (mine.length === 0) reasons.push(input.writerEnd ? `no test (test writer: ${input.writerEnd})` : "no test");
     const skipped = tests.some(
       (t) => t.status === "skipped" || t.annotations?.some((a) => a.type === "skip" || a.type === "fixme"),
     );

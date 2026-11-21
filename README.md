@@ -8,3 +8,12 @@
 - `e2e/acceptance.sh`: the end-to-end test with the real `claude` and GitHub.
 - `e2e/*.e2e.ts`: the end-to-end tests, in TypeScript so they run on macOS, Linux and Windows. Run them with `npm run e2e`.
 - `archive/`: v1 to v5, and the v6 build notes.
+
+## Prerequisites
+
+- Node 24 or later.
+- `git` and `claude` on the PATH.
+- Playwright Chromium. Run `npx playwright install chromium`.
+- On Windows: Git for Windows, which provides `sh` for the hooks and the run files. Turn on Developer Mode, so that tests can make symlinks.
+
+Run `awb doctor` to check these.

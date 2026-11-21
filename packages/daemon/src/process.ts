@@ -1,9 +1,9 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { hide, killTree, needsShell, WIN } from "./platform.ts";
+import { commandOf, hide, killTree, needsShell, WIN } from "./platform.ts";
 import { fill, type RunMd } from "./run-md.ts";
 
 const PKG = fileURLToPath(new URL("..", import.meta.url));
@@ -42,11 +42,15 @@ export async function startApp(runMd: RunMd, cwd: string, log: (l: string) => vo
     const cmd = fill(runMd.start, port, seed);
     log(`app: ${cmd}`);
     child = spawn("sh", ["-c", cmd], { cwd, stdio: "ignore", detached: true, ...hide });
-    if (child.pid) groups.add(child.pid);
+    if (child.pid) {
+      groups.add(child.pid);
+      remember(child.pid);
+    }
   }
   const stop = () => {
     if (child?.pid) {
       groups.delete(child.pid);
+      forget(child.pid);
       try {
         killTree(child.pid);
       } catch {}
@@ -63,6 +67,47 @@ export async function startApp(runMd: RunMd, cwd: string, log: (l: string) => vo
 }
 
 const groups = new Set<number>();
+
+type Leftover = { pid: number; cmd: string };
+let leftFile = "";
+
+export const setLeftoverFile = (file: string) => (leftFile = file);
+
+const readLeft = (file = leftFile): Leftover[] => {
+  try {
+    return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeLeft = (list: Leftover[], file = leftFile) => file && writeFileSync(file, JSON.stringify(list));
+
+function remember(pid: number) {
+  if (!leftFile) return;
+  let cmd = "";
+  try {
+    cmd = commandOf(pid).trim();
+  } catch {}
+  writeLeft([...readLeft().filter((l) => l.pid !== pid), { pid, cmd }]);
+}
+
+function forget(pid: number) {
+  if (leftFile) writeLeft(readLeft().filter((l) => l.pid !== pid));
+}
+
+export function killLeftovers(file = leftFile): number {
+  let n = 0;
+  for (const l of readLeft(file)) {
+    try {
+      if (l.cmd && commandOf(l.pid).trim() !== l.cmd) continue;
+      killTree(l.pid);
+      n++;
+    } catch {}
+  }
+  if (file) writeLeft([], file);
+  return n;
+}
 
 export function killChildren(): number {
   const n = groups.size;

@@ -2,13 +2,16 @@ import { mkdirSync, writeFileSync, renameSync, rmSync, readFileSync, realpathSyn
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { alive, openStore } from "./store.ts";
+import { currentLimit } from "./config.ts";
+import { isAwbSession, stopSessions } from "./task-helpers.ts";
 import { createApp } from "./server.ts";
-import { createStacks, migrateStacks } from "./stacks.ts";
+import { RESTART_REASON, createStacks, migrateStacks } from "./stacks.ts";
 import { taskRoutes } from "./task-routes.ts";
-import { claudeSession, createRunner, lastSessionUsd, stackLimit } from "./runner.ts";
+import { claudeSession, createRunner, lastSessionUsd, resumeStopped } from "./runner.ts";
 import { notify, runMessage } from "./notify.ts";
 import { createLog } from "./log.ts";
 import { killChildren } from "./prove.ts";
+import { killLeftovers, setLeftoverFile } from "./process.ts";
 import { createScheduler, migrateJobs, scheduleRoutes } from "./schedule.ts";
 
 export async function startDaemon(home: string) {
@@ -18,8 +21,21 @@ export async function startDaemon(home: string) {
   const store = openStore(join(home, "awb.db"), { quietMs: Number(process.env.AWB_QUIET_MIN || 15) * 60_000 });
   migrateStacks(store.db);
   const stacks = createStacks(store.db, (id) => join(realpathSync(home), "tasks", id));
-  const recovered = stacks.recover((pid) => alive(pid));
-  for (const task of recovered.alive) log("info", "daemon", "recover.alive", { task, reason: "its session is still running, so the task stays doing" });
+  setLeftoverFile(join(home, "apps.json"));
+  const leftovers = killLeftovers();
+  if (leftovers) log("warn", "daemon", "recover.apps", { stopped: leftovers, reason: "app servers of an earlier daemon were still running" });
+  const recovered = stacks.recover((pid) => alive(pid) && isAwbSession(pid));
+  const restarted = new Set(stacks.restartedStacks());
+  for (const task of recovered.alive) {
+    if (!restarted.has(stacks.task(task)!.stack_id)) {
+      log("info", "daemon", "recover.alive", { task, reason: "its session is not owned by a run, so the task stays doing" });
+      continue;
+    }
+    const pids = stopSessions(stacks.openSessionPids(task));
+    stacks.fail(task, RESTART_REASON);
+    recovered.tasks.push(task);
+    log("warn", "daemon", "recover.killed", { task, pids, reason: "its session outlived the daemon and lost its result pipe" });
+  }
   if (recovered.runs || recovered.tasks.length) {
     for (const task of recovered.tasks) log("warn", "daemon", "recover.task", { task, reason: "the daemon restarted while the task ran" });
     log("warn", "daemon", "recover", { runs: recovered.runs, tasks: recovered.tasks.length });
@@ -35,7 +51,7 @@ export async function startDaemon(home: string) {
       }),
     {
       log,
-      maxStacks: stackLimit(process.env.AWB_MAX_STACKS),
+      maxStacks: () => currentLimit(home),
       sessionUsd: (task) => lastSessionUsd(task.folder),
       onEnd: (r) => {
         const m = runMessage(stacks, r);
@@ -72,6 +88,10 @@ export async function startDaemon(home: string) {
   const schedule = setInterval(() => scheduler.tick().catch((err) => log("warn", "schedule", "error", { error: err })), 30_000);
   schedule.unref();
   log("info", "daemon", "start", { pid: process.pid, port, home });
+  if (process.env.AWB_AUTORESUME === "1") {
+    const r = resumeStopped(stacks, runner);
+    log("info", "daemon", "autoresume", { started: r.started.map((x) => x.id), skipped: r.skipped });
+  }
 
   const file = join(home, "daemon.json");
   const tmp = `${file}.${process.pid}.tmp`;
@@ -81,6 +101,7 @@ export async function startDaemon(home: string) {
   process.on("exit", killChildren);
   const stop = () => {
     const killed = killChildren();
+    killLeftovers();
     if (killed) log("warn", "daemon", "stop.children", { groups: killed });
     try {
       if (JSON.parse(readFileSync(file, "utf8")).pid === process.pid) rmSync(file);

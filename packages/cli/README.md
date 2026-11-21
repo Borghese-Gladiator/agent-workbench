@@ -32,6 +32,12 @@ A task id or a stack id can be a prefix of 6 or more characters in every command
 | `awb stack set` | Reads a stack as JSON on stdin and creates or replaces it. A stack of many tasks gets one branch for each task. Task 1 starts from the current branch, and each later task starts from the task below. |
 | `awb run [stack \| task] [--wait] [--retries N]` | Starts the runner on a stack (default: the newest of the repo), or on one `waiting` task. A task start fails if a task below it is not done. `--wait` returns when the run is `done` or `stopped`, and exits 1 if it is not `done`. |
 | `awb retry <stack \| task> [--wait] [--retries N]` | Sets a `failed` task, or every `failed` task of a stack, back to `waiting` and runs only those tasks. It uses the same worktree and branch. |
+| `awb stacks`, `awb stack show <stack>` | List the stacks with their ids, last run and task states, or show one stack with its runs. |
+| `awb limit [n]` | Shows or sets the number of stacks that run at once (1 to 5). It takes effect for the next `awb run` and is kept in `AWB_HOME/config.json`. |
+| `awb run --all-stopped` | Starts again every run that a daemon restart stopped, from its first `waiting` task. |
+| `awb stop <stack> --after-task` | Lets the current task end, starts no next task, and ends the run with the reason `stopped by you`. |
+| `awb daemon stop --when-idle` | Waits until no run, proof or ship is active, then stops the daemon. |
+| `awb cleanup` | Stops the app servers that a proof left running. |
 | `awb stop <stack \| task>` | Stops the run and the proof of the current task. The task becomes `failed` with the reason `stopped by awb stop`, and the later tasks stay `waiting`. Exits 1 if nothing runs for the id. |
 | `awb task rm <id...>` | Removes waiting or failed tasks in one transaction. If one id is doing, is shipped or does not exist, nothing is removed. |
 | `awb prove [--rewrite C1,C2]` | Starts the app, writes the missing proof tests with a fresh test-writer session, runs them, and runs the gate. Prints the claim table. Exits 1 if the gate fails. `--rewrite` deletes the tests of those claims first. |
@@ -41,7 +47,7 @@ How the runner works:
 - It makes a worktree in `AWB_HOME/worktrees/` for each task, runs the `## setup` block of the run file in it, and starts `awb -p` with the task prompt.
 - If a session ends on a transient API error (connection refused or reset, overloaded, 429, 5xx, fetch failed), it resumes the same Claude session up to `--retries` times (0 to 5, default 1).
 - If a task ends without a PR, the task is `failed` and the stack stops.
-- It runs at most `AWB_MAX_STACKS` stacks at a time, and refuses a new one when the limit is full.
+- It runs at most `awb limit` stacks at a time (default `AWB_MAX_STACKS`), and refuses a new one when the limit is full.
 
 ## Read the state
 
@@ -73,7 +79,8 @@ How the runner works:
 |---|---|---|
 | `AWB_HOME` | `~/.awb` | The folder of the daemon, the database, the logs and the task folders. |
 | `AWB_PORT` | a free port | The daemon port. |
-| `AWB_MAX_STACKS` | 2 (max 5) | The number of stacks that run at the same time. |
+| `AWB_MAX_STACKS` | 2 (max 5) | The default number of stacks that run at the same time. `awb limit <n>` overrides it and keeps the value in `AWB_HOME/config.json`. |
+| `AWB_AUTORESUME` | off | Set to `1` to start again, at daemon start, every run that a restart stopped. |
 | `AWB_TASK_TIMEOUT_MIN` | 45 | The time limit of a task session. |
 | `AWB_WRITER_TIMEOUT_MIN` | 30 | The time limit of the test writer. In a task session, it gets only the time left. |
 | `AWB_CLAUDE` | `claude` | Replaces `claude` in the launcher and the task sessions. |

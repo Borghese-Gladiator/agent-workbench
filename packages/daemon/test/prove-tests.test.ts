@@ -1,4 +1,4 @@
-import { test as nodeTest } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
@@ -7,8 +7,18 @@ import { join } from "node:path";
 import { gateFromDisk, prove, seedCache, seedCopy, writerLimit } from "../src/prove.ts";
 import type { Task } from "../src/stacks.ts";
 
-// The fake claude is an sh script, which node cannot spawn directly on Windows.
-const test: typeof nodeTest = ((name: string, fn: any) => nodeTest(name, { skip: process.platform === "win32" && "fake claude is an sh script" }, fn)) as any;
+const fakeClaude = (file: string, body: string) => {
+  writeFileSync(`${file}.mjs`, `import { readFileSync, copyFileSync, appendFileSync, writeFileSync, readdirSync } from "node:fs";\nreadFileSync(0);\n${body}\n`);
+  if (process.platform === "win32") writeFileSync(file, `@"${process.execPath}" "${file}.mjs" %*\r\n`);
+  else {
+    writeFileSync(file, `#!/bin/sh\nexec "${process.execPath}" "${file}.mjs" "$@"\n`);
+    chmodSync(file, 0o755);
+  }
+};
+
+const claudePath = (root: string) => join(root, process.platform === "win32" ? "claude.cmd" : "claude");
+
+const RESULT = (cost: number, turns: number) => `console.log(JSON.stringify({ type: "result", subtype: "success", num_turns: ${turns}, total_cost_usd: ${cost} }));`;
 
 delete process.env.NODE_TEST_CONTEXT;
 
@@ -39,10 +49,9 @@ function setup(addBody: string, writerExtra = "", baseBody?: string) {
   }
   commit(repo, addBody);
 
-  const claude = join(root, "claude");
+  const claude = claudePath(root);
   writeFileSync(join(root, "proof.mjs"), PROOF);
-  writeFileSync(claude, `#!/bin/sh\ncat > /dev/null\ncp ${join(root, "proof.mjs")} .awb-proof/c1.test.mjs\n${writerExtra}\necho '{"type":"result","subtype":"success","num_turns":1,"total_cost_usd":0}'\n`);
-  chmodSync(claude, 0o755);
+  fakeClaude(claude, `copyFileSync(${JSON.stringify(join(root, "proof.mjs"))}, ".awb-proof/c1.test.mjs");\n${writerExtra}\n${RESULT(0, 1)}`);
 
   const task = {
     id: "t1",
@@ -73,7 +82,7 @@ test("prove: a test claim fails on wrong code", async () => {
 });
 
 test("prove: a writer that edits the source is refused, and the edit is undone", async () => {
-  const { repo, task, deps } = setup("a - b", `echo 'export const add = (a, b) => a + b;' > add.mjs`);
+  const { repo, task, deps } = setup("a - b", `writeFileSync("add.mjs", "export const add = (a, b) => a + b;\\n");`);
   await assert.rejects(prove(task, repo, RUN_MD, deps), /changed the source/);
   assert.equal(git(repo, "status", "--porcelain"), "");
   assert.match(git(repo, "show", "HEAD:add.mjs"), /a - b/);
@@ -82,7 +91,7 @@ test("prove: a writer that edits the source is refused, and the edit is undone",
 test("prove: a writer that times out still has the cost of its messages", async () => {
   const { repo, task, deps } = setup("a + b");
   const msg = JSON.stringify({ type: "assistant", message: { id: "m1", model: "claude-opus-5-5", usage: { input_tokens: 1_000_000, output_tokens: 0 } } });
-  writeFileSync(deps.claude, `#!/bin/sh\ncat > /dev/null\necho '${msg}'\nexec sleep 5\n`);
+  fakeClaude(deps.claude, `console.log(${JSON.stringify(msg)});\nsetTimeout(() => {}, 5000);`);
   const r = await prove(task, repo, RUN_MD, { ...deps, writerTimeoutMin: 0.01 });
   assert.equal(r.writer?.end, "timeout after 0.01 min");
   assert.equal(r.writer?.usd?.toFixed(2), "4.00");
@@ -91,9 +100,9 @@ test("prove: a writer that times out still has the cost of its messages", async 
 test("prove: the writer runs once more for a claim that still has no test", async () => {
   const { repo, task, deps } = setup("a + b");
   const count = join(task.folder, "..", "calls");
-  writeFileSync(
+  fakeClaude(
     deps.claude,
-    `#!/bin/sh\ncat > /dev/null\necho x >> ${count}\n[ $(wc -l < ${count}) -ge 2 ] && cp ${join(task.folder, "..", "proof.mjs")} .awb-proof/c1.test.mjs\necho '{"type":"result","subtype":"success","num_turns":0,"total_cost_usd":0.5}'\n`,
+    `appendFileSync(${JSON.stringify(count)}, "x\\n");\nif (readFileSync(${JSON.stringify(count)}, "utf8").split("\\n").filter(Boolean).length >= 2) copyFileSync(${JSON.stringify(join(task.folder, "..", "proof.mjs"))}, ".awb-proof/c1.test.mjs");\n${RESULT(0.5, 0)}`,
   );
   const r = await prove(task, repo, RUN_MD, deps);
   assert.equal(r.gate.pass, true);
@@ -103,7 +112,7 @@ test("prove: the writer runs once more for a claim that still has no test", asyn
 });
 
 test("prove: a writer that writes every test runs once", async () => {
-  const { repo, task, deps } = setup("a + b", `echo x >> ${"../calls"}`);
+  const { repo, task, deps } = setup("a + b", `appendFileSync("../calls", "x\\n");`);
   await prove(task, repo, RUN_MD, deps);
   assert.equal(readFileSync(join(repo, "..", "calls"), "utf8").split("\n").filter(Boolean).length, 1);
 });
@@ -117,7 +126,7 @@ test("writerLimit: the writer gets the session time that is left, up to its own 
 });
 
 test("prove: with no time left in the session, the writer does not start", async () => {
-  const { repo, task, deps } = setup("a + b", "touch ../started");
+  const { repo, task, deps } = setup("a + b", `writeFileSync("../started", "");`);
   const r = await prove(task, repo, RUN_MD, { ...deps, deadline: Date.now() + 30_000 });
   assert.equal(existsSync(join(repo, "..", "started")), false);
   assert.deepEqual(r.gate.rows[0].reasons, ["no test (test writer: no time left in the session)"]);
