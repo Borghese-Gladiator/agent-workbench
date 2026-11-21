@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { barRows, costlyFailures, filterTasks, lastGate, matchLines, needsAttention, prGroup, relTime, sortTasks, splitStacks, stackCost, stackProgress, stepStates, timeline, toneOf } from "../ui/select.ts";
+import { barRows, costlyFailures, filterTasks, lastGate, matchLines, needsAttention, paletteRows, prGroup, relTime, sortTasks, splitStacks, stackCost, stackProgress, stepStates, timeline, toneOf } from "../ui/select.ts";
 
 test("relTime reads as minutes, hours, yesterday, days, then a short date", () => {
   const now = new Date(2026, 10, 19, 15, 0, 0).getTime();
@@ -55,6 +55,15 @@ test("filterTasks matches the text in title, branch, repo and id, and the status
   assert.deepEqual(filterTasks(tasks, "foot", "all").map((t) => t.id), ["a1"]);
   assert.deepEqual(filterTasks(tasks, "", "done").map((t) => t.id), ["b2"]);
   assert.equal(filterTasks(tasks, "DEMO", "all").length, 2);
+});
+
+test("paletteRows lists pages then tasks, and narrows both by the text", () => {
+  const pages: [string, string][] = [["Tasks", "#/tasks"], ["Logs", "#/logs"]];
+  const tasks = [{ id: "a1", title: "Footer", status: "failed" }, { id: "b2", title: "Header", status: "done" }];
+  assert.deepEqual(paletteRows(pages, tasks, "").map((r) => r.href), ["#/tasks", "#/logs", "#/task/a1", "#/task/b2"]);
+  assert.deepEqual(paletteRows(pages, tasks, "foot").map((r) => [r.label, r.status]), [["Footer", "failed"]]);
+  assert.deepEqual(paletteRows(pages, tasks, "LOG").map((r) => r.href), ["#/logs"]);
+  assert.deepEqual(paletteRows(pages, tasks, "zzz"), []);
 });
 
 test("matchLines searches every field of a log line, ignoring case", () => {
