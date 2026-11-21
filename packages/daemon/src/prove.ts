@@ -54,7 +54,7 @@ function mergeBase(worktree: string, base: string | null): string | null {
   if (!base) return null;
   for (const ref of [base, `origin/${base}`]) {
     try {
-      return execFileSync("git", ["merge-base", "HEAD", ref], { cwd: worktree, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+      return execFileSync("git", ["merge-base", "HEAD", ref], { cwd: worktree, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
     } catch {}
   }
   return null;
@@ -112,7 +112,7 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
   const tests = join(folder, "proof-tests");
   const proof = join(folder, "proof");
   mkdirSync(tests, { recursive: true });
-  if (!existsSync(join(folder, "node_modules"))) symlinkSync(NODE_MODULES, join(folder, "node_modules"), "dir");
+  if (!existsSync(join(folder, "node_modules"))) symlinkSync(NODE_MODULES, join(folder, "node_modules"), "junction");
   rmSync(proof, { recursive: true, force: true });
   mkdirSync(proof, { recursive: true });
   rmSync(join(worktree, PROOF_DIR), { recursive: true, force: true });

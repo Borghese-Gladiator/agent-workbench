@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openStore } from "../packages/daemon/src/store.ts";
 import { createStacks, migrateStacks } from "../packages/daemon/src/stacks.ts";
@@ -10,7 +11,7 @@ const store = openStore(join(home, "awb.db"));
 migrateStacks(store.db);
 const stacks = createStacks(store.db, (id) => join(home, "tasks", id));
 
-const repo = "/tmp/seed-repo";
+const repo = join(tmpdir(), "seed-repo");
 const session = store.register({ id: "seed-session", repo, worktree: repo, branch: "awb/seed-done", pid: null });
 for (const [hook, tool, input] of [
   ["PreToolUse", "Bash", { command: "npm test" }],

@@ -8,7 +8,7 @@ import { branchDiff, proofFile } from "../src/task-routes.ts";
 
 const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), "awb-ui-")));
 
-test("proofFile serves only real files inside AWB_HOME/tasks", () => {
+test("proofFile serves only real files inside AWB_HOME/tasks", (t) => {
   const home = tmp();
   const video = join(home, "tasks", "t1", "proof", "v.webm");
   mkdirSync(join(home, "tasks", "t1", "proof"), { recursive: true });
@@ -16,7 +16,12 @@ test("proofFile serves only real files inside AWB_HOME/tasks", () => {
   writeFileSync(join(home, "awb.db"), "secret");
   const outside = join(tmp(), "o.txt");
   writeFileSync(outside, "o");
-  symlinkSync(outside, join(home, "tasks", "t1", "link.txt"));
+  try {
+    symlinkSync(outside, join(home, "tasks", "t1", "link.txt"));
+  } catch (e: any) {
+    if (e.code === "EPERM") return t.skip("file symlinks need Developer Mode on Windows");
+    throw e;
+  }
 
   assert.equal(proofFile(home, video), video);
   assert.equal(proofFile(home, join(home, "tasks", "t1", "..", "..", "awb.db")), null);

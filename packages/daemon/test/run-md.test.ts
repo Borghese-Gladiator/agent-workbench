@@ -71,7 +71,7 @@ test("the run file in the worktree wins, the file in AWB_HOME is the fallback, a
   assert.equal(shared, join(home, "repos", "games.run.md"));
 
   assert.equal(findRunFile(home, repo, worktree), null);
-  assert.throws(() => readRunFile(home, repo, worktree), new RegExp(shared));
+  assert.throws(() => readRunFile(home, repo, worktree), (e: Error) => e.message.includes(shared));
 
   writeFileSync(shared, "## start\nurl: http://shared\n");
   assert.equal(readRunFile(home, repo, worktree), "## start\nurl: http://shared\n");

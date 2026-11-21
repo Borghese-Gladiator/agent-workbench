@@ -3,6 +3,7 @@ import { copyFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, r
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { hide, killTree } from "./platform.ts";
 import { run } from "./prove.ts";
 import { envFilePath, findRunFile, parseSetup } from "./run-md.ts";
 import { FINISHED, StackError } from "./stacks.ts";
@@ -132,7 +133,7 @@ export async function runStack(stacks: Stacks, stackId: string, session: Session
   }
 }
 
-const AWB = fileURLToPath(new URL("../../cli/bin/awb", import.meta.url));
+const AWB_MAIN = fileURLToPath(new URL("../../cli/src/main.ts", import.meta.url));
 
 export const MAX_STACKS = 5;
 
@@ -183,13 +184,13 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
       "--output-format", "stream-json", "--verbose",
     ];
     return new Promise<string>((resolve) => {
-      const child = spawn(AWB, args, { cwd: worktree, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, AWB_HOME: opts.home, AWB_SESSION_DEADLINE: String(Date.now() + opts.timeoutMin * 60_000) }, detached: true });
+      const child = spawn(process.execPath, ["--disable-warning=ExperimentalWarning", AWB_MAIN, ...args], { cwd: worktree, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, AWB_HOME: opts.home, AWB_SESSION_DEADLINE: String(Date.now() + opts.timeoutMin * 60_000) }, detached: true, ...hide });
       let timedOut = false;
       let tail = "";
       let head = "";
       const group = (sig: NodeJS.Signals) => {
         try {
-          process.kill(-child.pid!, sig);
+          killTree(child.pid!, sig);
         } catch {}
       };
       let hard: NodeJS.Timeout | undefined;

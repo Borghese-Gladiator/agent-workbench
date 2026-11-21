@@ -25,10 +25,11 @@ function fixture() {
 test("the root comes from the flag, then AWB_WORKTREES, then the Klaviyo or home default", () => {
   assert.equal(wtRoot("/a", { AWB_WORKTREES: "/b" }), "/a");
   assert.equal(wtRoot(undefined, { AWB_WORKTREES: "/b" }), "/b");
-  assert.equal(wtRoot(undefined, {}, "/h/Klaviyo/Repos/app/src", "/h"), "/h/Klaviyo/Repos/LOCAL_worktrees");
-  assert.equal(wtRoot(undefined, {}, "/h/Klaviyo/Repos", "/h"), "/h/Klaviyo/Repos/LOCAL_worktrees");
-  assert.equal(wtRoot(undefined, {}, "/h/Klaviyo/Reposx", "/h"), "/h/LOCAL_worktrees");
-  assert.equal(wtRoot(undefined, {}, "/h/GitHub/agent-workbench", "/h"), "/h/LOCAL_worktrees");
+  const p = (s: string) => join(s); // native separators, so the test holds on Windows
+  assert.equal(wtRoot(undefined, {}, p("/h/Klaviyo/Repos/app/src"), p("/h")), p("/h/Klaviyo/Repos/LOCAL_worktrees"));
+  assert.equal(wtRoot(undefined, {}, p("/h/Klaviyo/Repos"), p("/h")), p("/h/Klaviyo/Repos/LOCAL_worktrees"));
+  assert.equal(wtRoot(undefined, {}, p("/h/Klaviyo/Reposx"), p("/h")), p("/h/LOCAL_worktrees"));
+  assert.equal(wtRoot(undefined, {}, p("/h/GitHub/agent-workbench"), p("/h")), p("/h/LOCAL_worktrees"));
 });
 
 test("scan groups worktrees by repo and reads branch and dirty state", async () => {

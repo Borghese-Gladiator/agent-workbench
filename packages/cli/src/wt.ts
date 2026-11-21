@@ -7,7 +7,7 @@ import { emitKeypressEvents } from "node:readline";
 import { parseArgs, promisify } from "node:util";
 
 const run = promisify(execFile);
-const git = async (cwd: string, ...args: string[]) => (await run("git", args, { cwd })).stdout.trim();
+const git = async (cwd: string, ...args: string[]) => (await run("git", args, { cwd, windowsHide: true })).stdout.trim();
 
 export type Wt = { repo: string; name: string; path: string; branch: string; dirty: number; age: string };
 
@@ -15,7 +15,7 @@ export function wtRoot(flag?: string, env = process.env, cwd = process.cwd(), ho
   const set = flag ?? env.AWB_WORKTREES;
   if (set) return set;
   const klaviyo = join(home, "Klaviyo", "Repos");
-  return join((cwd + sep).startsWith(klaviyo + sep) ? klaviyo : home, "LOCAL_worktrees");
+  return join((process.platform === "win32" ? (cwd + sep).toLowerCase().startsWith((klaviyo + sep).toLowerCase()) : (cwd + sep).startsWith(klaviyo + sep)) ? klaviyo : home, "LOCAL_worktrees");
 }
 
 const dirs = (p: string) =>

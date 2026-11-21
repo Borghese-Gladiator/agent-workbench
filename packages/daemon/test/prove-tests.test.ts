@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
@@ -6,6 +6,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gateFromDisk, prove, seedCache, seedCopy, writerLimit } from "../src/prove.ts";
 import type { Task } from "../src/stacks.ts";
+
+// The fake claude is an sh script, which node cannot spawn directly on Windows.
+const test: typeof nodeTest = ((name: string, fn: any) => nodeTest(name, { skip: process.platform === "win32" && "fake claude is an sh script" }, fn)) as any;
 
 delete process.env.NODE_TEST_CONTEXT;
 

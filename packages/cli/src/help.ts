@@ -96,6 +96,12 @@ Show and start scheduled jobs.
   output <run id> Print the output of a run.
   --limit N       Set the number of runs to list. The default is 20.
   --json          Print the result as JSON.`,
+  logging: `usage: awb logging up|down
+
+Start or stop the Loki, Alloy and Grafana stack. It reads the logs of AWB_HOME.
+
+  up     Start the stack. This needs Docker.
+  down   Stop the stack.`,
   sessions: `usage: awb sessions [--json]
 
 List sessions.

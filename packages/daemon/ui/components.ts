@@ -1,5 +1,5 @@
 import { html } from "./vendor/htm-preact.js";
-import { toneOf } from "./select.ts";
+import { relTime, toneOf } from "./select.ts";
 
 export type Json = Record<string, any>;
 export type Usage = { input: number; output: number; cache_read: number; cache_creation: number; cost_usd?: number };
@@ -45,7 +45,8 @@ export const State = Chip;
 export const Pass = ({ pass }: { pass: boolean }) => html`<${Chip} s=${pass ? "PASS" : "FAIL"} />`;
 
 export const Branch = ({ b }: { b?: string | null }) =>
-  b ? html`<span class="mono trunc" title=${b}>${b}</span><button class="copy" aria-label=${"Copy branch " + b} onClick=${(e: Event) => (e.stopPropagation(), navigator.clipboard?.writeText(b))}>Copy</button>` : null;
+  b ? html`<span class="nowrap"><span class="mono trunc" title=${b}>${b}</span><button class="copy" aria-label=${"Copy branch " + b} onClick=${(e: Event) => (e.stopPropagation(), navigator.clipboard?.writeText(b))}>Copy</button></span>` : null;
+export const When = ({ t }: { t?: string | null }) => (t ? html`<time datetime=${t} title=${time(t)}>${relTime(t)}</time>` : null);
 export const Id = ({ v }: { v?: string | null }) => (v ? html`<span class="id" title=${v}>${v.slice(0, 8)}</span>` : null);
 export const TaskLink = ({ t }: { t?: Json }) => (t ? html`<a href=${"#/task/" + t.id}>${t.title}</a>` : null);
 

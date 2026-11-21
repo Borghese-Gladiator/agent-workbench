@@ -1,5 +1,5 @@
 import { html } from "./vendor/htm-preact.js";
-import { ago, Chip, Empty, Page, repoName, Stat, Stats, TaskLink, taskOf, time, usd, type Data, type Json, type Session } from "./components.ts";
+import { ago, Chip, Empty, Page, repoName, Stat, Stats, TaskLink, taskOf, usd, When, type Data, type Json, type Session } from "./components.ts";
 import { needsAttention } from "./select.ts";
 
 export const Op = ({ s }: { s: Session }) =>
@@ -26,11 +26,11 @@ function Active({ d }: { d: Data }) {
 function Attention({ d }: { d: Data }) {
   const items = needsAttention(d.tasks);
   if (!items.length) return html`<${Empty} text="Nothing needs attention." />`;
-  return html`<table><tbody>${items.map(
+  return html`<table class="list"><tbody>${items.map(
     ({ task, reason }) => html`<tr class="click" onClick=${() => (location.hash = "#/task/" + task.id)}>
-      <td><${Chip} s=${task.status} /></td>
+      <td class="state"><${Chip} s=${task.status} /></td>
       <td><${TaskLink} t=${task} /><span class="note FAIL">${reason}</span></td>
-      <td class="num"><a href=${"#/task/" + task.id}>Inspect</a></td></tr>`,
+      <td class="end"><a href=${"#/task/" + task.id}>Inspect</a></td></tr>`,
   )}</tbody></table>`;
 }
 
@@ -51,9 +51,12 @@ export function Overview({ d }: { d: Data }) {
     <h2>Needs attention</h2><${Attention} d=${d} />
     <h2>Recent activity</h2>
     ${recent.length
-      ? html`<table aria-label="Recent activity"><tbody>${recent.map(
-          (t) => html`<tr class="click" onClick=${() => (location.hash = "#/task/" + t.id)}><td><${Chip} s=${t.status} /></td><td><${TaskLink} t=${t} /></td>
-            <td class="muted">${t.pr_number ? "PR #" + t.pr_number : ""}</td><td class="muted num">${time(t.last_gate_at ?? t.created_at)}</td></tr>`,
+      ? html`<table class="list" aria-label="Recent activity"><tbody>${recent.map(
+          (t) => html`<tr class="click" onClick=${(e: MouseEvent) => !(e.target as Element).closest("a") && (location.hash = "#/task/" + t.id)}>
+            <td class="state"><${Chip} s=${t.status} /></td>
+            <td><${TaskLink} t=${t} /></td>
+            <td class="pr">${t.pr_url ? html`<a href=${t.pr_url} target="_blank" aria-label=${"Open PR " + t.pr_number}>PR #${t.pr_number}</a>` : null}</td>
+            <td class="when muted"><${When} t=${t.last_gate_at ?? t.created_at} /></td></tr>`,
         )}</tbody></table>`
       : html`<${Empty} text="No activity yet." />`}
   <//>`;

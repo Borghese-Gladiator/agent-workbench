@@ -76,6 +76,44 @@ export const barRows = (m: Record<string, number>, limit = 8) => {
   return rows.map(([name, usd]) => ({ name, usd, pct: Math.round((usd / max) * 100) }));
 };
 
+export const relTime = (iso: string | null | undefined, now = Date.now(), locale?: string): string => {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (Number.isNaN(t)) return "";
+  const min = Math.floor((now - t) / 60000);
+  if (min < 1) return "Just now";
+  if (min < 60) return min + " min ago";
+  if (min < 1440) return Math.floor(min / 60) + " h ago";
+  const day = (n: number) => new Date(n).setHours(0, 0, 0, 0);
+  const days = Math.round((day(now) - day(t)) / 86400000);
+  if (days === 1) return "Yesterday";
+  if (days < 7) return days + " days ago";
+  const year = new Date(t).getFullYear() === new Date(now).getFullYear() ? {} : { year: "numeric" as const };
+  return new Date(t).toLocaleDateString(locale, { month: "short", day: "numeric", ...year });
+};
+
+export type SortKey = "title" | "status" | "repo" | "usd";
+export type SortDir = "asc" | "desc";
+export const SORT_START: Record<SortKey, SortDir> = { title: "asc", status: "asc", repo: "asc", usd: "desc" };
+const RANK = ["failed", "doing", "waiting", "done", "merged", "closed"];
+
+export const sortTasks = (tasks: Task[], key: SortKey, dir: SortDir, usd: Record<string, number>) => {
+  const val = (t: Task): string | number =>
+    key === "usd" ? (usd[t.id] ?? 0) : key === "status" ? (RANK.indexOf(t.status) + 1 || RANK.length + 1) : key === "repo" ? String(t.repo ?? "").split("/").at(-1)! : String(t.title ?? "");
+  const sign = dir === "asc" ? 1 : -1;
+  return [...tasks].sort((a, b) => {
+    const x = val(a), y = val(b);
+    const c = typeof x === "number" ? x - (y as number) : x.localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" });
+    return c * sign || String(b.created_at ?? "").localeCompare(String(a.created_at ?? ""));
+  });
+};
+
+export const splitStacks = (stacks: Task[], archived: Set<string>) => {
+  const shown: Task[] = [];
+  const hidden: Task[] = [];
+  for (const s of stacks) (archived.has(s.id) || !s.tasks.length ? hidden : shown).push(s);
+  return { shown, hidden };
+};
+
 export type Step = { ts: string; title: string; detail: string; level: string };
 
 const TITLE: Record<string, string> = {

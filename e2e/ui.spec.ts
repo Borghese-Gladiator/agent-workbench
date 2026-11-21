@@ -26,6 +26,27 @@ test("Overview shows the summary, the failed task once, and no sessions table", 
   await shot(page, "1-overview");
 });
 
+test("Overview shows relative dates with the full date in a tooltip, and the PR text links to the PR", async ({ page }) => {
+  await page.goto("/");
+  const recent = page.getByRole("table", { name: "Recent activity" });
+  const stamp = recent.locator("time").first();
+  await expect(stamp).toHaveText(/^(Just now|\d+ min ago|\d+ h ago)$/);
+  expect(await stamp.getAttribute("title")).toMatch(/\d{4}/);
+  const pr = recent.getByRole("link", { name: "Open PR 1" });
+  await expect(pr).toHaveText("PR #1");
+  await expect(pr).toHaveAttribute("href", "https://github.com/example/demo/pull/1");
+  await expect(pr).toHaveAttribute("target", "_blank");
+  await recent.getByRole("link", { name: "Scoreboard" }).click();
+  await expect(page).toHaveURL(new RegExp(`#/task/${T1}$`));
+  await page.goto("/");
+  await recent.getByRole("row").filter({ hasText: "Scoreboard" }).getByRole("cell").nth(3).click();
+  await expect(page).toHaveURL(new RegExp(`#/task/${T1}$`));
+  await page.goto("/");
+  const widths = await page.locator("main table.list").evaluateAll((ts) => ts.map((t) => t.querySelector("td")!.getBoundingClientRect().width));
+  expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(2);
+  await shot(page, "1a-overview-dates");
+});
+
 test("the sidebar groups the pages, and each page has its own heading", async ({ page }) => {
   await page.goto("/");
   for (const [link, heading] of [["Tasks", "Tasks"], ["Stacks", "Stacks"], ["Runs", "Runs"], ["Reviews", "Reviews"], ["Verification", "Verification"], ["Logs", "Logs"], ["Usage", "Usage"], ["Settings", "Settings"], ["Overview", "Overview"]]) {
@@ -48,6 +69,141 @@ test("Tasks lists every task and filters by text and by status", async ({ page }
   await expect(row(page, "Footer")).toBeVisible();
   await expect(row(page, "Scoreboard")).toHaveCount(0);
   await shot(page, "2-tasks");
+});
+
+test("Tasks sorts by task, status, repository and cost, and a second click reverses it", async ({ page }) => {
+  await page.goto("/#/tasks");
+  const names = () => page.locator("main tbody tr").evaluateAll((rs) => rs.map((r) => r.querySelector("a")!.textContent));
+  const head = (name: string) => page.getByRole("columnheader", { name: new RegExp("^" + name) });
+  await head("Task").getByRole("button").click();
+  await expect(head("Task")).toHaveAttribute("aria-sort", "ascending");
+  expect(await names()).toEqual(["Broken", "Footer", "Scoreboard"]);
+  await head("Task").getByRole("button").click();
+  await expect(head("Task")).toHaveAttribute("aria-sort", "descending");
+  expect(await names()).toEqual(["Scoreboard", "Footer", "Broken"]);
+  await head("Status").getByRole("button").click();
+  await expect(head("Status")).toHaveAttribute("aria-sort", "ascending");
+  expect(await names()).toEqual(["Footer", "Broken", "Scoreboard"]);
+  await head("USD").getByRole("button").click();
+  await expect(head("USD")).toHaveAttribute("aria-sort", "descending");
+  await expect(head("Status")).toHaveAttribute("aria-sort", "none");
+  expect((await names())[2]).toBe("Broken");
+  await head("USD").getByRole("button").click();
+  await expect(head("USD")).toHaveAttribute("aria-sort", "ascending");
+  expect((await names())[0]).toBe("Broken");
+  await head("Repository").getByRole("button").click();
+  await expect(head("Repository")).toHaveAttribute("aria-sort", "ascending");
+  await shot(page, "2a-tasks-sorted");
+});
+
+test("Stacks edits a task in a modal, keeps PR numbers on one line, and archives a stack", async ({ page }) => {
+  await page.goto("/#/stacks");
+  const lineHeight = (loc: import("@playwright/test").Locator) => loc.evaluate((e) => e.getBoundingClientRect().height);
+  const prCell = row(page, "Scoreboard").locator("td.pr");
+  expect(await lineHeight(prCell.getByRole("link"))).toBeLessThan(30);
+  await expect(row(page, "Broken").getByRole("button", { name: /^Edit/ })).toBeVisible();
+  await expect(page.getByText("Edit title and claims")).toHaveCount(0);
+
+  await row(page, "Broken").getByRole("button", { name: /^Edit/ }).click();
+  const dlg = page.getByRole("dialog", { name: "Edit task" });
+  await expect(dlg).toBeVisible();
+  await dlg.getByLabel("Title").fill("Broken renamed");
+  await shot(page, "3a-edit-modal");
+  await page.keyboard.press("Escape");
+  await expect(dlg).toBeHidden();
+  await expect(row(page, "Broken renamed")).toHaveCount(0);
+
+  await row(page, "Broken").getByRole("button", { name: /^Edit/ }).click();
+  await dlg.getByLabel("Title").fill("Broken renamed");
+  await dlg.getByRole("button", { name: "Save" }).click();
+  await expect(dlg).toBeHidden();
+  await expect(row(page, "Broken renamed")).toBeVisible();
+  const t3 = await (await page.request.get(`/api/tasks/${T3}`)).json();
+  expect(t3.title).toBe("Broken renamed");
+
+  await page.getByRole("button", { name: /^Archive stack/ }).click();
+  await expect(page.getByText("Every stack is archived.")).toBeVisible();
+  await expect(row(page, "Scoreboard")).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText("Every stack is archived.")).toBeVisible();
+  const archived = page.getByText(/^Archived \(1\)$/);
+  await archived.click();
+  await expect(row(page, "Scoreboard")).toBeVisible();
+  expect((await page.request.get(`/api/tasks/${T1}`)).status()).toBe(200);
+  await shot(page, "3b-archived");
+  await page.getByRole("button", { name: /^Restore stack/ }).click();
+  await expect(page.getByText("Every stack is archived.")).toHaveCount(0);
+  await expect(row(page, "Scoreboard")).toBeVisible();
+
+  await row(page, "Broken renamed").getByRole("button", { name: /^Edit/ }).click();
+  await dlg.getByLabel("Title").fill("Broken");
+  await dlg.getByRole("button", { name: "Save" }).click();
+  await expect(dlg).toBeHidden();
+  await expect(row(page, "Broken")).toBeVisible();
+});
+
+test("a big stack with long names keeps PR numbers, costs, indexes and branches on one line", async ({ page }) => {
+  const repo = "/Users/dev/lm-expense-chatbot-pwa";
+  const names = ["Delete the old service worker", "Category to merchant drill-down", "Explore summary cards", "Trips tables and CRUD API", "Trips list page", "Trip suggestions", "Trip review screen", "Trip summary page", "Trip filter and dimension in Explore", "Keep trip links across Plaid sync"];
+  const tasks = Array.from({ length: 19 }, (_, i) => {
+    const title = i < names.length ? names[i] : "Follow up task number " + i;
+    const status = i < 7 ? "waiting" : i === 7 ? "done" : i === 8 ? "failed" : "waiting";
+    return {
+      id: "task-" + i, stack_id: "big", position: i, title, status, repo, base: "awb/todo-stack", folder: "/x", worktree: null,
+      branch: "awb/" + title.toLowerCase().replace(/[^a-z]+/g, "-") + "-8f2c1d",
+      pr_number: i < 8 ? 38 + i : null, pr_url: i < 8 ? "https://github.com/example/demo/pull/" + (38 + i) : null,
+      created_at: new Date(Date.now() - i * 3600_000).toISOString(), last_gate_at: i < 9 ? new Date(Date.now() - i * 3600_000).toISOString() : null,
+      fail_reason: i === 8 ? "the gate failed at 701ae78b5d: C1 no test (test writer: success, 6 turns); C2 not passed (session: timeout after 45 min)" : null,
+      failed_claims: i === 8 ? ["C1", "C2"] : [], claims: [{ id: "C1", text: "It works." }],
+    };
+  });
+  const cost = { total_usd: 58.52, session_usd: 50, writer_usd: 8.52, by_day: {}, by_repo: {}, unpriced_sessions: 0, by_task: tasks.map((t, i) => ({ task_id: t.id, title: t.title, usd: i === 8 ? 21.73 : 1.11 + i })) };
+  const json = (body: unknown) => (route: import("@playwright/test").Route) => (route.request().method() === "GET" ? route.fulfill({ json: body }) : route.continue());
+  await page.route("**/api/stacks", json([{ id: "big", version: 1, repo, base: "awb/todo-stack", tasks }]));
+  await page.route("**/api/tasks", json(tasks));
+  await page.route(/\/api\/cost/, json(cost));
+  await page.setViewportSize({ width: 1280, height: 800 });
+
+  await page.goto("/#/stacks");
+  await expect(row(page, "Delete the old service worker")).toBeVisible();
+  const oneLine = async (sel: string) => {
+    const cells = await page.locator(sel).evaluateAll((els) =>
+      els.map((e) => {
+        const walker = document.createTreeWalker(e, NodeFilter.SHOW_TEXT);
+        const tops = new Set<number>();
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          if (!(n.textContent ?? "").trim()) continue;
+          const r = document.createRange();
+          r.selectNodeContents(n);
+          for (const q of r.getClientRects()) if (q.width > 0) tops.add(Math.round(q.top / 6));
+        }
+        return [tops.size, (e.textContent ?? "").trim().slice(0, 40)] as const;
+      }),
+    );
+    const filled = cells.filter(([, text]) => text);
+    expect(filled.length, sel).toBeGreaterThan(0);
+    for (const [lines, text] of filled) expect(lines, `${sel} wraps onto a second line: "${text}"`).toBe(1);
+  };
+  await oneLine("td.pr a");
+  await oneLine("tbody tr td:first-child");
+  await oneLine("td.num:not(:has(.note))");
+  await oneLine("td.end > button");
+  const apart = await page.locator("td .nowrap").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
+  for (const h of apart) expect(h, "branch and Copy on one line").toBeLessThan(30);
+  await expect(page.getByText("costly failure")).toBeVisible();
+  await shot(page, "3c-big-stack");
+
+  await page.goto("/#/tasks");
+  await expect(row(page, "Delete the old service worker")).toBeVisible();
+  await oneLine("td.num");
+  await oneLine("td.nowrap");
+  await shot(page, "2b-big-tasks");
+
+  await page.goto("/");
+  await expect(page.getByRole("table", { name: "Recent activity" })).toBeVisible();
+  await oneLine("table.list td.pr a");
+  await oneLine("table.list td.when time");
+  await shot(page, "1b-big-overview");
 });
 
 test("Stacks shows the state and the USD of each task, and the stack cost", async ({ page }) => {
@@ -192,6 +348,8 @@ test("Retry runs only the failed task, and the run view follows it", async ({ pa
 test("Drop removes the failed task from its stack", async ({ page }) => {
   expect((await page.request.post("/api/run", { data: { id: T3 } })).status()).toBe(202);
   await expect.poll(async () => (await (await page.request.get(`/api/tasks/${T3}`)).json()).status, { timeout: 150_000 }).toBe("failed");
+  const version = async () => (await (await page.request.get("/api/stacks")).json())[0].version as number;
+  const before = await version();
   await page.goto(`/#/task/${T3}`);
   await expect(h1(page)).toContainText("Broken");
   await expect(page.getByRole("alert")).toContainText(/C3/);
@@ -201,7 +359,8 @@ test("Drop removes the failed task from its stack", async ({ page }) => {
   await expect(row(page, "Scoreboard")).toBeVisible();
   await expect(row(page, "Footer")).toContainText("done");
   await expect(row(page, "Broken")).toHaveCount(0);
-  await expect(page.getByText(/version 2/)).toBeVisible();
+  expect(await version()).toBe(before + 1);
+  await expect(page.getByText(new RegExp("version " + (before + 1)))).toBeVisible();
   expect((await page.request.get(`/api/tasks/${T3}`)).status()).toBe(404);
   await shot(page, "12-dropped");
 });

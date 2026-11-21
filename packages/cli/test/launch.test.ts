@@ -4,22 +4,30 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeArgs, awbSettings, gitInfo, repoRulesPath, resumeArgs, splitResume, DEFAULT_PLAYBOOK, SKILLS_DIR, PLUGIN_DIR } from "../src/launch.ts";
+import { claudeArgs, awbSettings, hookCommand, toRulePath, gitInfo, repoRulesPath, resumeArgs, splitResume, DEFAULT_PLAYBOOK, SKILLS_DIR, PLUGIN_DIR } from "../src/launch.ts";
 import { HOOK_EVENTS } from "../src/hook-send.ts";
 
 test("settings register the hook sender for every hook type, with AWB_HOME", () => {
-  const s = awbSettings("/h", "/opt/it's/awb-hook");
+  const command = hookCommand("/opt/node/node", "/opt/awb/hook-send.ts");
+  const s = awbSettings("/h", command);
   assert.deepEqual(s.env, { AWB_HOME: "/h" });
   assert.deepEqual(Object.keys(s.hooks), [...HOOK_EVENTS]);
   for (const [name, [entry]] of Object.entries(s.hooks)) {
-    assert.equal(entry.hooks[0].command, `'/opt/it'\\''s/awb-hook'`);
+    assert.equal(entry.hooks[0].command, command);
     assert.equal("matcher" in entry, name.endsWith("ToolUse"));
   }
 });
 
+test("the hook command runs node on hook-send.ts, with each part quoted for the shell", () => {
+  assert.equal(
+    hookCommand("/opt/it's/node", "/opt/awb/hook-send.ts"),
+    `'/opt/it'\\''s/node' '--disable-warning=ExperimentalWarning' '/opt/awb/hook-send.ts'`,
+  );
+});
+
 test("settings deny writes to the daemon files and the proof, not to the worktrees", () => {
   const s = awbSettings("/h/.awb");
-  assert.deepEqual(s.permissions.additionalDirectories, ["/h/.awb/repos"]);
+  assert.deepEqual(s.permissions.additionalDirectories, [join("/h/.awb", "repos")]);
   const deny = s.permissions.deny;
   assert.deepEqual(deny, [
     "Edit(//h/.awb/awb.db*)",
@@ -48,7 +56,7 @@ test("the playbook points UI work at the build-ui skill by a real path", () => {
   assert.ok(prompt.includes("/h/repos/games.run.md"));
   assert.ok(!prompt.includes("{skills}"));
   const skill = join(SKILLS_DIR, "build-ui.md");
-  assert.ok(prompt.includes(skill));
+  assert.ok(prompt.includes(`${SKILLS_DIR}/build-ui.md`));
   for (const f of [skill, join(SKILLS_DIR, "theme", "globals.css"), join(SKILLS_DIR, "theme", "design.md")]) assert.ok(existsSync(f), f);
 });
 
@@ -73,6 +81,11 @@ test("a worktree gets the rules of its main repo, and a repo with no rules file 
   const prompt = claudeArgs([], DEFAULT_PLAYBOOK, {}, rules)[1];
   assert.match(prompt, /awb playbook/);
   assert.match(prompt, /## Rules for this repo\n\nFrom .*app\.md\. These rules win over the playbook\.\n\nCommit with --no-verify\.\n$/);
+});
+
+test("toRulePath writes Windows drive paths the way Claude permission rules match them", () => {
+  assert.equal(toRulePath("C:\\Users\\me\\.awb", "win32"), "/c/Users/me/.awb");
+  assert.equal(toRulePath("/Users/me/.awb", "darwin"), "/Users/me/.awb");
 });
 
 test("--resume maps to claude --resume with the claude session id", () => {

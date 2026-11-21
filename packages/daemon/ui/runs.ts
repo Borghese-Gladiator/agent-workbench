@@ -14,7 +14,7 @@ function RunHistory({ runs }: { runs: Json[] }) {
         <td><${Id} v=${r.id} /></td>
         <td><${Chip} s=${r.state} />${r.state === "stopped" && r.reason ? html`<span class="note FAIL">${r.reason}</span>` : null}</td>
         <td>${r.current ? html`<a href=${"#/task/" + r.current}>${r.title ?? r.current.slice(0, 8)}</a>` : null}</td>
-        <td class="muted">${repoName(r.repo)}</td>
+        <td class="muted nowrap">${repoName(r.repo)}</td>
         <td class="muted">${ago(r.started_at, r.ended_at)}<span class="note">${time(r.started_at)}</span></td>
       </tr>`,
     )}</tbody>

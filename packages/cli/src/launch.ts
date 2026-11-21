@@ -1,23 +1,29 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { quote } from "../../daemon/src/run-md.ts";
 import { HOOK_EVENTS } from "./hook-send.ts";
 
 export const DEFAULT_PLAYBOOK = fileURLToPath(new URL("../playbook.md", import.meta.url));
 export const SKILLS_DIR = fileURLToPath(new URL("../skills", import.meta.url));
-export const HOOK_BIN = fileURLToPath(new URL("../bin/awb-hook", import.meta.url));
+export const HOOK_SCRIPT = fileURLToPath(new URL("./hook-send.ts", import.meta.url));
 export const PLUGIN_DIR = fileURLToPath(new URL("../plugin", import.meta.url));
 
-export function awbSettings(home: string, hookBin = HOOK_BIN) {
-  const quoted = `'${hookBin.replaceAll("'", `'\\''`)}'`;
-  const entry = (matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command: quoted, timeout: 5 }] }];
+// Claude Code permission rules match POSIX-style paths. On Windows "C:\Users\me" is written "/c/Users/me".
+export const toRulePath = (p: string, platform: string = process.platform) =>
+  platform === "win32" ? p.replaceAll("\\", "/").replace(/^([A-Za-z]):/, (_, d: string) => `/${d.toLowerCase()}`) : p;
+
+export const hookCommand = (node = process.execPath, script = HOOK_SCRIPT) => [node, "--disable-warning=ExperimentalWarning", script].map(quote).join(" ");
+
+export function awbSettings(home: string, command = hookCommand()) {
+  const entry = (matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command, timeout: 5 }] }];
   return {
     env: { AWB_HOME: home },
     permissions: {
       additionalDirectories: [join(home, "repos")],
       deny: [
-        ...["awb.db*", "daemon.json", "tasks/**"].map((p) => `Edit(/${home}/${p})`),
+        ...["awb.db*", "daemon.json", "tasks/**"].map((p) => `Edit(/${toRulePath(home)}/${p})`),
       ],
     },
     hooks: Object.fromEntries(
@@ -27,10 +33,10 @@ export function awbSettings(home: string, hookBin = HOOK_BIN) {
 }
 
 export function gitInfo(cwd: string) {
-  const git = (...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  const git = (...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", windowsHide: true }).trim();
   const worktree = git("rev-parse", "--show-toplevel");
   const common = git("rev-parse", "--path-format=absolute", "--git-common-dir");
-  const repo = common.endsWith("/.git") ? common.slice(0, -5) : worktree;
+  const repo = /[\\/]\.git$/.test(common) ? resolve(common, "..") : resolve(worktree);
   const branch = git("rev-parse", "--abbrev-ref", "HEAD");
   return { repo, worktree, branch };
 }

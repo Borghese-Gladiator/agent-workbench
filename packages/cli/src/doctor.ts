@@ -46,7 +46,7 @@ export async function logChecks(logDir: string, alloy: string, loki: string, max
 
 function chromiumInstalled(): boolean {
   const dir = process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), "Library", "Caches", "ms-playwright");
-  const linux = join(homedir(), ".cache", "ms-playwright");
+  const linux = process.platform === "win32" ? join(process.env.LOCALAPPDATA || join(homedir(), "AppData", "Local"), "ms-playwright") : join(homedir(), ".cache", "ms-playwright");
   return [dir, linux].some((d) => existsSync(d) && readdirSync(d).some((n) => n.startsWith("chromium")));
 }
 
@@ -72,7 +72,7 @@ export function mcpChecks(listing: string | null, servers = MCP_SERVERS): Check[
 
 function mcpListing(): string | null {
   try {
-    return execFileSync("claude", ["mcp", "list"], { encoding: "utf8", timeout: 60_000 });
+    return execFileSync("claude", ["mcp", "list"], { encoding: "utf8", timeout: 60_000, shell: process.platform === "win32", windowsHide: true });
   } catch {
     return null;
   }
@@ -82,7 +82,7 @@ export async function doctor(home: string): Promise<boolean> {
   const checks: Check[] = [];
 
   try {
-    const v = execFileSync("claude", ["--version"], { encoding: "utf8" }).trim();
+    const v = execFileSync("claude", ["--version"], { encoding: "utf8", shell: process.platform === "win32", windowsHide: true }).trim();
     checks.push({ name: "claude", ok: true, detail: v });
   } catch {
     checks.push({ name: "claude", ok: false, detail: "not found on PATH", fix: "npm i -g @anthropic-ai/claude-code" });
@@ -107,7 +107,7 @@ export async function doctor(home: string): Promise<boolean> {
   checks.push(...mcpChecks(mcpListing()));
 
   checks.push(
-    ...(await logChecks(join(home, "logs"), process.env.AWB_ALLOY_URL || "http://127.0.0.1:12345", process.env.AWB_LOKI_URL || "http://127.0.0.1:3100", undefined, process.env.AWB_LOGS || join(homedir(), ".awb", "logs"))),
+    ...(await logChecks(join(home, "logs"), process.env.AWB_ALLOY_URL || "http://127.0.0.1:12345", process.env.AWB_LOKI_URL || "http://127.0.0.1:3100", undefined, process.env.AWB_LOGS || join(home, "logs"))),
   );
 
   for (const c of checks) {
