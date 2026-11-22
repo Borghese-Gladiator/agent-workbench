@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { quote } from "../../daemon/src/run-md.ts";
@@ -16,11 +17,24 @@ export const toRulePath = (p: string, platform: string = process.platform) =>
 
 export const hookCommand = (node = process.execPath, script = HOOK_SCRIPT) => [node, "--disable-warning=ExperimentalWarning", script].map(quote).join(" ");
 
-export function awbSettings(home: string, command = hookCommand()) {
+export function userStatusLine(settingsFile = join(homedir(), ".claude", "settings.json")): string | undefined {
+  try {
+    return JSON.parse(readFileSync(settingsFile, "utf8")).statusLine?.command;
+  } catch {
+    return undefined;
+  }
+}
+
+export const statusLineCommand = (userCommand?: string) => {
+  const tag = "printf '\\033[1m[AWB]\\033[0m\\n'";
+  return userCommand ? `${tag}; ${userCommand}` : tag;
+};
+
+export function awbSettings(home: string, command = hookCommand(), userStatus = userStatusLine()) {
   const entry = (matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command, timeout: 5 }] }];
   return {
     env: { AWB: "1", AWB_HOME: home },
-    statusLine: { type: "command", command: "echo [AWB]" },
+    statusLine: { type: "command", command: statusLineCommand(userStatus) },
     permissions: {
       additionalDirectories: [join(home, "repos")],
       deny: [
