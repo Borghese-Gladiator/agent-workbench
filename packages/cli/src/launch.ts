@@ -19,7 +19,8 @@ export const hookCommand = (node = process.execPath, script = HOOK_SCRIPT) => [n
 export function awbSettings(home: string, command = hookCommand()) {
   const entry = (matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command, timeout: 5 }] }];
   return {
-    env: { AWB_HOME: home },
+    env: { AWB: "1", AWB_HOME: home },
+    statusLine: { type: "command", command: "echo [AWB]" },
     permissions: {
       additionalDirectories: [join(home, "repos")],
       deny: [

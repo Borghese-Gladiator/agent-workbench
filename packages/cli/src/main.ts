@@ -599,7 +599,8 @@ async function launch(passThrough: string[]): Promise<number> {
   const claude = process.env.AWB_CLAUDE || "claude";
   mkdirSync(join(home, "repos"), { recursive: true });
   const args = claudeArgs(passThrough, playbookPath(git.worktree), awbSettings(home), repoRulesPath(home, git.repo), runFilePath(home, git.repo));
-  const child = spawn(claude, args, { cwd, stdio: "inherit", shell: needsShell(claude), env: { ...process.env, AWB_HOME: home, AWB_SESSION_ID: session.id } });
+  if (process.stdout.isTTY) process.stdout.write(`\x1b]0;[AWB] ${basename(git.repo)}\x07`);
+  const child = spawn(claude, args, { cwd, stdio: "inherit", shell: needsShell(claude), env: { ...process.env, AWB: "1", AWB_HOME: home, AWB_SESSION_ID: session.id } });
 
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"] as const) process.on(sig, () => child.kill(sig));
   const code: number = await new Promise((resolve) => {
