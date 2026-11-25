@@ -8,7 +8,7 @@ import type { Task } from "./stacks.ts";
 import { PLAYWRIGHT, git, run, startApp } from "./process.ts";
 import { seedCache, seedCopy } from "./seed.ts";
 import { PROOF_DIR, removeTests, repoTests, testHash } from "./proof-tests.ts";
-import { runTestWriter, runWriter, writeMissing, type ProveDeps, type WriterEnd } from "./writer.ts";
+import { runTestWriter, runWriter, writeMissing, eachClaim, type ProveDeps, type WriterEnd } from "./writer.ts";
 
 export { run, killChildren } from "./process.ts";
 export { seedCache, seedCopy } from "./seed.ts";
@@ -122,11 +122,14 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
   const head = git(worktree, "rev-parse", "HEAD");
   writeFileSync(join(proof, "sha.txt"), head + "\n");
 
+  const hintFile = join(worktree, ".awb", "prove.md");
+  if (existsSync(hintFile)) deps = { ...deps, hint: readFileSync(hintFile, "utf8").trim() };
+
   const removed = removeTests(rewrite, tests);
   if (removed.length) deps.log(`removed for a rewrite: ${removed.join(", ")}`);
 
   let writer: WriterEnd | null = null;
-  if (testCmd) writer = await writeMissing(testClaims, tests, proof, deps.log, (c) => runTestWriter(folder, worktree, c, testCmd, deps));
+  if (testCmd) writer = await writeMissing(testClaims, tests, proof, deps.log, (c) => eachClaim(c, (one) => runTestWriter(folder, worktree, one, testCmd, deps)));
 
   if (seed && !deps.seedDir) throw new Error("run.md has a '## seed' section, but no seed folder is set");
   const seedPath = seed ? seedCopy(await seedCache(seed, worktree, deps.seedDir!, proof, deps.log)) : undefined;
@@ -141,7 +144,7 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
           `import { test } from "@playwright/test";\ntest("seed", async ({ page }) => {\n  await page.goto(${JSON.stringify(runMd.ready)});\n});\n`,
         );
       }
-      writer = (await writeMissing(browserClaims, tests, proof, deps.log, (c) => runWriter(folder, c, app.url, runMd.ready, deps, seed?.about))) ?? writer;
+      writer = (await writeMissing(browserClaims, tests, proof, deps.log, (c) => eachClaim(c, (one) => runWriter(folder, one, app.url, runMd.ready, deps, seed?.about)))) ?? writer;
     }
 
     writeFileSync(join(proof, "test-hash.txt"), testHash(tests) + "\n");

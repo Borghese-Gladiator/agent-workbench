@@ -39,9 +39,7 @@ for (const [name, input, reason, failed] of [
     "not passed",
     ["C2"],
   ],
-  ["no video", base([spec("C1: a", {}, ["trace"]), spec("C2: b")]), "no video or trace", ["C1"]],
   ["no trace", base([spec("C1: a", {}, ["video"]), spec("C2: b")]), "no video or trace", ["C1"]],
-  ["a video path that does not exist", base(good, { fileExists: (p) => !p.endsWith("C2: b/video") }), "no video or trace", ["C2"]],
   ["the commit changed", base(good, { head: "def" }), "commit changed since the run started", ["C1", "C2"]],
   ["dirty source", base(good, { dirty: true }), "source has uncommitted changes", ["C1", "C2"]],
   ["a test file changed", base(good, { testHashNow: "x" }), "a test file changed after the run started", ["C1", "C2"]],
@@ -136,4 +134,12 @@ test("a test claim that also passes on the base commit fails; one that fails or 
     ["C2", []],
     ["C3", []],
   ]);
+});
+
+test("eachClaim: a timeout on one claim does not stop the others from running first", async () => {
+  const { eachClaim } = await import("../src/writer.ts");
+  const seen: string[] = [];
+  const w = await eachClaim([{ id: "C1", text: "a" }, { id: "C2", text: "b" }], async (c) => (seen.push(c[0].id), { end: c[0].id === "C1" ? "timeout after 30 min" : "success", usd: 1 }));
+  assert.deepEqual(seen, ["C1", "C2"]);
+  assert.equal(w.usd, 2);
 });

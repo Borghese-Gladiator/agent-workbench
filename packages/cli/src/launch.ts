@@ -48,12 +48,21 @@ export function awbSettings(home: string, command = hookCommand(), userStatus = 
 }
 
 export function gitInfo(cwd: string) {
-  const git = (...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", windowsHide: true }).trim();
+  const git = (...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
   const worktree = git("rev-parse", "--show-toplevel");
   const common = git("rev-parse", "--path-format=absolute", "--git-common-dir");
   const repo = /[\\/]\.git$/.test(common) ? resolve(common, "..") : resolve(worktree);
   const branch = git("rev-parse", "--abbrev-ref", "HEAD");
   return { repo, worktree, branch };
+}
+
+export function scopeInfo(cwd: string) {
+  try {
+    return gitInfo(cwd);
+  } catch {
+    const dir = resolve(cwd);
+    return { repo: dir, worktree: dir, branch: "" };
+  }
 }
 
 export function playbookPath(worktree: string): string {

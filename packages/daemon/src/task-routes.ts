@@ -33,12 +33,14 @@ export function taskRoutes(
     running.set(id, r);
     res.on("close", () => r.listeners.delete(res));
     res.writeHead(200, { "content-type": "application/x-ndjson" });
+    const beat = setInterval(() => { for (const l of r.listeners) l.write("\n"); }, 30_000);
     return {
       line: (o: Json) => {
         r.lines.push(o);
         for (const l of r.listeners) l.write(JSON.stringify(o) + "\n");
       },
       end: () => {
+        clearInterval(beat);
         running.delete(id);
         for (const l of r.listeners) l.end();
       },

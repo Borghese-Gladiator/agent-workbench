@@ -4,15 +4,25 @@ import { basename, join } from "node:path";
 import { needsShell, openCommand } from "../../daemon/src/platform.ts";
 import { runFilePath } from "../../daemon/src/run-md.ts";
 import { awbHome, ensureDaemon, findDaemon, api, reportCliError } from "./home.ts";
-import { gitInfo, playbookPath, claudeArgs, awbSettings, repoRulesPath, splitResume, resumeArgs } from "./launch.ts";
+import { gitInfo, scopeInfo, playbookPath, claudeArgs, awbSettings, repoRulesPath, splitResume, resumeArgs } from "./launch.ts";
 import { doctor } from "./doctor.ts";
 import { wtCmd } from "./wt.ts";
 import { loggingCmd } from "./logging.ts";
 import { helpFor, helpIndex } from "./help.ts";
 import { logText, type LogLine } from "../../daemon/src/log.ts";
 
+const args = process.argv.slice(2);
+if (args[0] === "-C") {
+  try {
+    process.chdir(args[1] ?? "");
+  } catch {
+    console.error(`awb: cannot enter ${args[1]}`);
+    process.exit(2);
+  }
+  args.splice(0, 2);
+}
 const home = awbHome();
-const [cmd, ...rest] = process.argv.slice(2);
+const [cmd, ...rest] = args;
 const flag = (name: string) => {
   const i = rest.indexOf(name);
   return i >= 0 ? rest[i + 1] : undefined;
@@ -132,7 +142,7 @@ switch (cmd) {
     break;
   }
   default:
-    process.exitCode = await launch(process.argv.slice(2));
+    process.exitCode = await launch(args);
 }
 
 async function scheduleCmd(args: string[]): Promise<number> {
@@ -291,8 +301,10 @@ async function streamNdjson(path: string, body: object, onResult: (r: any) => nu
     buf += decoder.decode(chunk, { stream: true });
     let i;
     while ((i = buf.indexOf("\n")) >= 0) {
-      const msg = JSON.parse(buf.slice(0, i));
+      const text = buf.slice(0, i);
       buf = buf.slice(i + 1);
+      if (!text) continue;
+      const msg = JSON.parse(text);
       if (msg.log) printError(`awb: ${msg.log}`);
       if (msg.error && msg.table) {
         printError(`awb: ${msg.error}`);
@@ -585,13 +597,7 @@ async function launch(passThrough: string[]): Promise<number> {
       return 1;
     }
   }
-  let git;
-  try {
-    git = gitInfo(cwd);
-  } catch {
-    console.error(`awb: not inside a git repo: ${cwd}`);
-    return 1;
-  }
+  const git = scopeInfo(cwd);
   daemon ??= await ensureDaemon(home);
   const session = await api(daemon, "/api/sessions", { ...git, pid: process.pid });
   console.error(`awb: session ${session.id} on ${git.branch}, daemon port ${daemon.port}`);

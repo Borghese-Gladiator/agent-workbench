@@ -36,7 +36,6 @@ You work inside Agent Workbench (`awb`). The workbench tracks this session and p
    The test writer names each file for its claim: `c1.test.ts` or `c1_test.py`. The gate maps a test to a claim from the file name.
    A task with only test claims does not need `## start`.
    If a fresh clone needs an install before the app can start, add a `## setup` section with a ```sh block, for example `npm ci`. The runner runs it in each new worktree.
-   If this branch changes how the app starts, write the new run file to `.awb/run.md` in the repo and commit it. That file wins over the run file outside the repo.
    If the proof needs data in the app, add a `## seed` section. Write what the data is in prose, then a ```sh block that writes the data to the folder `{seed}`, then a `key:` line with the repo files that the data depends on. `awb` runs the block one time and keeps the result until the block or a key file changes. Each proof gets a fresh copy, and `{seed}` in `## start` is the path of that copy.
    If the app needs secrets, for example an `.env` file, do not commit them. Ask the user to put the file in `$AWB_HOME/repos/<repo name>.env`. The runner copies it to `.env` in each new worktree before `## setup`.
 5. Write the code. If the task adds or changes a UI, read `{skills}/build-ui.md` first and follow it. It sets the stack, the default theme and the PWA claims. Add those claims to the task before you write the code. Run the repo lint, typecheck and unit tests, and fix every failure.
@@ -60,6 +59,17 @@ One session has a limit. If the feature needs more than about one session of wor
 3. Make sure that the run file exists (step 4 of the feature request), and push the current branch. The first task starts from the current branch, and the PR of the first task targets it.
 4. Run `awb run --wait`. A fresh session does each task in its own worktree. Each task branches from the task below, so the PRs stack. The command returns when the run is `done` or `stopped`. Each task can take 30 minutes or more, so run it in the background. Do not write your own wait loop: a stopped stack keeps its later tasks `waiting`.
 5. If a task fails, the stack stops. Run `awb show <task id>` to read the reason. To try again, run `awb retry <task id> --wait`.
+
+## Work in more than one repo
+
+If the session starts in a folder that is not a git repo (for example `~/Klaviyo/Repos`), the repo is not fixed. Pick it for each task.
+
+1. Find the repo. For a Sentry issue, use the path of the fault frame. For other work, ask the user if the repo is not clear.
+2. Make a worktree for the task. Use the `worktrees` skill.
+3. Read `$AWB_HOME/repos/<repo name>.md` for the rules of that repo. They win over this playbook. The run file is `$AWB_HOME/repos/<repo name>.run.md`.
+4. Run every `awb` command with `-C <worktree>`, for example `awb -C <worktree> prove`. The shell does not keep `cd` between commands, so do not use `cd`.
+5. Use `git -C <worktree>` for each git command.
+6. A session can work on a few repos at the same time. Each repo has its own task, branch and PR.
 
 ## Questions about tasks
 

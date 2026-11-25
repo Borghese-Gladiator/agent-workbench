@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeArgs, awbSettings, statusLineCommand, hookCommand, toRulePath, gitInfo, repoRulesPath, resumeArgs, splitResume, DEFAULT_PLAYBOOK, SKILLS_DIR, PLUGIN_DIR } from "../src/launch.ts";
+import { scopeInfo, claudeArgs, awbSettings, statusLineCommand, hookCommand, toRulePath, gitInfo, repoRulesPath, resumeArgs, splitResume, DEFAULT_PLAYBOOK, SKILLS_DIR, PLUGIN_DIR } from "../src/launch.ts";
 import { HOOK_EVENTS } from "../src/hook-send.ts";
 
 test("settings register the hook sender for every hook type, with AWB_HOME", () => {
@@ -95,4 +95,17 @@ test("--resume maps to claude --resume with the claude session id", () => {
   assert.deepEqual(splitResume(["--resume", "t1", "-p", "hi"]), { id: "t1", rest: ["-p", "hi"] });
   assert.deepEqual(splitResume(["--resume"]), { id: null, rest: [] });
   assert.equal(splitResume(["-p", "hi"]), null);
+});
+
+test("scopeInfo falls back to the folder when it is not a git repo", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "awb-scope-")));
+  assert.deepEqual(scopeInfo(dir), { repo: dir, worktree: dir, branch: "" });
+});
+
+test("scopeInfo returns the git repo when the folder is one", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "awb-scope-git-")));
+  execFileSync("git", ["init", "-q", "-b", "main", dir]);
+  execFileSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.hooksPath=/dev/null", "commit", "-q", "--allow-empty", "-m", "x"]);
+  assert.equal(scopeInfo(dir).repo, dir);
+  assert.equal(scopeInfo(dir).branch, "main");
 });

@@ -39,6 +39,9 @@ Stop the app servers that an earlier proof left running.`,
 Run the proof checks.
 
   --rewrite a,b   Rewrite the listed items.
+
+To guide the test writer, write notes in .awb/prove.md in the worktree.
+
   --json          Print the result as JSON.`,
   ship: `usage: awb ship [--json]
 
@@ -141,8 +144,10 @@ List worktrees.
 export const helpFor = (cmd: string | undefined) => (cmd ? HELP[cmd] : undefined);
 
 export const helpIndex = () =>
-  `usage: awb <command> [options]
+  `usage: awb [-C <dir>] <command> [options]
        awb [claude options]
+
+-C <dir>  Run the command as if awb started in <dir>. The repo of a command is the repo of <dir>.
 
 Commands:
 ${Object.entries(HELP)

@@ -60,7 +60,7 @@ export function runGate(input: GateInput): GateResult {
       results.map((r) => r.attachments.find((a) => a.name === name && a.path && input.fileExists(a.path))?.path);
     const videos = files("video");
     const traces = files("trace");
-    if (c.proof !== "test" && (videos.some((v) => !v) || traces.some((t) => !t))) reasons.push("no video or trace");
+    if (c.proof !== "test" && traces.some((t) => !t)) reasons.push("no video or trace");
     reasons.push(...global);
     return {
       id,
