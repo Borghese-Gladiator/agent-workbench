@@ -22,7 +22,7 @@ test("Overview shows the summary, the failed task once, and no sessions table", 
   await expect(attention).toContainText(/the gate failed at \w+: C2/);
   await expect(page.getByText(/the gate failed at \w+: C2/)).toHaveCount(1);
   await expect(page.getByRole("columnheader", { name: "Tokens in / out" })).toHaveCount(0);
-  await expect(page.locator("aside .foot")).toContainText("Today 2.70 USD");
+  await expect(page.locator("aside .foot")).toContainText("Today 3.45 USD");
   await shot(page, "1-overview");
 });
 
@@ -209,7 +209,7 @@ test("a big stack with long names keeps PR numbers, costs, indexes and branches 
 test("Stacks shows the state and the USD of each task, and the stack cost", async ({ page }) => {
   await page.goto("/#/stacks");
   await expect(row(page, "Scoreboard").locator("td.num")).toHaveText("1.35");
-  await expect(row(page, "Footer").locator("td.num")).toHaveText("1.35");
+  await expect(row(page, "Footer").locator("td.num")).toHaveText("2.10");
   await expect(row(page, "Broken").locator("td.num")).toHaveText("");
   await expect(row(page, "Footer")).toContainText("failed");
   await expect(row(page, "Broken")).toContainText("blocked");
