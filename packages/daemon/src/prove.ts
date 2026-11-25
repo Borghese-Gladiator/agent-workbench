@@ -150,7 +150,7 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
     writeFileSync(join(proof, "test-hash.txt"), testHash(tests) + "\n");
     if (app) {
       deps.log("proof run: playwright test");
-      const pw = await run(PLAYWRIGHT, ["test", "--config", "playwright.config.ts"], folder, "", 0, deps.signal);
+      const pw = await run(process.execPath, [PLAYWRIGHT, "test", "--config", "playwright.config.ts"], folder, "", 0, deps.signal);
       writeFileSync(join(proof, "run.log"), pw.out);
     }
     if (testClaims.length && testCmd) {

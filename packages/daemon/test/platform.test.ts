@@ -4,6 +4,12 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { basenameOf, needsShell, openCommand } from "../src/platform.ts";
 import { notifyCommand } from "../src/notify.ts";
+import { PLAYWRIGHT } from "../src/process.ts";
+
+test("PLAYWRIGHT is a script that node runs, not a .cmd file that needs a shell", () => {
+  assert.ok(PLAYWRIGHT.endsWith("cli.js"));
+  assert.equal(needsShell(PLAYWRIGHT, "win32"), false);
+});
 
 for (const [path, name] of [["/a/b", "b"], ["C:\\a\\b", "b"], ["C:/a/b", "b"], ["C:\\a\\b\\", "b"]]) {
   test(`basenameOf ${path}`, () => assert.equal(basenameOf(path), name));

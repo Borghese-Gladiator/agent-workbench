@@ -79,7 +79,7 @@ export async function runWriter(folder: string, claims: Claim[], url: string, re
     mcp,
     JSON.stringify({
       mcpServers: {
-        "playwright-test": { command: PLAYWRIGHT, args: ["run-test-mcp-server", "--headless", "-c", join(folder, "playwright.config.ts")] },
+        "playwright-test": { command: process.execPath, args: [PLAYWRIGHT, "run-test-mcp-server", "--headless", "-c", join(folder, "playwright.config.ts")] },
       },
     }),
   );
