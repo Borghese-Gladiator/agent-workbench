@@ -76,20 +76,7 @@ Make the smallest change at the root cause. Do not change the test. Commit: `fix
 
 Do not put `Fixes <SHORT-ID>`, `Resolves <SHORT-ID>` or a similar line in a commit message. Sentry reads these lines, and it resolves the issue when the commit merges. The short id in the title in parentheses is safe. Sentry ignores it.
 
-The PR body follows the repo PR template. If the template asks for `Fixes <SENTRY-SHORT-ID>` (the `app` template does), put that line in the PR body only.
-
-If the template has a `# Checklist` section, put only that section in a `<details>` element. The other sections stay open:
-
-```md
-<details>
-<summary>Checklist</summary>
-
-<the Checklist section of the template, with its heading and all its checkboxes>
-
-</details>
-```
-
-Keep a blank line after `<summary>` and before `</details>`, or GitHub does not render the Markdown inside.
+The PR body comes from `awb ship`, not from the repo PR template. Do not add a `Fixes <SENTRY-SHORT-ID>` line to a commit.
 
 ## 8. Get the "after" result
 
@@ -169,14 +156,13 @@ If the user asks for a PR, ship the branch with `awb ship`. Do not run `gh pr cr
 2. Create a task with one test claim. Send it on stdin to `awb stack set`:
    ```sh
    awb stack set <<'EOF'
-   {"tasks":[{"title":"fix: <what changed> (<SHORT-ID>)","claims":[{"id":"C1","proof":"test","text":"<the input of the event> no longer raises <exception type> in <function>"}]}]}
+   {"tasks":[{"title":"fix: <what changed> (<SHORT-ID>)","context":"<what the user sees, who it affects, the Sentry link>","description":"<the cause, the fix, and what the PR does not change>","claims":[{"id":"C1","proof":"test","text":"<the input of the event> no longer raises <exception type> in <function>"}]}]}
    EOF
    ```
 3. Run `awb prove`. A separate session writes its own test from the claim. The gate runs that test on the base commit and on your fix. The claim passes only when the test fails on the base and passes on the fix.
 4. If the claim fails, fix the code, commit, and run `awb prove` again. Do not edit the proof tests.
 5. Run `awb ship`. It opens the draft PR.
-6. `awb ship` puts the repo PR template in the PR body unfilled. If the template asks for `Fixes <SHORT-ID>` or a ticket link, add them to the PR body with `gh pr edit --body-file`. Keep the claim table. Link the proof file from `$AWB_HOME/sentry/<SHORT-ID>/proof.md` in the body.
-7. Do step 11.
+6. Do step 11.
 
 Never run `gh pr ready`, and never request reviewers.
 
@@ -184,6 +170,6 @@ For an error in fender with a browser path, the fix also needs a browser claim. 
 
 ## Rules
 
-- Do not write to Sentry or Slack. Do not resolve, assign or comment on an issue. A `Fixes <SHORT-ID>` line in a commit is a write to Sentry, so do not add one. A `Fixes` line in a PR body is correct only when the repo PR template asks for it.
+- Do not write to Sentry or Slack. Do not resolve, assign or comment on an issue. A `Fixes <SHORT-ID>` line in a commit is a write to Sentry, so do not add one. Do not edit the PR body after `awb ship`.
 - Do not weaken a test so that it passes.
 - Every number in the proof file comes from Sentry or from a command output.

@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { openStore } from "../src/store.ts";
 import { createStacks, migrateStacks, taskBranch } from "../src/stacks.ts";
 import { createRunner, initSessionId, retryCount, runStack, sessionEnd, STOPPED, taskPrompt, transientError, type RunState, type Session } from "../src/runner.ts";
@@ -11,7 +14,7 @@ const setup = () => {
   return createStacks(store.db, (id) => `/home/tasks/${id}`);
 };
 const where = { repo: "/r", branch: "main", base: "main" };
-const three = ["Accounts", "Save results", "Leaderboard"].map((title) => ({ title, claims: [{ id: "C1", text: `${title} works` }] }));
+const three = ["Accounts", "Save results", "Leaderboard"].map((title) => ({ title, context: "c", description: "d", claims: [{ id: "C1", text: `${title} works` }] }));
 const state = (stackId: string): RunState => ({ id: "run", stackId, state: "running", current: null, reason: null });
 
 test("a stack of three: one branch for each task, and the bases form a chain", () => {
@@ -28,7 +31,7 @@ test("a replace that moves a waiting task computes the bases again", () => {
   const s = setup();
   const { stack } = s.set({ ...where, tasks: three });
   const [a, b, c] = stack.tasks;
-  const r = s.set({ ...where, stackId: stack.id, version: 1, tasks: [a, c, b].map(({ id, title, claims }) => ({ id, title, claims })) });
+  const r = s.set({ ...where, stackId: stack.id, version: 1, tasks: [a, c, b].map(({ id, title, context, description, claims }) => ({ id, title, context, description, claims })) });
   const [x, y, z] = r.stack.tasks;
   assert.deepEqual([x.id, y.id, z.id], [a.id, c.id, b.id]);
   assert.deepEqual([x.base, y.base, z.base], ["main", a.branch, c.branch]);
@@ -37,7 +40,7 @@ test("a replace that moves a waiting task computes the bases again", () => {
 test("a new task in a replace gets its own branch on top", () => {
   const s = setup();
   const { stack } = s.set({ ...where, tasks: three.slice(0, 2) });
-  const r = s.set({ ...where, stackId: stack.id, version: 1, tasks: [...stack.tasks.map(({ id, title, claims }) => ({ id, title, claims })), three[2]] });
+  const r = s.set({ ...where, stackId: stack.id, version: 1, tasks: [...stack.tasks.map(({ id, title, context, description, claims }) => ({ id, title, context, description, claims })), three[2]] });
   const [, b, c] = r.stack.tasks;
   assert.match(c.branch!, /^awb\/leaderboard-/);
   assert.equal(c.base, b.branch);
@@ -198,11 +201,21 @@ test("stop fails the current task with the reason, and the later tasks stay wait
 
 test("run() with an aborted signal kills the child and its group", async () => {
   const ctrl = new AbortController();
-  const p = run("sh", ["-c", "sleep 30 & echo $!; wait"], "/", "", 0, ctrl.signal);
-  await new Promise((ok) => setTimeout(ok, 300));
+  const file = join(mkdtempSync(join(tmpdir(), "awb-abort-")), "pid");
+  const p = run("sh", ["-c", `sleep 30 & echo $! > ${file}; wait`], "/", "", 0, ctrl.signal);
+  for (let i = 0; i < 100 && !(existsSync(file) && readFileSync(file, "utf8").endsWith("\n")); i++) await new Promise((ok) => setTimeout(ok, 50));
+  const pid = Number(readFileSync(file, "utf8").trim());
   ctrl.abort();
   const r = await p;
-  const pid = Number(r.out.trim());
   assert.notEqual(r.code, 0);
-  assert.throws(() => process.kill(pid, 0));
+  let dead = false;
+  for (let i = 0; i < 40 && !dead; i++) {
+    try {
+      process.kill(pid, 0);
+      await new Promise((ok) => setTimeout(ok, 50));
+    } catch {
+      dead = true;
+    }
+  }
+  assert.ok(dead, "the sleep child is still alive");
 });

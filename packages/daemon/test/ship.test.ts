@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { prBody, findSecrets, syncStatus, readTemplate } from "../src/ship.ts";
+import { prBody, findSecrets, syncStatus } from "../src/ship.ts";
 import { gateFromDisk, testHash, removeTests } from "../src/prove.ts";
 import type { GateResult } from "../src/gate.ts";
 
@@ -21,6 +21,8 @@ const gate: GateResult = {
 const body = (videoUrls: Record<string, string[]>) =>
   prBody({
     title: "Add a scoreboard",
+    context: "Players cannot see who leads over many games.",
+    description: "Adds a session scoreboard to the page.",
     commits: ["abc123 feat: scoreboard"],
     claims,
     gate,
@@ -37,17 +39,48 @@ test("PR body: a row and a video link for each claim, the run facts and the spec
   assert.match(b, /\| C2 \| Counts draws \| PASS \| \[video\]\(https:\/\/gh\/c2\.webm\) \|/);
   assert.match(b, /Commit: `3f9c2a1abcdef`/);
   assert.match(b, /Start: `npx vite --port \{port\}`/);
-  assert.match(b, /<details><summary>1 proof test files[\s\S]*#### c1\.spec\.ts[\s\S]*C1: x[\s\S]*<\/details>/);
-  assert.match(b, /## Not proven\n\nNone\./);
+  assert.match(b, /<summary><h4>Test Code<\/h4><\/summary>\n\n1 proof test files[\s\S]*#### c1\.spec\.ts[\s\S]*C1: x[\s\S]*<\/details>/);
   assert.match(b, /Generated with \[Claude Code\]/);
 });
 
-test("PR body: the run facts are in a closed details block", () => {
-  assert.match(body({}), /<details><summary><b>How it was run<\/b><\/summary>\n\n- Start:[\s\S]*cookies\.\n\n<\/details>\n\n## Not proven/);
+test("PR body: Context and Description come first, then the Changes list", () => {
+  const b = body({});
+  assert.match(b, /^## Context\n\nPlayers cannot see who leads over many games\.\n\n## Description\n\nAdds a session scoreboard to the page\.\n\n#### Changes\n\n- abc123 feat: scoreboard\n/);
 });
 
-const withStack = (stack: { title: string; pr: number | null; current: boolean }[], template: string | null = null) =>
-  prBody({ title: "t", commits: [], claims, gate, videoUrls: {}, start: "s", tests: "x", folder: "/f", specs: [], stack, template });
+test("PR body: no commits, no Changes heading", () => {
+  const b = prBody({ title: "t", context: "c", description: "d", commits: [], claims, gate, videoUrls: {}, start: "s", tests: "x", folder: "/f", specs: [] });
+  assert.doesNotMatch(b, /#### Changes/);
+});
+
+test("PR body: the Features summary shows the result and the commit", () => {
+  const b = body({});
+  assert.match(b, /<summary><h4>Features: 2\/2 claims PASS at 3f9c2a1<\/h4><\/summary>\n\n\| Claim \| Sentence \| Result \| Video \|/);
+});
+
+test("PR body: the Test Plan lists the videos and the test command", () => {
+  const b = body({ C1: ["https://gh/c1.webm"], C2: ["https://gh/c2.webm"] });
+  assert.match(b, /## Test Plan\n\n- C1: \[video\]\(https:\/\/gh\/c1\.webm\)\n- C2: \[video\]\(https:\/\/gh\/c2\.webm\)\n\nTests: `playwright test`\n/);
+});
+
+test("PR body: the run facts are in a closed details block", () => {
+  assert.match(body({}), /<details>\n<summary><h4>How it was run<\/h4><\/summary>\n\n- Start:[\s\S]*cookies\.\n\n<\/details>/);
+});
+
+test("PR body: no Not proven section, and no Not tested line when every claim has a video", () => {
+  const b = body({ C1: ["https://gh/c1.webm"], C2: ["https://gh/c2.webm"] });
+  assert.doesNotMatch(b, /Not proven/);
+  assert.doesNotMatch(b, /Not tested/);
+});
+
+test("PR body: Test Code Output shows only when the author gives output", () => {
+  assert.doesNotMatch(body({}), /Test Code Output/);
+  const b = prBody({ title: "t", context: "c", description: "d", output: "ok 12 rows on prod\n", commits: [], claims, gate, videoUrls: {}, start: "s", tests: "x", folder: "/f", specs: [] });
+  assert.match(b, /<summary><h4>Test Code Output<\/h4><\/summary>\n\n````\nok 12 rows on prod\n````/);
+});
+
+const withStack = (stack: { title: string; pr: number | null; current: boolean }[]) =>
+  prBody({ title: "t", context: "c", description: "d", commits: [], claims, gate, videoUrls: {}, start: "s", tests: "x", folder: "/f", specs: [], stack });
 
 test("PR body: a stack of more than one task shows the merge order, open", () => {
   const b = withStack([
@@ -57,34 +90,18 @@ test("PR body: a stack of more than one task shows the merge order, open", () =>
   ]);
   assert.match(b, /<details open><summary><b>PR Merge Order<\/b><\/summary>/);
   assert.match(b, /\| 1 \| #11 \| Base \\\| layout \|\n\| 2 \| #12 \(this PR\) \| Carousel \|\n\| 3 \| not shipped \| Completed state \|/);
-  assert.ok(b.indexOf("PR Merge Order") < b.indexOf("## Features"));
+  assert.ok(b.indexOf("PR Merge Order") < b.indexOf("Features:"));
 });
 
-test("PR body: one task, no merge order; no template, no template block", () => {
+test("PR body: one task, no merge order", () => {
   const b = withStack([{ title: "Only", pr: 5, current: true }]);
   assert.doesNotMatch(b, /PR Merge Order/);
-  assert.doesNotMatch(b, /PR template/);
 });
 
-test("PR body: the repo template goes in a closed details block before the footer", () => {
-  const b = withStack([], "## Checklist\n\n- [ ] Tests");
-  assert.match(b, /<details><summary><b>PR template<\/b> \(awb does not fill it\)<\/summary>\n\n## Checklist\n\n- \[ \] Tests\n\n<\/details>\n\n🤖 Generated/);
-});
-
-test("readTemplate finds the GitHub template, and gives null when none or empty", () => {
-  const dir = mkdtempSync(join(tmpdir(), "awb-tpl-"));
-  assert.equal(readTemplate(dir), null);
-  mkdirSync(join(dir, ".github"));
-  writeFileSync(join(dir, ".github", "pull_request_template.md"), "  \n");
-  assert.equal(readTemplate(dir), null);
-  writeFileSync(join(dir, ".github", "pull_request_template.md"), "## Checklist\n");
-  assert.equal(readTemplate(dir), "## Checklist");
-});
-
-test("PR body: a claim with no uploaded video is listed under Not proven", () => {
+test("PR body: a claim with no uploaded video is listed in the Not tested line", () => {
   const b = body({ C1: ["https://gh/c1.webm"] });
   assert.match(b, /\| C2 \| Counts draws \| PASS \| none \|/);
-  assert.match(b, /- C2: no video uploaded\./);
+  assert.match(b, /Not tested: C2 has no video\./);
 });
 
 for (const [kind, text] of [
@@ -166,7 +183,7 @@ test("removeTests deletes only the specs that name a listed claim, and never the
 
 test("PR body: a test claim shows repo test, and no video is missing for it", () => {
   const b = prBody({
-    title: "Engine",
+    title: "Engine", context: "c", description: "d",
     commits: [],
     claims: [{ id: "C1", text: "replans", proof: "test" }],
     gate: { ...gate, rows: [{ id: "C1", tests: 1, status: "PASS", reasons: [], videos: [], traces: [] }] },
@@ -177,7 +194,7 @@ test("PR body: a test claim shows repo test, and no video is missing for it", ()
     specs: [],
   });
   assert.match(b, /\| C1 \| replans \| PASS \| repo test \|/);
-  assert.match(b, /## Not proven\n\nNone\./);
+  assert.doesNotMatch(b, /Not tested/);
 });
 
 test("test files: the claim comes from the file name, in each language", async () => {

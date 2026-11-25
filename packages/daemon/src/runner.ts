@@ -57,6 +57,9 @@ export function taskPrompt(task: Task, below: Task[]): string {
       ? `The tasks below this one are done, and their code is on your branch: ${below.map((t) => `"${t.title}"`).join(", ")}.`
       : "This is the first task of the stack.",
     `You are on the branch ${task.branch}, and the task already exists in awb, so do not run awb stack set and do not make a branch.`,
+    `The context of this task: ${task.context}`,
+    `The description of this task: ${task.description}`,
+    "These two texts become the first two sections of the PR body. If the work changes what they say, ask the user to run awb stack set again.",
     "The claims of this task:",
     ...task.claims.map((c) => `- ${c.id}${c.proof === "test" ? " (proven by a repo test)" : ""}: ${c.text}`),
     "Follow the playbook from step 4: check the run file, write the code, commit, run awb prove until every claim passes, then run awb ship.",

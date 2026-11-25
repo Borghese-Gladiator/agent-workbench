@@ -50,7 +50,7 @@ after(async () => {
 });
 
 test("prove passes C1, fails C2, and leaves no awb file in the repo", async () => {
-  const stack = { tasks: [{ title: "add", claims: [{ id: "C1", text: "add(2, 3) is 5", proof: "test" }, { id: "C2", text: "add(2, 2) is 5", proof: "test" }] }] };
+  const stack = { tasks: [{ title: "add", context: "c", description: "d", claims: [{ id: "C1", text: "add(2, 3) is 5", proof: "test" }, { id: "C2", text: "add(2, 2) is 5", proof: "test" }] }] };
   const set = await awb(["stack", "set"], { cwd: repo, env: env(), input: JSON.stringify(stack) });
   assert.equal(set.code, 0, set.stderr);
 

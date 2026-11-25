@@ -22,7 +22,7 @@ const setup = (file = ":memory:", opts = {}) => {
   return { store, stacks: createStacks(store.db, (id) => join(root, id)) };
 };
 const where = { repo: "/r", branch: "main", base: "main" };
-const two = ["A", "B"].map((title) => ({ title, claims: [{ id: "C1", text: `${title} works` }] }));
+const two = ["A", "B"].map((title) => ({ title, context: "c", description: "d", claims: [{ id: "C1", text: `${title} works` }] }));
 const state = (stackId: string): RunState => ({ id: "run-1", stackId, state: "running", current: null, reason: null });
 
 test("prices: a known model, a dated id by prefix, and no cost for an unknown model", () => {

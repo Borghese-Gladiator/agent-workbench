@@ -9,6 +9,8 @@ export type Task = {
   stack_id: string;
   position: number;
   title: string;
+  context: string;
+  description: string;
   claims: Claim[];
   status: TaskStatus;
   branch: string | null;
@@ -39,7 +41,7 @@ export const FINISHED: string[] = ["done", "merged", "closed"];
 
 export type Stack = { id: string; repo: string; base: string | null; version: number; created_at: string; tasks: Task[] };
 
-export type TaskInput = { id?: string; title: string; claims: Claim[] };
+export type TaskInput = { id?: string; title: string; context: string; description: string; claims: Claim[] };
 
 export type StackChanges = { added: string[]; removed: string[]; changed: string[]; moved: string[] };
 
@@ -94,6 +96,7 @@ export function migrateStacks(db: DatabaseSync) {
   const stackCols = (db.prepare("PRAGMA table_info(stacks)").all() as { name: string }[]).map((c) => c.name);
   if (!stackCols.includes("base")) db.exec("ALTER TABLE stacks ADD COLUMN base TEXT;");
   if (!cols.includes("fail_reason")) db.exec("ALTER TABLE tasks ADD COLUMN fail_reason TEXT;");
+  if (!cols.includes("context")) db.exec("ALTER TABLE tasks ADD COLUMN context TEXT NOT NULL DEFAULT ''; ALTER TABLE tasks ADD COLUMN description TEXT NOT NULL DEFAULT '';");
   const attemptCols = (db.prepare("PRAGMA table_info(attempts)").all() as { name: string }[]).map((c) => c.name);
   if (!attemptCols.includes("writer_usd")) db.exec("ALTER TABLE attempts ADD COLUMN writer_usd REAL;");
   db.exec(`
@@ -119,6 +122,9 @@ export function validateTasks(tasks: unknown): TaskInput[] {
   return tasks.map((t, i) => {
     if (!t || typeof t.title !== "string" || !t.title.trim()) throw new StackError(`task ${i}: missing title`, 400);
     if (!Array.isArray(t.claims) || t.claims.length === 0) throw new StackError(`task ${i}: missing claims`, 400);
+    for (const k of ["context", "description"]) {
+      if (typeof t[k] !== "string" || !t[k].trim()) throw new StackError(`task ${i}: missing ${k}`, 400);
+    }
     const ids = new Set<string>();
     for (const c of t.claims) {
       if (!c || typeof c.id !== "string" || !/^C\d+$/.test(c.id)) throw new StackError(`task ${i}: claim id must look like C1`, 400);
@@ -131,6 +137,8 @@ export function validateTasks(tasks: unknown): TaskInput[] {
     return {
       id: typeof t.id === "string" ? t.id : undefined,
       title: t.title.trim(),
+      context: t.context.trim(),
+      description: t.description.trim(),
       claims: t.claims.map((c: Claim) => ({ id: c.id, text: c.text.trim(), ...(c.proof === "test" ? { proof: "test" as const } : {}) })),
     };
   });
@@ -162,9 +170,9 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     ),
     bump: db.prepare("UPDATE stacks SET version = version + 1 WHERE id = ?"),
     addTask: db.prepare(
-      "INSERT INTO tasks (id, stack_id, position, title, claims, status, branch, base, folder, created_at) VALUES (?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?)",
+      "INSERT INTO tasks (id, stack_id, position, title, context, description, claims, status, branch, base, folder, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?)",
     ),
-    updTask: db.prepare("UPDATE tasks SET position = ?, title = ?, claims = ? WHERE id = ?"),
+    updTask: db.prepare("UPDATE tasks SET position = ?, title = ?, context = ?, description = ?, claims = ? WHERE id = ?"),
     delTask: db.prepare("DELETE FROM tasks WHERE id = ?"),
     delGates: db.prepare("DELETE FROM gate_results WHERE attempt_id IN (SELECT id FROM attempts WHERE task_id = ?)"),
     delAttempts: db.prepare("DELETE FROM attempts WHERE task_id = ?"),
@@ -220,7 +228,7 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
     stack.tasks.forEach((t, position) => {
       if (t.status === "waiting" && (t.base !== base || t.position !== position)) {
         q.updBase.run(base, t.id);
-        q.updTask.run(position, t.title, JSON.stringify(t.claims), t.id);
+        q.updTask.run(position, t.title, t.context, t.description, JSON.stringify(t.claims), t.id);
       }
       base = t.branch;
     });
@@ -255,7 +263,7 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
           input.tasks.forEach((t, position) => {
             const taskId = randomUUID();
             const branch = input.tasks.length === 1 ? input.branch : taskBranch(t.title, taskId);
-            q.addTask.run(taskId, id, position, t.title, JSON.stringify(t.claims), branch, base, taskFolder(taskId), now);
+            q.addTask.run(taskId, id, position, t.title, t.context, t.description, JSON.stringify(t.claims), branch, base, taskFolder(taskId), now);
             changes.added.push(taskId);
             base = branch;
           });
@@ -279,18 +287,19 @@ export function createStacks(db: DatabaseSync, taskFolder: (taskId: string) => s
           if (t.id && !old) throw new StackError(`task ${t.id} is not in stack ${current.id}`, 404);
           if (!old) {
             const taskId = randomUUID();
-            q.addTask.run(taskId, current.id, position, t.title, JSON.stringify(t.claims), taskBranch(t.title, taskId), null, taskFolder(taskId), now);
+            q.addTask.run(taskId, current.id, position, t.title, t.context, t.description, JSON.stringify(t.claims), taskBranch(t.title, taskId), null, taskFolder(taskId), now);
             changes.added.push(taskId);
             return;
           }
-          const edited = old.title !== t.title || JSON.stringify(old.claims) !== JSON.stringify(t.claims);
+          const edited =
+            old.title !== t.title || old.context !== t.context || old.description !== t.description || JSON.stringify(old.claims) !== JSON.stringify(t.claims);
           const moved = old.position !== position;
           if ((edited || moved) && old.status !== "waiting") {
             throw new StackError(`task ${old.id} is ${old.status}; only waiting tasks can change`);
           }
           if (edited) changes.changed.push(old.id);
           if (moved) changes.moved.push(old.id);
-          if (edited || moved) q.updTask.run(position, t.title, JSON.stringify(t.claims), old.id);
+          if (edited || moved) q.updTask.run(position, t.title, t.context, t.description, JSON.stringify(t.claims), old.id);
         });
         rebase(current.id, input.base);
         const any = changes.added.length + changes.removed.length + changes.changed.length + changes.moved.length;

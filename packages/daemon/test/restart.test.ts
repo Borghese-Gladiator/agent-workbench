@@ -10,7 +10,7 @@ import { currentLimit, setStackLimit } from "../src/config.ts";
 import { killLeftovers, setLeftoverFile } from "../src/process.ts";
 import { runGate } from "../src/gate.ts";
 
-const tasks = [1, 2, 3].map((n) => ({ title: `T${n}`, claims: [{ id: "C1", text: "x" }] }));
+const tasks = [1, 2, 3].map((n) => ({ title: `T${n}`, context: "c", description: "d", claims: [{ id: "C1", text: "x" }] }));
 const make = () => {
   const store = openStore(":memory:");
   migrateStacks(store.db);

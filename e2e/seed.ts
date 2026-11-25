@@ -30,8 +30,8 @@ const { stack } = stacks.set({
   branch: "awb/seed-done",
   base: "main",
   tasks: [
-    { title: "Seed done task", claims: [{ id: "C1", text: "The page shows Hello" }] },
-    { title: "Seed failed task", claims: [{ id: "C1", text: "The page shows Bye" }, { id: "C2", text: "Reset clears the list" }] },
+    { title: "Seed done task", context: "c", description: "d", claims: [{ id: "C1", text: "The page shows Hello" }] },
+    { title: "Seed failed task", context: "c", description: "d", claims: [{ id: "C1", text: "The page shows Bye" }, { id: "C2", text: "Reset clears the list" }] },
   ],
 });
 const [done, failed] = stack.tasks;
@@ -58,7 +58,7 @@ stacks.set({
   repo: "/tmp/seed-repo-2",
   branch: "awb/seed-waiting",
   base: "main",
-  tasks: [{ title: "Seed waiting task", claims: [{ id: "C1", text: "The page shows Hi" }] }],
+  tasks: [{ title: "Seed waiting task", context: "c", description: "d", claims: [{ id: "C1", text: "The page shows Hi" }] }],
 });
 
 const { stack: shipped } = stacks.set({
@@ -66,8 +66,8 @@ const { stack: shipped } = stacks.set({
   branch: "awb/seed-shipped",
   base: "main",
   tasks: [
-    { title: "Seed merged task", claims: [{ id: "C1", text: "The page shows Yes" }] },
-    { title: "Seed closed task", claims: [{ id: "C1", text: "The page shows No" }] },
+    { title: "Seed merged task", context: "c", description: "d", claims: [{ id: "C1", text: "The page shows Yes" }] },
+    { title: "Seed closed task", context: "c", description: "d", claims: [{ id: "C1", text: "The page shows No" }] },
   ],
 });
 stacks.setStatus(shipped.tasks[0].id, "merged");

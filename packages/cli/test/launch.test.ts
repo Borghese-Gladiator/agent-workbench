@@ -52,6 +52,13 @@ for (const passThrough of [["--resume"], ["--resume", "abc"], ["-p", "hello worl
   });
 }
 
+test("the playbook says the awb PR body wins over /pr-draft and the repo template, and keeps the draft rule", () => {
+  const prompt = claudeArgs([], DEFAULT_PLAYBOOK, {})[1];
+  assert.match(prompt, /The PR body comes only from `awb ship`/);
+  assert.match(prompt, /Do not use the `\/pr-draft` skill/);
+  assert.match(prompt, /Never move it out of draft/);
+});
+
 test("the playbook points UI work at the build-ui skill by a real path", () => {
   const prompt = claudeArgs([], DEFAULT_PLAYBOOK, {}, undefined, "/h/repos/games.run.md")[1];
   assert.ok(!prompt.includes("{run_file}"));

@@ -179,7 +179,7 @@ export function taskRoutes(
       const { line, end } = begin(t.id, "ship", res);
       try {
         log("info", "ship", "start", { task: t.id, branch: t.branch });
-        const r = await ship(t, b.worktree, readRunFile(home, b.repo, b.worktree), (msg) => (line({ log: msg }), log("info", "ship", "step", { task: t.id, msg })), stacks.get(t.stack_id)?.tasks);
+        const r = await ship(t, b.worktree, readRunFile(home, b.repo, b.worktree), (msg) => (line({ log: msg }), log("info", "ship", "step", { task: t.id, msg })), stacks.get(t.stack_id)?.tasks, typeof b.output === "string" ? b.output : null);
         stacks.setPr(t.id, r.number, r.url);
         log("info", "ship", "pr", { task: t.id, pr: r.number, url: r.url });
         line({ result: { url: r.url, number: r.number, table: r.table, taskId: t.id } });

@@ -126,9 +126,9 @@ const env = withPath(
 
 const STACK = {
   tasks: [
-    { title: "Scoreboard", claims: [{ id: "C1", text: "The page shows the Demo heading." }] },
-    { title: "Footer", claims: [{ id: "C1", text: "The page shows the Demo heading." }, { id: "C2", text: "The page shows a footer." }] },
-    { title: "Broken", claims: [{ id: "C1", text: "The page shows the Demo heading." }, { id: "C3", text: "The page shows a Missing button." }] },
+    { title: "Scoreboard", context: "c", description: "d", claims: [{ id: "C1", text: "The page shows the Demo heading." }] },
+    { title: "Footer", context: "c", description: "d", claims: [{ id: "C1", text: "The page shows the Demo heading." }, { id: "C2", text: "The page shows a footer." }] },
+    { title: "Broken", context: "c", description: "d", claims: [{ id: "C1", text: "The page shows the Demo heading." }, { id: "C3", text: "The page shows a Missing button." }] },
   ],
 };
 

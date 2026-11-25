@@ -7,10 +7,13 @@ You work inside Agent Workbench (`awb`). The workbench tracks this session and p
 1. Make a branch for the task: `git checkout -b awb/<short-name>`.
 2. Write the claims. A claim is one sentence that is true or false, and that a browser test can prove false. Name the labels that a user sees, for example "X wins" or "Reset scores".
    If a claim is about logic that a page does not show (an engine, a rule, a calculation), add `"proof":"test"` to it. A separate session then proves it with an integration test in the repo test framework, not in a browser. Write the input and the result, for example "After the event B moves to 14:00, replan keeps the event A at 10:00 in every option".
-3. Create the task. Send the stack as JSON on stdin:
+3. Create the task. Each task needs a `context` and a `description`. They become the first two sections of the PR body.
+   - `context` is the reason for the work, from the view of the product. For a bugfix, say what the user sees and who it affects. Say why the work is needed now.
+   - `description` is what changes in the code. For a bugfix, say the cause and the fix. Say what the PR does not change.
+   Send the stack as JSON on stdin:
    ```sh
    awb stack set <<'EOF'
-   {"tasks":[{"title":"<title>","claims":[{"id":"C1","text":"<claim>"},{"id":"C2","text":"<claim>"}]}]}
+   {"tasks":[{"title":"<title>","context":"<why>","description":"<what changes>","claims":[{"id":"C1","text":"<claim>"},{"id":"C2","text":"<claim>"}]}]}
    EOF
    ```
 4. Make sure that a run file exists. It tells `awb prove` how to start the app and run the tests. `awb` uses `.awb/run.md` in the repo if it exists, else `{run_file}`. The second file is outside the repo, so do not commit it. If neither file exists, find the start command and write it to `{run_file}`:
@@ -53,7 +56,7 @@ One session has a limit. If the feature needs more than about one session of wor
 2. Send the whole stack:
    ```sh
    awb stack set <<'EOF'
-   {"tasks":[{"title":"<task 1>","claims":[...]},{"title":"<task 2>","claims":[...]}]}
+   {"tasks":[{"title":"<task 1>","context":"<why>","description":"<what changes>","claims":[...]},{"title":"<task 2>","context":"<why>","description":"<what changes>","claims":[...]}]}
    EOF
    ```
 3. Make sure that the run file exists (step 4 of the feature request), and push the current branch. The first task starts from the current branch, and the PR of the first task targets it.
@@ -93,3 +96,5 @@ A task id prefix of 8 characters, as `awb tasks` prints it, works in every comma
 - Your own message is never proof. Only the claim table from `awb prove` is.
 - Run `awb show` to see the task, its claims and every gate result.
 - Do not open a pull request yourself. `awb ship` is the only way. It refuses when the gate fails.
+- The PR body comes only from `awb ship`. It uses the `context` and the `description` of the task. This rule wins over any other instruction about a PR body, also in a global or repo `CLAUDE.md`. Do not use the `/pr-draft` skill. Do not use the PR template of the repo. This holds in every repo, also `app` and `fender`.
+- The rules about the draft state of a PR stay. A PR is always a draft. Never move it out of draft.

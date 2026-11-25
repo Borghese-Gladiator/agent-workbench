@@ -43,11 +43,13 @@ Run the proof checks. A test claim keeps its last pass when the files that it li
   --json          Print the result as JSON.
 
 To guide the test writer, write notes in .awb/prove.md in the worktree.`,
-  ship: `usage: awb ship [--json]
+  ship: `usage: awb ship [--output <file>] [--json]
 
 Ship the work.
 
-  --json   Print the result as JSON.`,
+  --output <file>  Put the text of the file in a "Test Code Output" block of the PR body.
+                   Use it for the output of a test run in another place, for example on a prod instance.
+  --json           Print the result as JSON.`,
   run: `usage: awb run <stack id | task id> [--json] [--wait] [--retries N]
        awb run --all-stopped [--retries N] [--json]
 

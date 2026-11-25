@@ -37,7 +37,7 @@ async function daemon() {
   return { store, stacks, runner, stop, close };
 }
 
-const tasks = [{ title: "A", claims: [{ id: "C1", text: "x" }] }, { title: "B", claims: [{ id: "C1", text: "y" }] }];
+const tasks = [{ title: "A", context: "c", description: "d", claims: [{ id: "C1", text: "x" }] }, { title: "B", context: "c", description: "d", claims: [{ id: "C1", text: "y" }] }];
 
 test("POST /api/stop with a stack id prefix stops the run; unknown and idle ids give 404 and 409", async () => {
   const d = await daemon();
