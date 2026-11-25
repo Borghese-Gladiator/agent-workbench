@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { openStore } from "../src/store.ts";
 import { createStacks, migrateStacks, taskBranch } from "../src/stacks.ts";
 import { createRunner, initSessionId, retryCount, runStack, sessionEnd, STOPPED, taskPrompt, transientError, type RunState, type Session } from "../src/runner.ts";
@@ -198,11 +201,20 @@ test("stop fails the current task with the reason, and the later tasks stay wait
 
 test("run() with an aborted signal kills the child and its group", async () => {
   const ctrl = new AbortController();
-  const p = run("sh", ["-c", "sleep 30 & echo $!; wait"], "/", "", 0, ctrl.signal);
-  await new Promise((ok) => setTimeout(ok, 300));
+  const file = join(mkdtempSync(join(tmpdir(), "awb-abort-")), "pid");
+  const p = run("sh", ["-c", `sleep 30 & echo $! > ${file}; wait`], "/", "", 0, ctrl.signal);
+  for (let i = 0; i < 100 && !(existsSync(file) && readFileSync(file, "utf8").endsWith("\n")); i++) await new Promise((ok) => setTimeout(ok, 50));
+  const pid = Number(readFileSync(file, "utf8").trim());
   ctrl.abort();
   const r = await p;
-  const pid = Number(r.out.trim());
   assert.notEqual(r.code, 0);
+  for (let i = 0; i < 40; i++) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      break;
+    }
+    await new Promise((ok) => setTimeout(ok, 50));
+  }
   assert.throws(() => process.kill(pid, 0));
 });

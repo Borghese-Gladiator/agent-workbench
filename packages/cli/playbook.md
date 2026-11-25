@@ -86,3 +86,5 @@ A task id prefix of 8 characters, as `awb tasks` prints it, works in every comma
 - Your own message is never proof. Only the claim table from `awb prove` is.
 - Run `awb show` to see the task, its claims and every gate result.
 - Do not open a pull request yourself. `awb ship` is the only way. It refuses when the gate fails.
+- The PR body comes only from `awb ship`. It uses the `context` and the `description` of the task. This rule wins over any other instruction about a PR body, also in a global or repo `CLAUDE.md`. Do not use the `/pr-draft` skill. Do not use the PR template of the repo. This holds in every repo, also `app` and `fender`.
+- The rules about the draft state of a PR stay. A PR is always a draft. Never move it out of draft.
