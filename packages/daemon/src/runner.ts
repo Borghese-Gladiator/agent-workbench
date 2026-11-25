@@ -161,7 +161,8 @@ export function claudeSession(opts: { home: string; repo: string; timeoutMin: nu
       mkdirSync(join(opts.home, "worktrees"), { recursive: true });
       await run("git", ["fetch", "-q", "origin"], opts.repo, "", 0, signal);
       const base = (await run("git", ["rev-parse", "--verify", "-q", task.base!], opts.repo)).code === 0 ? task.base! : `origin/${task.base}`;
-      const add = await run("git", ["worktree", "add", "-b", task.branch!, worktree, base], opts.repo);
+      const exists = (await run("git", ["rev-parse", "--verify", "-q", `refs/heads/${task.branch}`], opts.repo)).code === 0;
+      const add = await run("git", ["worktree", "add", ...(exists ? [worktree, task.branch!] : ["-b", task.branch!, worktree, base])], opts.repo);
       if (add.code !== 0) throw new Error(`git worktree add failed: ${add.out.trim()}`);
       const env = envFilePath(opts.home, opts.repo);
       if (existsSync(env)) copyFileSync(env, join(worktree, ".env"));
