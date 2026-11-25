@@ -3,11 +3,11 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { commandOf, hide, killTree, needsShell, WIN } from "./platform.ts";
+import { commandOf, hide, killTree, needsShell } from "./platform.ts";
 import { fill, type RunMd } from "./run-md.ts";
 
 const PKG = fileURLToPath(new URL("..", import.meta.url));
-export const PLAYWRIGHT = join(PKG, "..", "..", "node_modules", ".bin", WIN ? "playwright.cmd" : "playwright");
+export const PLAYWRIGHT = join(PKG, "..", "..", "node_modules", "@playwright", "test", "cli.js");
 
 export const git = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", ...hide }).trim();
 

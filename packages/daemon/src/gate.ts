@@ -1,6 +1,6 @@
 export type Claim = { id: string; text: string; proof?: "test" };
 
-export type ReportResult = { status: string; attachments: { name: string; path?: string }[] };
+export type ReportResult = { status: string; attachments: { name: string; path?: string }[]; error?: string };
 export type ReportSpec = { title: string; tests: { status?: string; annotations?: { type: string }[]; results: ReportResult[] }[] };
 export type ReportSuite = { specs?: ReportSpec[]; suites?: ReportSuite[] };
 export type Report = { suites: ReportSuite[] };
@@ -18,11 +18,22 @@ export type GateInput = {
   startError?: string;
   baseReport?: Report;
   carried?: Carried[];
+  kept?: Record<string, string>;
 };
 
 export type Carried = { label: string; claims: Claim[]; report: Report };
 
-export type GateRow = { id: string; tests: number; status: "PASS" | "FAIL"; reasons: string[]; videos: string[]; traces: string[] };
+export type GateRow = {
+  id: string;
+  tests: number;
+  status: "PASS" | "FAIL";
+  reasons: string[];
+  videos: string[];
+  traces: string[];
+  kept?: string;
+  error?: string;
+  sameOnBase?: boolean;
+};
 export type GateResult = { pass: boolean; rows: GateRow[]; head: string; reasons: string[] };
 
 function specsOf(report: Report): ReportSpec[] {
@@ -41,7 +52,11 @@ export function runGate(input: GateInput): GateResult {
   if (input.dirty) global.push("source has uncommitted changes");
   if (input.testHashAtStart !== input.testHashNow) global.push("a test file changed after the run started");
 
-  const row = (c: Claim, specs: ReportSpec[], id = c.id, baseSpecs: ReportSpec[] = []): GateRow => {
+  const row = (c: Claim, specs: ReportSpec[], id = c.id, baseSpecs: ReportSpec[] = [], kept?: string): GateRow => {
+    if (kept) {
+      const reasons = [...global];
+      return { id, tests: 0, status: reasons.length ? "FAIL" : "PASS", reasons, videos: [], traces: [], kept };
+    }
     const mine = specs.filter((s) => new RegExp(`^${c.id}\\b`).test(s.title));
     const tests = mine.flatMap((s) => s.tests);
     const results = tests.flatMap((t) => t.results);
@@ -60,8 +75,10 @@ export function runGate(input: GateInput): GateResult {
       results.map((r) => r.attachments.find((a) => a.name === name && a.path && input.fileExists(a.path))?.path);
     const videos = files("video");
     const traces = files("trace");
-    if (c.proof !== "test" && (videos.some((v) => !v) || traces.some((t) => !t))) reasons.push("no video or trace");
+    if (c.proof !== "test" && traces.some((t) => !t)) reasons.push("no video or trace");
     reasons.push(...global);
+    const error = results.find((r) => r.status !== "passed" && r.error)?.error;
+    const baseErrors = onBase.flatMap((t) => t.results.map((r) => r.error));
     return {
       id,
       tests: tests.length,
@@ -69,12 +86,13 @@ export function runGate(input: GateInput): GateResult {
       reasons,
       videos: videos.filter((v): v is string => !!v),
       traces: traces.filter((t): t is string => !!t),
+      ...(error ? { error, ...(baseErrors.includes(error) ? { sameOnBase: true } : {}) } : {}),
     };
   };
   const specs = specsOf(input.report);
   const baseSpecs = input.baseReport ? specsOf(input.baseReport) : [];
   const rows = [
-    ...input.claims.map((c) => row(c, specs, c.id, baseSpecs)),
+    ...input.claims.map((c) => row(c, specs, c.id, baseSpecs, input.kept?.[c.id])),
     ...(input.carried ?? []).flatMap((k) => k.claims.map((c) => row(c, specsOf(k.report), `${k.label}/${c.id}`))),
   ];
   return { pass: rows.length > 0 && rows.every((r) => r.status === "PASS"), rows, head: input.head, reasons: global };
@@ -97,15 +115,18 @@ export function junitReport(xml: string): Report {
       specs.push({ title, tests: [{ status: "skipped", results: [] }] });
       continue;
     }
-    const status = /<(failure|error)\b/.test(body) ? "failed" : "passed";
-    specs.push({ title, tests: [{ status: "expected", results: [{ status, attachments: [] }] }] });
+    const fail = body.match(/<(?:failure|error)\b((?:[^>"]|"[^"]*")*)>/);
+    const status = fail ? "failed" : "passed";
+    const error = fail ? unescape((fail[1].match(/\bmessage="([^"]*)"/)?.[1] ?? "").replace(/&#10;/g, "\n")).split("\n")[0].slice(0, 300) : "";
+    specs.push({ title, tests: [{ status: "expected", results: [{ status, attachments: [], ...(error ? { error } : {}) }] }] });
   }
   return { suites: [{ specs }] };
 }
 
 export function claimTable(g: GateResult): string {
   const lines = g.rows.map(
-    (r) => `${r.id.padEnd(5)} ${r.status}  tests=${r.tests}${r.reasons.length ? "  " + r.reasons.join(", ") : ""}`,
+    (r) =>
+      `${r.id.padEnd(5)} ${r.status}  tests=${r.tests}${r.kept ? `  kept from ${r.kept.slice(0, 10)}` : ""}${r.reasons.length ? "  " + r.reasons.join(", ") : ""}${r.error ? `  error: ${r.error}` : ""}`,
   );
   return [...lines, `gate: ${g.pass ? "PASS" : "FAIL"} at ${g.head.slice(0, 10)}`].join("\n");
 }

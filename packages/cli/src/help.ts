@@ -34,12 +34,15 @@ The value is from 1 to 5. A lower limit never stops a run. It refuses new runs u
   cleanup: `usage: awb cleanup
 
 Stop the app servers that an earlier proof left running.`,
-  prove: `usage: awb prove [--json] [--rewrite a,b]
+  prove: `usage: awb prove [--json] [--rewrite a,b] [--all]
 
-Run the proof checks.
+Run the proof checks. A test claim keeps its last pass when the files that it lists did not change.
 
   --rewrite a,b   Rewrite the listed items.
-  --json          Print the result as JSON.`,
+  --all           Run every claim again. Keep no earlier pass.
+  --json          Print the result as JSON.
+
+To guide the test writer, write notes in .awb/prove.md in the worktree.`,
   ship: `usage: awb ship [--output <file>] [--json]
 
 Ship the work.
@@ -143,8 +146,10 @@ List worktrees.
 export const helpFor = (cmd: string | undefined) => (cmd ? HELP[cmd] : undefined);
 
 export const helpIndex = () =>
-  `usage: awb <command> [options]
+  `usage: awb [-C <dir>] <command> [options]
        awb [claude options]
+
+-C <dir>  Run the command as if awb started in <dir>. The repo of a command is the repo of <dir>.
 
 Commands:
 ${Object.entries(HELP)

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { quote } from "../../daemon/src/run-md.ts";
@@ -16,10 +17,24 @@ export const toRulePath = (p: string, platform: string = process.platform) =>
 
 export const hookCommand = (node = process.execPath, script = HOOK_SCRIPT) => [node, "--disable-warning=ExperimentalWarning", script].map(quote).join(" ");
 
-export function awbSettings(home: string, command = hookCommand()) {
+export function userStatusLine(settingsFile = join(homedir(), ".claude", "settings.json")): string | undefined {
+  try {
+    return JSON.parse(readFileSync(settingsFile, "utf8")).statusLine?.command;
+  } catch {
+    return undefined;
+  }
+}
+
+export const statusLineCommand = (userCommand?: string) => {
+  const tag = "printf '\\033[1m[AWB]\\033[0m\\n'";
+  return userCommand ? `${tag}; ${userCommand}` : tag;
+};
+
+export function awbSettings(home: string, command = hookCommand(), userStatus = userStatusLine()) {
   const entry = (matcher?: string) => [{ ...(matcher ? { matcher } : {}), hooks: [{ type: "command", command, timeout: 5 }] }];
   return {
-    env: { AWB_HOME: home },
+    env: { AWB: "1", AWB_HOME: home },
+    statusLine: { type: "command", command: statusLineCommand(userStatus) },
     permissions: {
       additionalDirectories: [join(home, "repos")],
       deny: [
@@ -33,12 +48,21 @@ export function awbSettings(home: string, command = hookCommand()) {
 }
 
 export function gitInfo(cwd: string) {
-  const git = (...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", windowsHide: true }).trim();
+  const git = (...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim();
   const worktree = git("rev-parse", "--show-toplevel");
   const common = git("rev-parse", "--path-format=absolute", "--git-common-dir");
   const repo = /[\\/]\.git$/.test(common) ? resolve(common, "..") : resolve(worktree);
   const branch = git("rev-parse", "--abbrev-ref", "HEAD");
   return { repo, worktree, branch };
+}
+
+export function scopeInfo(cwd: string) {
+  try {
+    return gitInfo(cwd);
+  } catch {
+    const dir = resolve(cwd);
+    return { repo: dir, worktree: dir, branch: "" };
+  }
 }
 
 export function playbookPath(worktree: string): string {

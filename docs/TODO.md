@@ -9,6 +9,29 @@
 - [ ] **No gate for the dark screenshot.** `build-ui.md` section 6 asks for a dark screenshot at 1440px of each main screen. No code checks that the agent took it. Add a claim type or a gate step that fails when the file is missing.
 - [ ] **Proof does not show that a test fails on broken code.** A pass on the first run does not show that the test can fail. Add a mutation step: break the changed code on a copy, run the tests, and require a failure.
 
+## Proof cost
+
+Video and trace stay on for browser claims. The gate needs them as evidence. Do not reduce them.
+
+- [ ] **Optional limits for the test writer.** Add a setting for the model, the turn count and the cost of one writer session. No setting has a default. With no setting, `runClaude` in `packages/daemon/src/writer.ts` passes no flag, as it does now. With a setting, it passes the matching `claude` flag. The timeout setting in "The test writer times out under machine load" belongs with these settings. Claims for the proof:
+  - With no setting, the writer arguments have no model flag, no turn flag and no cost flag.
+  - With each setting, the writer arguments have the matching flag and value.
+  - A value that is not valid fails with a clear message before the session starts.
+- [ ] **Run only the claims that a code change can affect.** Done for Node test claims. `prove` sets `NODE_V8_COVERAGE` for the head run, so the list of files for each claim is measured and not written by the writer. `prove` saves the list with each pass in `passes.json`. A later run keeps the pass when the test and the listed files did not change, and the gate row reads "kept from <sha>". A lock file, a config file or a file that the list misses runs the claim. `awb prove --all` runs every claim. Open:
+  - Browser claims and Python tests give no list, so they always run. Add a list for Python with `coverage.py`.
+  - A test that runs the code in a child process that does not inherit the environment gives an incomplete list. Find out if this happens in the repos we use.
+  - Carried tasks still rerun. Use the saved lists to keep them.
+- [ ] **Carried tasks rerun on every proof run.** `carriedClaims` in `packages/daemon/src/task-helpers.ts` adds each passed test claim of the tasks below, and `prove` runs them again. Use the file list from the item above. Rerun a carried claim only when the diff since its last pass touches its files. The carried tasks exist to catch a regression from a higher task, so keep the full rerun when the file list is missing. Claim for the proof: a task that changes only its own files keeps all carried claims and starts no carried test run.
+- [ ] **Do not repeat the base run for the same test.** The base run is not a repeat. It proves that a test fails on the old code. But it runs again on each proof run, also when the test file and the merge base did not change. Save the base result with the hash of the test file and the merge base sha. Reuse the result when both match. Run the base commit only for claims that pass on the head commit. Claims for the proof:
+  - A second `awb prove` with the same test hash and the same merge base does not switch the worktree to the base commit.
+  - A changed test file runs the base run again for that claim only.
+- [ ] **Question: can the writer run count as the proof run?** The test writer runs the tests in its own session, and `runRepoTests` runs them again. The second run is independent of the writer, and the gate needs that. Decide whether to keep both. A cheaper option: keep the proof run, and tell the writer to run its tests only once at the end. Measure the share of writer time that goes to test runs before a change.
+
+## Windows
+
+- [ ] **Claude writer sessions survive a daemon restart.** `run()` in `packages/daemon/src/process.ts` adds each child to the `groups` set in memory only. `remember` records only the app process from `startApp`. After a restart, `killLeftovers` cannot find the writer sessions. The old sessions keep running while the resumed run starts new ones. Record each `run()` child in the leftover file, and forget it when it ends. Claim for the proof: after a forced daemon restart in the middle of a writer session, `killLeftovers` ends that session.
+- [ ] **Hook processes can open a console window.** Claude Code starts `hook-send.ts` on each tool call (`PreToolUse` and `PostToolUse` with matcher `*`). Our code cannot set `windowsHide` for them. Find out on Windows whether a window opens. If it does, send the events from one long-lived process, or use an HTTP hook, in place of a new `node` process for each call. Keep the draft PR block in `blockReason`.
+
 ## UI
 
 - [ ] **The Stacks State column hides the real status.** The dark 1440px screenshot of the Stacks page shows "Seed merged task" as Done and "Seed closed task" as Waiting. The State column uses `stepStates` in `packages/daemon/ui/select.ts`, which maps merged to done and closed to waiting. The Merged and Closed filters then list rows with a different label. Show the real task status in the column. Claim for the proof: with the Closed filter, the row state reads "Closed".

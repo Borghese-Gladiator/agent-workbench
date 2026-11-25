@@ -194,3 +194,34 @@ test("seed: a failed seed command writes seed.log, throws, and leaves no cache",
   assert.match(readFileSync(join(root, "seed.log"), "utf8"), /boom/);
   assert.deepEqual(readdirSync(dir), []);
 });
+
+test("prove: a second run keeps a passed claim when no file that its test loaded changed, and --all runs it again", async () => {
+  const { repo, task, deps } = setup("a + b");
+  const first = await prove(task, repo, RUN_MD, deps);
+  assert.equal(first.gate.rows[0].kept, undefined);
+  const passes = JSON.parse(readFileSync(join(task.folder, "passes.json"), "utf8"));
+  assert.deepEqual(passes.C1.files, ["add.mjs"]);
+
+  writeFileSync(join(repo, "other.txt"), "x");
+  git(repo, "add", ".");
+  git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "-c", "core.hooksPath=/dev/null", "commit", "-qm", "other");
+  const second = await prove(task, repo, RUN_MD, deps);
+  assert.equal(second.gate.rows[0].kept, undefined, "an unlisted file runs every claim");
+
+  const head = git(repo, "rev-parse", "HEAD").trim();
+  const third = await prove(task, repo, RUN_MD, deps);
+  assert.equal(third.gate.rows[0].kept, head, "nothing changed since the pass, so the claim is kept");
+  assert.equal(third.gate.pass, true);
+
+  const all = await prove(task, repo, RUN_MD, deps, [], [], true);
+  assert.equal(all.gate.rows[0].kept, undefined, "all runs the claim again");
+});
+
+test("prove: a claim whose loaded file changed runs again and fails on broken code", async () => {
+  const { repo, task, deps } = setup("a + b");
+  await prove(task, repo, RUN_MD, deps);
+  commit(repo, "a - b");
+  const r = await prove(task, repo, RUN_MD, deps);
+  assert.equal(r.gate.rows[0].kept, undefined);
+  assert.equal(r.gate.pass, false);
+});

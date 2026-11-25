@@ -58,7 +58,7 @@ test("prove passes C1, fails C2, and leaves no awb file in the repo", async () =
   assert.notEqual(prove.code, 0, "prove passed with a failing claim");
   assert.match(prove.stdout, /^C1 +PASS/m);
   assert.match(prove.stdout, /^C2 +FAIL.*not passed/m);
-  assert.match(prove.stdout, /test writer: success, 2 turns, 0\.12 USD, limit 30 min/);
+  assert.match(prove.stdout, /test writer: success, 2 turns; success, 2 turns, 0\.24 USD, limit 30 min/);
 
   assert.equal(await git(repo, "status", "--porcelain"), "");
 });

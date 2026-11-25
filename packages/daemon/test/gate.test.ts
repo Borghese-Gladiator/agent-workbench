@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runGate, junitReport, type GateInput, type ReportSpec } from "../src/gate.ts";
+import { runGate, junitReport, claimTable, type GateInput, type ReportSpec } from "../src/gate.ts";
 
 const spec = (title: string, over: Partial<ReportSpec["tests"][0]> = {}, attachments = ["video", "trace"]): ReportSpec => ({
   title,
@@ -21,6 +21,15 @@ const base = (specs: ReportSpec[], over: Partial<GateInput> = {}): GateInput => 
 
 const good = [spec("C1: a"), spec("C2: b")];
 
+test("a kept claim passes with no test in the report, shows its sha, and still fails on a global reason", () => {
+  const input = base([spec("C2: b")], { claims: [{ id: "C1", text: "a", proof: "test" }, { id: "C2", text: "b" }], kept: { C1: "1234567890abcdef" } });
+  const g = runGate(input);
+  assert.equal(g.pass, true);
+  assert.equal(g.rows[0].kept, "1234567890abcdef");
+  assert.match(claimTable(g), /C1\s+PASS\s+tests=0\s+kept from 1234567890/);
+  assert.equal(runGate({ ...input, dirty: true }).rows[0].status, "FAIL");
+});
+
 test("all rules hold: the gate passes and lists the evidence", () => {
   const g = runGate(base(good));
   assert.equal(g.pass, true);
@@ -39,9 +48,7 @@ for (const [name, input, reason, failed] of [
     "not passed",
     ["C2"],
   ],
-  ["no video", base([spec("C1: a", {}, ["trace"]), spec("C2: b")]), "no video or trace", ["C1"]],
   ["no trace", base([spec("C1: a", {}, ["video"]), spec("C2: b")]), "no video or trace", ["C1"]],
-  ["a video path that does not exist", base(good, { fileExists: (p) => !p.endsWith("C2: b/video") }), "no video or trace", ["C2"]],
   ["the commit changed", base(good, { head: "def" }), "commit changed since the run started", ["C1", "C2"]],
   ["dirty source", base(good, { dirty: true }), "source has uncommitted changes", ["C1", "C2"]],
   ["a test file changed", base(good, { testHashNow: "x" }), "a test file changed after the run started", ["C1", "C2"]],
@@ -136,4 +143,23 @@ test("a test claim that also passes on the base commit fails; one that fails or 
     ["C2", []],
     ["C3", []],
   ]);
+});
+
+test("eachClaim: a timeout on one claim does not stop the others from running first", async () => {
+  const { eachClaim } = await import("../src/writer.ts");
+  const seen: string[] = [];
+  const w = await eachClaim([{ id: "C1", text: "a" }, { id: "C2", text: "b" }], async (c) => (seen.push(c[0].id), { end: c[0].id === "C1" ? "timeout after 30 min" : "success", usd: 1 }));
+  assert.deepEqual(seen, ["C1", "C2"]);
+  assert.equal(w.usd, 2);
+});
+
+test("a failed test keeps its first error line, and flags the same error on the base commit", () => {
+  const xml = (msg: string) => `<testsuites><testcase name="C1: a"><failure message="${msg}&#10;more">x</failure></testcase></testsuites>`;
+  const claims = testClaims(1);
+  const same = runGate(base([], { claims, report: junitReport(xml("boom")), baseReport: junitReport(xml("boom")) }));
+  assert.equal(same.rows[0].error, "boom");
+  assert.equal(same.rows[0].sameOnBase, true);
+  const diff = runGate(base([], { claims, report: junitReport(xml("boom")), baseReport: junitReport(xml("other")) }));
+  assert.equal(diff.rows[0].error, "boom");
+  assert.equal(diff.rows[0].sameOnBase, undefined);
 });

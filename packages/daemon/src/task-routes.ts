@@ -33,12 +33,14 @@ export function taskRoutes(
     running.set(id, r);
     res.on("close", () => r.listeners.delete(res));
     res.writeHead(200, { "content-type": "application/x-ndjson" });
+    const beat = setInterval(() => { for (const l of r.listeners) l.write("\n"); }, 30_000);
     return {
       line: (o: Json) => {
         r.lines.push(o);
         for (const l of r.listeners) l.write(JSON.stringify(o) + "\n");
       },
       end: () => {
+        clearInterval(beat);
         running.delete(id);
         for (const l of r.listeners) l.end();
       },
@@ -148,7 +150,7 @@ export function taskRoutes(
       log("info", "prove", "start", { ...ids, rewrite: rewrite.length ? rewrite : undefined });
       let after: TaskStatus = before === "failed" ? "failed" : "waiting";
       try {
-        const r = await prove(t, b.worktree, readRunFile(home, b.repo, b.worktree), { ...proveDeps, deadline: Number(b.deadline) || undefined, seedDir: seedDir(home, b.repo), signal: ctrl.signal, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite, carriedClaims(stacks, t));
+        const r = await prove(t, b.worktree, readRunFile(home, b.repo, b.worktree), { ...proveDeps, deadline: Number(b.deadline) || undefined, seedDir: seedDir(home, b.repo), signal: ctrl.signal, log: (msg) => (line({ log: msg }), log("info", "prove", "step", { ...ids, msg })) }, rewrite, carriedClaims(stacks, t), b.all === true);
         stacks.saveGate(attempt, r.gate);
         if (r.writer?.usd != null) stacks.setWriterCost(attempt, r.writer.usd);
         const failed = r.gate.rows.filter((x) => x.status === "FAIL").map((x) => `${x.id}: ${x.reasons.join(", ")}`);

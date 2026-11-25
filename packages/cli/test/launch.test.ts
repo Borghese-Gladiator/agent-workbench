@@ -4,13 +4,15 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claudeArgs, awbSettings, hookCommand, toRulePath, gitInfo, repoRulesPath, resumeArgs, splitResume, DEFAULT_PLAYBOOK, SKILLS_DIR, PLUGIN_DIR } from "../src/launch.ts";
+import { scopeInfo, claudeArgs, awbSettings, statusLineCommand, hookCommand, toRulePath, gitInfo, repoRulesPath, resumeArgs, splitResume, DEFAULT_PLAYBOOK, SKILLS_DIR, PLUGIN_DIR } from "../src/launch.ts";
 import { HOOK_EVENTS } from "../src/hook-send.ts";
 
 test("settings register the hook sender for every hook type, with AWB_HOME", () => {
   const command = hookCommand("/opt/node/node", "/opt/awb/hook-send.ts");
-  const s = awbSettings("/h", command);
-  assert.deepEqual(s.env, { AWB_HOME: "/h" });
+  const s = awbSettings("/h", command, "bash ~/.claude/statusline.sh");
+  assert.deepEqual(s.env, { AWB: "1", AWB_HOME: "/h" });
+  assert.deepEqual(s.statusLine, { type: "command", command: `${statusLineCommand()}; bash ~/.claude/statusline.sh` });
+  assert.equal(awbSettings("/h", command, "").statusLine.command, statusLineCommand());
   assert.deepEqual(Object.keys(s.hooks), [...HOOK_EVENTS]);
   for (const [name, [entry]] of Object.entries(s.hooks)) {
     assert.equal(entry.hooks[0].command, command);
@@ -100,4 +102,17 @@ test("--resume maps to claude --resume with the claude session id", () => {
   assert.deepEqual(splitResume(["--resume", "t1", "-p", "hi"]), { id: "t1", rest: ["-p", "hi"] });
   assert.deepEqual(splitResume(["--resume"]), { id: null, rest: [] });
   assert.equal(splitResume(["-p", "hi"]), null);
+});
+
+test("scopeInfo falls back to the folder when it is not a git repo", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "awb-scope-")));
+  assert.deepEqual(scopeInfo(dir), { repo: dir, worktree: dir, branch: "" });
+});
+
+test("scopeInfo returns the git repo when the folder is one", () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "awb-scope-git-")));
+  execFileSync("git", ["init", "-q", "-b", "main", dir]);
+  execFileSync("git", ["-C", dir, "-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.hooksPath=/dev/null", "commit", "-q", "--allow-empty", "-m", "x"]);
+  assert.equal(scopeInfo(dir).repo, dir);
+  assert.equal(scopeInfo(dir).branch, "main");
 });

@@ -3,12 +3,13 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runGate, claimTable, junitReport, type Carried, type Claim, type GateResult, type Report } from "./gate.ts";
-import { parseRunMd, parseSeed, parseTest, fillTest } from "./run-md.ts";
+import { parseRunMd, parseSeed, parseTest, fillTest, quote } from "./run-md.ts";
 import type { Task } from "./stacks.ts";
 import { PLAYWRIGHT, git, run, startApp } from "./process.ts";
 import { seedCache, seedCopy } from "./seed.ts";
-import { PROOF_DIR, removeTests, repoTests, testHash } from "./proof-tests.ts";
-import { runTestWriter, runWriter, writeMissing, type ProveDeps, type WriterEnd } from "./writer.ts";
+import { PROOF_DIR, removeTests, repoTests, testFileClaim, testHash } from "./proof-tests.ts";
+import { claimHash, coverageFiles, keptClaims, readPasses, savePasses, type Passes } from "./claim-files.ts";
+import { runTestWriter, runWriter, writeMissing, eachClaim, type ProveDeps, type WriterEnd } from "./writer.ts";
 
 export { run, killChildren } from "./process.ts";
 export { seedCache, seedCopy } from "./seed.ts";
@@ -34,8 +35,8 @@ export default defineConfig({
 `;
 }
 
-async function runRepoTests(folder: string, worktree: string, testCmd: string, log: (l: string) => void, from = folder, name = "junit", signal?: AbortSignal) {
-  const files = repoTests(join(from, "proof-tests"));
+async function runRepoTests(folder: string, worktree: string, testCmd: string, log: (l: string) => void, from = folder, name = "junit", signal?: AbortSignal, skip: string[] = []) {
+  const files = repoTests(join(from, "proof-tests")).filter((f) => !skip.includes(testFileClaim(f)!));
   const work = join(worktree, PROOF_DIR);
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work);
@@ -43,8 +44,14 @@ async function runRepoTests(folder: string, worktree: string, testCmd: string, l
     for (const f of files) copyFileSync(join(from, "proof-tests", f), join(work, f));
     const cmd = fillTest(testCmd, files.map((f) => `${PROOF_DIR}/${f}`), join(folder, "proof", `${name}.xml`));
     log(`proof run${name === "base-junit" ? " on the base commit" : ""}: ${cmd}`);
-    const r = await run("sh", ["-c", `export PYTHONDONTWRITEBYTECODE=1\n${cmd}`], worktree, "", 0, signal);
+    const cov = name === "junit" ? join(folder, "proof", "coverage") : "";
+    const covEnv = cov ? `export NODE_V8_COVERAGE=${quote(cov)}\n` : "";
+    const r = await run("sh", ["-c", `export PYTHONDONTWRITEBYTECODE=1\n${covEnv}${cmd}`], worktree, "", 0, signal);
     writeFileSync(join(folder, "proof", `${name.replace(/junit$/, "test")}.log`), r.out);
+    if (cov) {
+      writeFileSync(join(folder, "proof", "claim-files.json"), JSON.stringify(Object.fromEntries(coverageFiles(cov, worktree))));
+      rmSync(cov, { recursive: true, force: true });
+    }
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -60,7 +67,7 @@ function mergeBase(worktree: string, base: string | null): string | null {
   return null;
 }
 
-async function runBaseTests(task: Task, folder: string, worktree: string, testCmd: string, log: (l: string) => void, signal?: AbortSignal) {
+async function runBaseTests(task: Task, folder: string, worktree: string, testCmd: string, log: (l: string) => void, signal?: AbortSignal, skip: string[] = []) {
   const sha = mergeBase(worktree, task.base);
   if (!sha) return log(`base run skipped: no merge base with ${task.base ?? "(no base)"}`);
   if (git(worktree, "status", "--porcelain") !== "") return log("base run skipped: the worktree has uncommitted changes");
@@ -68,7 +75,7 @@ async function runBaseTests(task: Task, folder: string, worktree: string, testCm
   const branch = git(worktree, "rev-parse", "--abbrev-ref", "HEAD");
   git(worktree, "switch", "-q", "--detach", sha);
   try {
-    await runRepoTests(folder, worktree, testCmd, log, folder, "base-junit", signal);
+    await runRepoTests(folder, worktree, testCmd, log, folder, "base-junit", signal, skip);
   } finally {
     git(worktree, "switch", "-q", ...(branch === "HEAD" ? ["--detach", head] : [branch]));
   }
@@ -89,6 +96,7 @@ export function gateFromDisk(claims: Claim[], folder: string, worktree: string):
     dirty: git(worktree, "status", "--porcelain") !== "",
     testHashAtStart: read("test-hash.txt"),
     testHashNow: testHash(join(folder, "proof-tests")),
+    kept: read("kept.json") ? JSON.parse(read("kept.json")) : undefined,
     fileExists: existsSync,
     writerEnd: read("writer-end.txt") || undefined,
     baseReport: read("base-junit.xml") ? junitReport(read("base-junit.xml")) : undefined,
@@ -102,7 +110,15 @@ export type CarriedTask = { label: string; claims: Claim[]; folder: string };
 
 export type ProveResult = { gate: GateResult; table: string; folder: string; writer: WriterEnd | null };
 
-export async function prove(task: Task, worktree: string, runMdText: string, deps: ProveDeps, rewrite: string[] = [], carried: CarriedTask[] = []): Promise<ProveResult> {
+function changedSince(worktree: string, sha: string): string[] | null {
+  try {
+    return git(worktree, "diff", "--name-only", `${sha}..HEAD`).split("\n").filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+export async function prove(task: Task, worktree: string, runMdText: string, deps: ProveDeps, rewrite: string[] = [], carried: CarriedTask[] = [], all = false): Promise<ProveResult> {
   const browserClaims = task.claims.filter((c) => c.proof !== "test");
   const testClaims = task.claims.filter((c) => c.proof === "test");
   const runMd = browserClaims.length ? parseRunMd(runMdText) : null;
@@ -122,11 +138,14 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
   const head = git(worktree, "rev-parse", "HEAD");
   writeFileSync(join(proof, "sha.txt"), head + "\n");
 
+  const hintFile = join(worktree, ".awb", "prove.md");
+  if (existsSync(hintFile)) deps = { ...deps, hint: readFileSync(hintFile, "utf8").trim() };
+
   const removed = removeTests(rewrite, tests);
   if (removed.length) deps.log(`removed for a rewrite: ${removed.join(", ")}`);
 
   let writer: WriterEnd | null = null;
-  if (testCmd) writer = await writeMissing(testClaims, tests, proof, deps.log, (c) => runTestWriter(folder, worktree, c, testCmd, deps));
+  if (testCmd) writer = await writeMissing(testClaims, tests, proof, deps.log, (c) => eachClaim(c, (one) => runTestWriter(folder, worktree, one, testCmd, deps)));
 
   if (seed && !deps.seedDir) throw new Error("run.md has a '## seed' section, but no seed folder is set");
   const seedPath = seed ? seedCopy(await seedCache(seed, worktree, deps.seedDir!, proof, deps.log)) : undefined;
@@ -141,18 +160,23 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
           `import { test } from "@playwright/test";\ntest("seed", async ({ page }) => {\n  await page.goto(${JSON.stringify(runMd.ready)});\n});\n`,
         );
       }
-      writer = (await writeMissing(browserClaims, tests, proof, deps.log, (c) => runWriter(folder, c, app.url, runMd.ready, deps, seed?.about))) ?? writer;
+      writer = (await writeMissing(browserClaims, tests, proof, deps.log, (c) => eachClaim(c, (one) => runWriter(folder, one, app.url, runMd.ready, deps, seed?.about)))) ?? writer;
     }
 
     writeFileSync(join(proof, "test-hash.txt"), testHash(tests) + "\n");
     if (app) {
       deps.log("proof run: playwright test");
-      const pw = await run(PLAYWRIGHT, ["test", "--config", "playwright.config.ts"], folder, "", 0, deps.signal);
+      const pw = await run(process.execPath, [PLAYWRIGHT, "test", "--config", "playwright.config.ts"], folder, "", 0, deps.signal);
       writeFileSync(join(proof, "run.log"), pw.out);
     }
-    if (testClaims.length && testCmd) {
-      await runRepoTests(folder, worktree, testCmd, deps.log, folder, "junit", deps.signal);
-      await runBaseTests(task, folder, worktree, testCmd, deps.log, deps.signal);
+    const passes = readPasses(folder);
+    const kept = all ? {} : keptClaims(testClaims, tests, passes, (sha) => changedSince(worktree, sha));
+    const keptIds = Object.keys(kept);
+    writeFileSync(join(proof, "kept.json"), JSON.stringify(kept));
+    if (keptIds.length) deps.log(`kept from an earlier pass, files not changed: ${keptIds.join(", ")}`);
+    if (testClaims.length && testCmd && keptIds.length < testClaims.length) {
+      await runRepoTests(folder, worktree, testCmd, deps.log, folder, "junit", deps.signal, keptIds);
+      await runBaseTests(task, folder, worktree, testCmd, deps.log, deps.signal, keptIds);
     }
     if (carried.length && testCmd) {
       writeFileSync(join(proof, "carried.json"), JSON.stringify(carried));
@@ -162,6 +186,18 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
 
     const gate = gateFromDisk(task.claims, folder, worktree);
     writeFileSync(join(proof, "gate.json"), JSON.stringify(gate, null, 2));
+    const coveredFile = join(proof, "claim-files.json");
+    const covered: Record<string, string[]> = existsSync(coveredFile) ? JSON.parse(readFileSync(coveredFile, "utf8")) : {};
+    const next: Passes = { ...passes };
+    for (const c of testClaims) {
+      const row = gate.rows.find((r) => r.id === c.id);
+      if (row?.status !== "PASS") delete next[c.id];
+      else if (!kept[c.id]) {
+        if (covered[c.id]?.length) next[c.id] = { sha: gate.head, hash: claimHash(tests, c.id), files: covered[c.id] };
+        else delete next[c.id];
+      }
+    }
+    savePasses(folder, next);
     return { gate, table: claimTable(gate), folder, writer };
   } finally {
     app?.stop();

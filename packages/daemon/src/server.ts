@@ -66,9 +66,10 @@ async function route(
   }
   if (req.method === "POST" && url.pathname === "/api/sessions") {
     const body = await readJson(req);
-    for (const k of ["repo", "worktree", "branch"]) {
+    for (const k of ["repo", "worktree"]) {
       if (typeof body[k] !== "string" || !body[k]) throw new Error(`missing ${k}`);
     }
+    if (typeof body.branch !== "string") throw new Error("missing branch");
     const s = store.register({ id: randomUUID(), repo: body.repo, worktree: body.worktree, branch: body.branch, pid: body.pid });
     broadcast(s.id);
     return send(res, 201, s);
