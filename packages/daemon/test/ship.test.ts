@@ -48,6 +48,11 @@ test("PR body: Context and Description come first, then the Changes list", () =>
   assert.match(b, /^## Context\n\nPlayers cannot see who leads over many games\.\n\n## Description\n\nAdds a session scoreboard to the page\.\n\n#### Changes\n\n- abc123 feat: scoreboard\n/);
 });
 
+test("PR body: no commits, no Changes heading", () => {
+  const b = prBody({ title: "t", context: "c", description: "d", commits: [], claims, gate, videoUrls: {}, start: "s", tests: "x", folder: "/f", specs: [] });
+  assert.doesNotMatch(b, /#### Changes/);
+});
+
 test("PR body: the Features summary shows the result and the commit", () => {
   const b = body({});
   assert.match(b, /<summary><h4>Features: 2\/2 claims PASS at 3f9c2a1<\/h4><\/summary>\n\n\| Claim \| Sentence \| Result \| Video \|/);

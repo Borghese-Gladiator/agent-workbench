@@ -90,11 +90,7 @@ ${b.context}
 
 ${b.description}
 
-#### Changes
-
-${b.commits.map((c) => `- ${c}`).join("\n")}
-
-${mergeOrder}<details>
+${b.commits.length ? `#### Changes\n\n${b.commits.map((c) => `- ${c}`).join("\n")}\n\n` : ""}${mergeOrder}<details>
 <summary><h4>Features: ${passed}/${b.claims.length} claims PASS at ${b.gate.head.slice(0, 7)}</h4></summary>
 
 | Claim | Sentence | Result | Video |
@@ -184,6 +180,7 @@ export type ShipResult = { url: string; number: number; gate: GateResult; table:
 
 export async function ship(task: Task, worktree: string, runMdText: string, log: (l: string) => void, stackTasks: Task[] = [], output: string | null = null): Promise<ShipResult> {
   if (!task.branch || !task.base) throw new ShipRefused(`task ${task.id} has no branch or base`);
+  if (!task.context.trim() || !task.description.trim()) throw new ShipRefused("the task has no context or description: run awb stack set again with both fields");
   if (!existsSync(task.folder)) throw new ShipRefused("no proof yet: run awb prove first");
   const folder = realpathSync(task.folder);
 
