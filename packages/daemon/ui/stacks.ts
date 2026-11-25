@@ -6,10 +6,14 @@ import { STATUS } from "./tasks.ts";
 function EditModal({ st, t, onSaved }: { st: Json; t: Json; onSaved: () => void }) {
   const dlg = useRef<HTMLDialogElement | null>(null);
   const [title, setTitle] = useState<string>(t.title);
+  const [context, setContext] = useState<string>(t.context ?? "");
+  const [description, setDescription] = useState<string>(t.description ?? "");
   const [claims, setClaims] = useState<string>(t.claims.map((c: Json) => c.id + ": " + c.text).join("\n"));
   const [msg, setMsg] = useState("");
   const open = () => {
     setTitle(t.title);
+    setContext(t.context ?? "");
+    setDescription(t.description ?? "");
     setClaims(t.claims.map((c: Json) => c.id + ": " + c.text).join("\n"));
     setMsg("");
     dlg.current?.showModal();
@@ -28,7 +32,9 @@ function EditModal({ st, t, onSaved }: { st: Json; t: Json; onSaved: () => void 
         repo: st.repo,
         branch: st.tasks[0].branch,
         base: st.base,
-        tasks: st.tasks.map((x: Json) => (x.id === t.id ? { id: x.id, title, claims: parsed } : { id: x.id, title: x.title, claims: x.claims })),
+        tasks: st.tasks.map((x: Json) => (x.id === t.id
+            ? { id: x.id, title, context, description, claims: parsed }
+            : { id: x.id, title: x.title, context: x.context, description: x.description, claims: x.claims })),
       });
       dlg.current?.close();
       onSaved();
@@ -41,6 +47,12 @@ function EditModal({ st, t, onSaved }: { st: Json; t: Json; onSaved: () => void 
       <form class="body" onSubmit=${save}>
         <h3>Edit task</h3>
         <label>Title<input name="title" value=${title} onInput=${(e: Event) => setTitle((e.target as HTMLInputElement).value)} /></label>
+        <label>Context, the reason for the work
+          <textarea name="context" rows="3" value=${context} onInput=${(e: Event) => setContext((e.target as HTMLTextAreaElement).value)}></textarea>
+        </label>
+        <label>Description, what changes in the code
+          <textarea name="description" rows="3" value=${description} onInput=${(e: Event) => setDescription((e.target as HTMLTextAreaElement).value)}></textarea>
+        </label>
         <label>Claims, one a line, like <code>C1: text</code>
           <textarea name="claims" rows="8" value=${claims} onInput=${(e: Event) => setClaims((e.target as HTMLTextAreaElement).value)}></textarea>
         </label>
