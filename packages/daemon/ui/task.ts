@@ -81,7 +81,7 @@ function Rewrite({ t, setMsg }: { t: Json; setMsg: (m: Msg) => void }) {
 function ClaimRow({ c, r }: { c: Json; r?: Json }) {
   const status = r?.status ?? "waiting";
   return html`<details class="ev claim"><summary style="grid-template-columns: 56px 90px 1fr">
-      <b class="mono">${c.id}</b><${Chip} s=${status} label=${r ? undefined : "Not run"} /><span>${c.text}${r?.reasons.length ? html`<span class="note FAIL">${r.reasons.join(", ")}</span>` : null}${r?.error ? html`<span class="note FAIL mono">${r.error}</span>` : null}</span></summary>
+      <b class="mono">${c.id}</b><${Chip} s=${status} label=${r ? undefined : "Not run"} /><span>${c.text}${r?.reasons.length ? html`<span class="note FAIL">${[...r.reasons, ...(r.error ? [r.error] : [])].join(", ")}</span>` : null}</span></summary>
     <div style="padding: 4px 4px 12px">
       ${(r?.videos ?? []).map((v: string) => html`<video controls preload="metadata" src=${file(v)}></video>`)}
       ${(r?.traces ?? []).map(
@@ -99,7 +99,7 @@ function Gates({ t }: { t: Json }) {
       <summary>Attempt ${i + 1} · ${x.pass ? "passed" : "failed"} · <span class="mono">${x.commit_sha.slice(0, 10)}</span></summary>
       <table><thead><tr><th>Claim</th><th>Result</th><th class="num">Tests</th><th>Evidence</th></tr></thead><tbody>
         ${x.result.rows.map(
-          (r: Json) => html`<tr><td class="mono">${r.id}</td><td><${Pass} pass=${r.status === "PASS"} />${r.reasons.length ? html`<span class="note FAIL">${r.reasons.join(", ")}</span>` : null}${r.error ? html`<span class="note FAIL mono">${r.error}</span>` : null}</td>
+          (r: Json) => html`<tr><td class="mono">${r.id}</td><td><${Pass} pass=${r.status === "PASS"} />${r.reasons.length ? html`<span class="note FAIL">${[...r.reasons, ...(r.error ? [r.error] : [])].join(", ")}</span>` : null}</td>
             <td class="num">${r.tests}</td>
             <td>${r.videos.length} video, ${r.traces.length} trace${r.videos.map((v: string) => html` <a href=${file(v)} target="_blank">video</a>`)}${r.traces.map((tr: string) => html` <a href=${file(tr)} download>trace</a>`)}</td></tr>`,
         )}

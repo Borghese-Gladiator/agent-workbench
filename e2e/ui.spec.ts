@@ -280,6 +280,29 @@ test("the failed task shows one failure message, the tabs, and the actions", asy
   await expect(page.getByRole("columnheader", { name: "Gate" })).toBeVisible();
 });
 
+for (const sameOnBase of [true, false]) {
+  test(`a failed claim shows its error, and the banner ${sameOnBase ? "names the environment" : "keeps the retry text"}`, async ({ page }) => {
+    const error = "OperationalError: (1054, \"Unknown column 'uuid' in 'field list'\")";
+    await page.route(`**/api/tasks/${T2}`, async (route) => {
+      const res = await route.fetch();
+      const body = await res.json();
+      const rows = body.attempts.at(-1).gates.at(-1).result.rows;
+      for (const r of rows) if (r.status === "FAIL") Object.assign(r, { error, ...(sameOnBase ? { sameOnBase: true } : {}) });
+      await route.fulfill({ response: res, json: body });
+    });
+    await page.goto(`/#/task/${T2}`);
+    const alert = page.getByRole("alert");
+    await expect(alert).toContainText(/Failed claims: C2/);
+    if (sameOnBase) await expect(alert).toContainText("the environment is the likely cause");
+    else await expect(alert).not.toContainText("environment");
+    await expect(alert).toContainText(sameOnBase ? "Fix the environment, then retry the task." : "Retry the task, or rewrite the proof tests in Verification.");
+    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+    await expect(page.locator("details.claim").filter({ hasText: "C2" })).toContainText(error);
+    await page.getByRole("tab", { name: "Verification" }).click();
+    await expect(page.getByRole("cell").filter({ hasText: error })).toBeVisible();
+  });
+}
+
 test("the task logs tab shows events, the raw log, the setup log and the writer log", async ({ page }) => {
   await page.goto(`/#/task/${T2}/logs`);
   const main = page.locator("main");
