@@ -40,7 +40,7 @@ test("a second prove waits for the running proof and gets its result; ship durin
   const store = openStore(":memory:");
   migrateStacks(store.db);
   const stacks = createStacks(store.db, (id) => join(root, "tasks", id));
-  stacks.set({ repo, branch: "feat", base: "main", tasks: [{ title: "Add", claims: [{ id: "C1", text: "add sums", proof: "test" }] }] });
+  stacks.set({ repo, branch: "feat", base: "main", tasks: [{ title: "Add", context: "c", description: "d", claims: [{ id: "C1", text: "add sums", proof: "test" }] }] });
   const routes = taskRoutes(stacks, { claude }, { owns: () => false } as any, () => null, root, store.db);
   const server = createApp(store, { home: root, startedAt: "" }, routes).listen(0);
   await new Promise((r) => server.once("listening", r));

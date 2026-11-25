@@ -40,8 +40,8 @@ const env = {
 
 const STACK = {
   tasks: [
-    { title: "Slow task", claims: [{ id: "C1", text: "The page / shows a heading." }] },
-    { title: "Never starts", claims: [{ id: "C1", text: "The page / shows a list." }] },
+    { title: "Slow task", context: "c", description: "d", claims: [{ id: "C1", text: "The page / shows a heading." }] },
+    { title: "Never starts", context: "c", description: "d", claims: [{ id: "C1", text: "The page / shows a list." }] },
   ],
 };
 

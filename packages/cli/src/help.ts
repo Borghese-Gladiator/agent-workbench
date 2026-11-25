@@ -40,11 +40,13 @@ Run the proof checks.
 
   --rewrite a,b   Rewrite the listed items.
   --json          Print the result as JSON.`,
-  ship: `usage: awb ship [--json]
+  ship: `usage: awb ship [--output <file>] [--json]
 
 Ship the work.
 
-  --json   Print the result as JSON.`,
+  --output <file>  Put the text of the file in a "Test Code Output" block of the PR body.
+                   Use it for the output of a test run in another place, for example on a prod instance.
+  --json           Print the result as JSON.`,
   run: `usage: awb run <stack id | task id> [--json] [--wait] [--retries N]
        awb run --all-stopped [--retries N] [--json]
 

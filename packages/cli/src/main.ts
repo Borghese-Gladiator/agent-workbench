@@ -88,7 +88,7 @@ switch (cmd) {
     process.exitCode = await proveCmd(rest.includes("--json"), flag("--rewrite")?.split(",").filter(Boolean) ?? []);
     break;
   case "ship":
-    process.exitCode = await shipCmd(rest.includes("--json"));
+    process.exitCode = await shipCmd(rest.includes("--json"), rest.includes("--output") ? rest[rest.indexOf("--output") + 1] : undefined);
     break;
   case "run":
     process.exitCode = rest.includes("--all-stopped")
@@ -304,10 +304,19 @@ async function streamNdjson(path: string, body: object, onResult: (r: any) => nu
   return code;
 }
 
-async function shipCmd(json: boolean): Promise<number> {
+async function shipCmd(json: boolean, outputFile?: string): Promise<number> {
   const git = here();
   if (!git) return 1;
-  return streamNdjson("/api/ship", git, (r) => {
+  let output: string | undefined;
+  if (outputFile !== undefined) {
+    try {
+      output = readFileSync(outputFile, "utf8");
+    } catch {
+      console.error(`awb: cannot read --output ${outputFile}`);
+      return 1;
+    }
+  }
+  return streamNdjson("/api/ship", { ...git, output }, (r) => {
     if (json) console.log(JSON.stringify(r, null, 2));
     else console.log(`${r.table}\nDraft PR: ${r.url}`);
     return 0;

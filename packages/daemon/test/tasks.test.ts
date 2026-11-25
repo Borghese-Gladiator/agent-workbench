@@ -11,7 +11,7 @@ const setup = () => {
   migrateStacks(store.db);
   return createStacks(store.db, (id) => `/home/tasks/${id}`);
 };
-const t = (title: string) => ({ title, claims: [{ id: "C1", text: `${title} works` }, { id: "C2", text: "more" }] });
+const t = (title: string) => ({ title, context: "c", description: "d", claims: [{ id: "C1", text: `${title} works` }, { id: "C2", text: "more" }] });
 const gate = (pass: boolean): GateResult => ({
   pass,
   head: "abcdef1234567",
@@ -133,7 +133,7 @@ test("the runner refuses a new stack when the limit is full, and the limit is ne
 
 test("carriedClaims takes the test claims that passed in the last passing gate of each task below", () => {
   const s = setup();
-  const tc = (title: string) => ({ title, claims: [{ id: "C1", text: "x", proof: "test" as const }, { id: "C2", text: "browser" }] });
+  const tc = (title: string) => ({ title, context: "c", description: "d", claims: [{ id: "C1", text: "x", proof: "test" as const }, { id: "C2", text: "browser" }] });
   const { stack } = s.set({ repo: "/r", branch: "feat", base: "main", tasks: [tc("A"), tc("B"), tc("C")] });
   const [a, b, c] = stack.tasks;
   s.saveGate(s.startAttempt(a.id, null), gate(true));

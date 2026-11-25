@@ -73,7 +73,7 @@ bug)
   echo "revert the feature code: $FILES"
   git -C "$REPO" checkout "origin/$BASE" -- $FILES
   git -C "$REPO" commit -qm "planted bug: remove the feature code"
-  STACK=$(awb show "$TID" --json 2>/dev/null | node -e 'const t=JSON.parse(require("fs").readFileSync(0)); console.log(JSON.stringify({tasks:[{title:t.title+" (planted bug)",claims:t.claims}]}))')
+  STACK=$(awb show "$TID" --json 2>/dev/null | node -e 'const t=JSON.parse(require("fs").readFileSync(0)); console.log(JSON.stringify({tasks:[{title:t.title+" (planted bug)",context:t.context||"c",description:t.description||"d",claims:t.claims}]}))')
   (cd "$REPO" && echo "$STACK" | awb stack set 2>/dev/null)
   NEW=$(cd "$REPO" && awb show --json 2>/dev/null | node -e 'console.log(JSON.parse(require("fs").readFileSync(0)).folder)')
   NEW_ID=$(cd "$REPO" && awb show --json 2>/dev/null | node -e 'console.log(JSON.parse(require("fs").readFileSync(0)).id)')
@@ -193,7 +193,7 @@ EOF
     git -C "$L" commit -qm "a scheduler"
     git -C "$L" checkout -q -b awb/logic
     (cd "$L" && awb stack set >/dev/null <<'EOF'
-{"tasks":[{"title":"Pick a free slot","claims":[
+{"tasks":[{"title":"Pick a free slot","context":"c","description":"d","claims":[
 {"id":"C1","proof":"test","text":"overlaps returns false for two events where one ends at the hour the other starts (10-11 and 11-12)"},
 {"id":"C2","proof":"test","text":"pick slot with fixed events 9-10 and 11-13, a length of 2 and a day of 9-17 returns the slot 13-15, which overlaps no fixed event"}
 ]}]}

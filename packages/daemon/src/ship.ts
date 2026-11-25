@@ -13,6 +13,9 @@ export function findSecrets(files: { name: string; text: string }[]): string[] {
 
 export type BodyInput = {
   title: string;
+  context: string;
+  description: string;
+  output?: string | null;
   commits: string[];
   claims: Claim[];
   gate: GateResult;
@@ -40,7 +43,6 @@ export function prBody(b: BodyInput): string {
     const links = (b.videoUrls[c.id] ?? []).map((u, i) => `[video${i ? ` ${i + 1}` : ""}](${u})`).join(" ");
     return `| ${c.id} | ${cell(c.text)} | ${row?.status ?? "FAIL"} | ${c.proof === "test" ? "repo test" : links || "none"} |`;
   });
-  const notProven = b.claims.filter((c) => c.proof !== "test" && !b.videoUrls[c.id]?.length).map((c) => `- ${c.id}: no video uploaded.`);
   const specs = b.specs
     .map((s) => `#### ${s.name}\n\n\`\`\`${s.name.endsWith(".py") ? "python" : "ts"}\n${s.text.trimEnd()}\n\`\`\``)
     .join("\n\n");
@@ -65,19 +67,48 @@ ${b.template}
 
 `
     : "";
-  return `## Summary
+  const passed = b.claims.filter((c) => b.gate.rows.find((r) => r.id === c.id)?.status === "PASS").length;
+  const videos = b.claims.flatMap((c) => (b.videoUrls[c.id] ?? []).map((u, i) => `- ${c.id}${i ? ` (${i + 1})` : ""}: [video](${u})`));
+  const notTested = b.claims.filter((c) => c.proof !== "test" && !b.videoUrls[c.id]?.length).map((c) => `${c.id} has no video`);
+  const output = b.output?.trim()
+    ? `<details>
+<summary><h4>Test Code Output</h4></summary>
 
-${b.title}
+\`\`\`\`
+${b.output.trimEnd()}
+\`\`\`\`
+
+</details>
+
+`
+    : "";
+  return `## Context
+
+${b.context}
+
+## Description
+
+${b.description}
+
+#### Changes
 
 ${b.commits.map((c) => `- ${c}`).join("\n")}
 
-${mergeOrder}## Features
+${mergeOrder}<details>
+<summary><h4>Features: ${passed}/${b.claims.length} claims PASS at ${b.gate.head.slice(0, 7)}</h4></summary>
 
 | Claim | Sentence | Result | Video |
 | --- | --- | --- | --- |
 ${rows.join("\n")}
 
-<details><summary><b>How it was run</b></summary>
+</details>
+
+## Test Plan
+
+${videos.length ? `${videos.join("\n")}\n\n` : ""}Tests: ${b.tests}
+
+${notTested.length ? `Not tested: ${notTested.join("; ")}.\n\n` : ""}<details>
+<summary><h4>How it was run</h4></summary>
 
 - Start: \`${b.start}\`
 - Commit: \`${b.gate.head}\`
@@ -86,19 +117,16 @@ ${rows.join("\n")}
 
 </details>
 
-## Not proven
+<details>
+<summary><h4>Test Code</h4></summary>
 
-${notProven.join("\n") || "None."}
-
-## Test code
-
-<details><summary>${b.specs.length} proof test files (not in the diff)</summary>
+${b.specs.length} proof test files (not in the diff)
 
 ${specs}
 
 </details>
 
-${template}🤖 Generated with [Claude Code](https://claude.com/claude-code)
+${output}${template}🤖 Generated with [Claude Code](https://claude.com/claude-code)
 `;
 }
 
@@ -154,7 +182,7 @@ async function uploadVideos(worktree: string, folder: string, pr: number, gate: 
 
 export type ShipResult = { url: string; number: number; gate: GateResult; table: string };
 
-export async function ship(task: Task, worktree: string, runMdText: string, log: (l: string) => void, stackTasks: Task[] = []): Promise<ShipResult> {
+export async function ship(task: Task, worktree: string, runMdText: string, log: (l: string) => void, stackTasks: Task[] = [], output: string | null = null): Promise<ShipResult> {
   if (!task.branch || !task.base) throw new ShipRefused(`task ${task.id} has no branch or base`);
   if (!existsSync(task.folder)) throw new ShipRefused("no proof yet: run awb prove first");
   const folder = realpathSync(task.folder);
@@ -182,7 +210,7 @@ export async function ship(task: Task, worktree: string, runMdText: string, log:
   const template = readTemplate(worktree);
   const body = (videoUrls: Record<string, string[]>, number: number | null = null) =>
     prBody({
-      title: task.title, commits, claims: task.claims, gate, videoUrls, start, tests: testsLine, folder, specs, template,
+      title: task.title, context: task.context, description: task.description, output, commits, claims: task.claims, gate, videoUrls, start, tests: testsLine, folder, specs, template,
       stack: stackTasks.map((t) => ({ title: t.title, pr: t.id === task.id ? number : t.pr_number, current: t.id === task.id })),
     });
 

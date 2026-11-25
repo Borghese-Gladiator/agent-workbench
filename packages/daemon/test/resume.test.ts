@@ -34,7 +34,7 @@ test("GET /api/resume finds the claude session by session id, task id prefix, an
     assert.deepEqual([old.claude_session_id, old.worktree], ["old", "/w/a"], "a claude session id resumes that exact claude session");
     assert.equal((await get("repo=/r"))[0], 400);
 
-    const [task] = stacks.set({ repo: "/r", branch: "main", base: "main", tasks: [{ title: "T", claims: [{ id: "C1", text: "x" }] }] }).stack.tasks;
+    const [task] = stacks.set({ repo: "/r", branch: "main", base: "main", tasks: [{ title: "T", context: "c", description: "d", claims: [{ id: "C1", text: "x" }] }] }).stack.tasks;
     const [noAttempt, err] = await get(`id=${task.id.slice(0, 8)}`);
     assert.equal(noAttempt, 404);
     assert.match(err.error, new RegExp(task.id.slice(0, 8)));

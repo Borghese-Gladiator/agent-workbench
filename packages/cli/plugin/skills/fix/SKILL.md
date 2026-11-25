@@ -169,7 +169,7 @@ If the user asks for a PR, ship the branch with `awb ship`. Do not run `gh pr cr
 2. Create a task with one test claim. Send it on stdin to `awb stack set`:
    ```sh
    awb stack set <<'EOF'
-   {"tasks":[{"title":"fix: <what changed> (<SHORT-ID>)","claims":[{"id":"C1","proof":"test","text":"<the input of the event> no longer raises <exception type> in <function>"}]}]}
+   {"tasks":[{"title":"fix: <what changed> (<SHORT-ID>)","context":"<what the user sees, who it affects, the Sentry link>","description":"<the cause, the fix, and what the PR does not change>","claims":[{"id":"C1","proof":"test","text":"<the input of the event> no longer raises <exception type> in <function>"}]}]}
    EOF
    ```
 3. Run `awb prove`. A separate session writes its own test from the claim. The gate runs that test on the base commit and on your fix. The claim passes only when the test fails on the base and passes on the fix.

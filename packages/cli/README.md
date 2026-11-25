@@ -29,7 +29,7 @@ A task id or a stack id can be a prefix of 6 or more characters in every command
 
 | Command | What it does |
 |---|---|
-| `awb stack set` | Reads a stack as JSON on stdin and creates or replaces it. A stack of many tasks gets one branch for each task. Task 1 starts from the current branch, and each later task starts from the task below. |
+| `awb stack set` | Reads a stack as JSON on stdin and creates or replaces it. Each task needs a `title`, a `context`, a `description` and `claims`. A stack of many tasks gets one branch for each task. Task 1 starts from the current branch, and each later task starts from the task below. |
 | `awb run [stack \| task] [--wait] [--retries N]` | Starts the runner on a stack (default: the newest of the repo), or on one `waiting` task. A task start fails if a task below it is not done. `--wait` returns when the run is `done` or `stopped`, and exits 1 if it is not `done`. |
 | `awb retry <stack \| task> [--wait] [--retries N]` | Sets a `failed` task, or every `failed` task of a stack, back to `waiting` and runs only those tasks. It uses the same worktree and branch. |
 | `awb stacks`, `awb stack show <stack>` | List the stacks with their ids, last run and task states, or show one stack with its runs. |
@@ -41,7 +41,7 @@ A task id or a stack id can be a prefix of 6 or more characters in every command
 | `awb stop <stack \| task>` | Stops the run and the proof of the current task. The task becomes `failed` with the reason `stopped by awb stop`, and the later tasks stay `waiting`. Exits 1 if nothing runs for the id. |
 | `awb task rm <id...>` | Removes waiting or failed tasks in one transaction. If one id is doing, is shipped or does not exist, nothing is removed. |
 | `awb prove [--rewrite C1,C2]` | Starts the app, writes the missing proof tests with a fresh test-writer session, runs them, and runs the gate. Prints the claim table. Exits 1 if the gate fails. `--rewrite` deletes the tests of those claims first. |
-| `awb ship` | Runs the gate again. If it passes, scans for secrets, pushes the branch, opens a draft PR, uploads each video, and sets the task to `done`. Refuses when the gate fails. |
+| `awb ship [--output <file>]` | Runs the gate again. If it passes, scans for secrets, pushes the branch, opens a draft PR, uploads each video, and sets the task to `done`. Refuses when the gate fails. The PR body has Context and Description (from the task), a Features block, a Test Plan, and the test code. `--output` adds a Test Code Output block with the text of a file, for a run in another place. |
 
 How the runner works:
 - It makes a worktree in `AWB_HOME/worktrees/` for each task, runs the `## setup` block of the run file in it, and starts `awb -p` with the task prompt.

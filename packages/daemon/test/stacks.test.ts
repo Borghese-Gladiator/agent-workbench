@@ -8,7 +8,7 @@ const setup = () => {
   migrateStacks(store.db);
   return createStacks(store.db, (id) => `/home/tasks/${id}`);
 };
-const task = (title = "Scoreboard", claims = [{ id: "C1", text: "shows 0" }]) => ({ title, claims });
+const task = (title = "Scoreboard", claims = [{ id: "C1", text: "shows 0" }]) => ({ title, context: "c", description: "d", claims });
 const where = { repo: "/r", branch: "awb/x", base: "main" };
 
 test("create a stack of one, bound to the branch", () => {
@@ -72,16 +72,35 @@ for (const [name, run, msg] of [
 
 for (const [name, tasks] of [
   ["no tasks", []],
-  ["no title", [{ title: " ", claims: [{ id: "C1", text: "x" }] }]],
-  ["no claims", [{ title: "t", claims: [] }]],
-  ["a bad claim id", [{ title: "t", claims: [{ id: "one", text: "x" }] }]],
-  ["a duplicate claim id", [{ title: "t", claims: [{ id: "C1", text: "x" }, { id: "C1", text: "y" }] }]],
-  ["an unknown proof", [{ title: "t", claims: [{ id: "C1", text: "x", proof: "unit" }] }]],
+  ["no title", [{ title: " ", context: "c", description: "d", claims: [{ id: "C1", text: "x" }] }]],
+  ["no claims", [{ title: "t", context: "c", description: "d", claims: [] }]],
+  ["no context", [{ title: "t", description: "d", claims: [{ id: "C1", text: "x" }] }]],
+  ["a blank context", [{ title: "t", context: "  ", description: "d", claims: [{ id: "C1", text: "x" }] }]],
+  ["no description", [{ title: "t", context: "c", claims: [{ id: "C1", text: "x" }] }]],
+  ["a bad claim id", [{ title: "t", context: "c", description: "d", claims: [{ id: "one", text: "x" }] }]],
+  ["a duplicate claim id", [{ title: "t", context: "c", description: "d", claims: [{ id: "C1", text: "x" }, { id: "C1", text: "y" }] }]],
+  ["an unknown proof", [{ title: "t", context: "c", description: "d", claims: [{ id: "C1", text: "x", proof: "unit" }] }]],
 ] as const) {
   test(`validation refuses ${name}`, () => {
     assert.throws(() => validateTasks(tasks), StackError);
   });
 }
+
+test("a change in the context or the description is an edit and is kept", () => {
+  const s = setup();
+  const { stack } = s.set({ ...where, tasks: [task()] });
+  const id = stack.tasks[0].id;
+  const r = s.set({ ...where, stackId: stack.id, version: 1, tasks: [{ id, ...task(), context: "new why", description: "new what" }] });
+  assert.deepEqual(r.changes.changed, [id]);
+  assert.equal(r.stack.tasks[0].context, "new why");
+  assert.equal(r.stack.tasks[0].description, "new what");
+});
+
+test("validation trims the context and the description", () => {
+  const [t] = validateTasks([{ title: "t", context: " why ", description: " what ", claims: [{ id: "C1", text: "x" }] }]);
+  assert.equal(t.context, "why");
+  assert.equal(t.description, "what");
+});
 
 test("attempts and gate results are kept for each try", () => {
   const s = setup();
@@ -111,6 +130,6 @@ test("ship saves the PR and sets done; a closed task still shows, and the branch
 });
 
 test("validation keeps proof test and drops proof browser, the default", () => {
-  const [t] = validateTasks([{ title: "t", claims: [{ id: "C1", text: "x", proof: "test" }, { id: "C2", text: "y", proof: "browser" }] }]);
+  const [t] = validateTasks([{ title: "t", context: "c", description: "d", claims: [{ id: "C1", text: "x", proof: "test" }, { id: "C2", text: "y", proof: "browser" }] }]);
   assert.deepEqual(t.claims, [{ id: "C1", text: "x", proof: "test" }, { id: "C2", text: "y" }]);
 });
