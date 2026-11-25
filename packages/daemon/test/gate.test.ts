@@ -137,3 +137,14 @@ test("a test claim that also passes on the base commit fails; one that fails or 
     ["C3", []],
   ]);
 });
+
+test("a failed test keeps its first error line, and flags the same error on the base commit", () => {
+  const xml = (msg: string) => `<testsuites><testcase name="C1: a"><failure message="${msg}&#10;more">x</failure></testcase></testsuites>`;
+  const claims = testClaims(1);
+  const same = runGate(base([], { claims, report: junitReport(xml("boom")), baseReport: junitReport(xml("boom")) }));
+  assert.equal(same.rows[0].error, "boom");
+  assert.equal(same.rows[0].sameOnBase, true);
+  const diff = runGate(base([], { claims, report: junitReport(xml("boom")), baseReport: junitReport(xml("other")) }));
+  assert.equal(diff.rows[0].error, "boom");
+  assert.equal(diff.rows[0].sameOnBase, undefined);
+});
