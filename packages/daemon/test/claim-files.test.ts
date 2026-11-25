@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claimHash, claimsAffected, keptClaims, readClaimFiles } from "../src/claim-files.ts";
-import { testWriterPrompt } from "../src/writer.ts";
+import { pathToFileURL } from "node:url";
+import { claimHash, claimsAffected, coverageFiles, keptClaims, type Passes } from "../src/claim-files.ts";
 
 const claims = [
   { id: "C1", text: "a", proof: "test" as const },
@@ -31,25 +31,47 @@ test("claimsAffected: a claim with no list runs on every change", () => {
   assert.deepEqual(ids(["src/a.ts"], new Map([["C1", ["src/a.ts"]]])), ["C1", "C2"]);
 });
 
-test("readClaimFiles reads each .files file and ignores blank lines and a leading ./", () => {
-  const dir = mkdtempSync(join(tmpdir(), "awb-files-"));
-  writeFileSync(join(dir, "c1.files"), "./src/a.ts\n\n  src/b.ts  \n");
-  writeFileSync(join(dir, "c2.test.ts"), "");
-  assert.deepEqual([...readClaimFiles(dir)], [["C1", ["src/a.ts", "src/b.ts"]]]);
+function coverage(worktree: string, files: Record<string, string[]>) {
+  const dir = mkdtempSync(join(tmpdir(), "awb-cov-"));
+  Object.entries(files).forEach(([name, urls], i) => {
+    writeFileSync(join(dir, `coverage-${i}.json`), JSON.stringify({ result: [name, ...urls].map((p) => ({ url: pathToFileURL(join(worktree, p)).href })) }));
+  });
+  return dir;
+}
+
+test("coverageFiles lists the repo files that each test loaded, through imports too", () => {
+  const wt = realpathSync(mkdtempSync(join(tmpdir(), "awb-wt-")));
+  mkdirSync(join(wt, ".awb-proof"));
+  const dir = coverage(wt, {
+    ".awb-proof/c1.test.mjs": ["cart.mjs", "tax.mjs", "node_modules/x/index.js"],
+    ".awb-proof/c2.test.mjs": ["tax.mjs"],
+  });
+  writeFileSync(join(dir, "coverage-9.json"), JSON.stringify({ result: [{ url: "node:internal/x" }, { url: "file:///elsewhere/y.mjs" }] }));
+  writeFileSync(join(dir, "coverage-8.json"), "not json");
+  assert.deepEqual([...coverageFiles(dir, wt)], [["C1", ["cart.mjs", "tax.mjs"]], ["C2", ["tax.mjs"]]]);
+});
+
+test("coverageFiles gives nothing when there is no coverage, so every claim runs", () => {
+  const wt = realpathSync(mkdtempSync(join(tmpdir(), "awb-wt-")));
+  assert.equal(coverageFiles(join(wt, "none"), wt).size, 0);
+  assert.equal(coverageFiles(coverage(wt, {}), wt).size, 0);
 });
 
 function proofDir() {
   const dir = mkdtempSync(join(tmpdir(), "awb-kept-"));
   writeFileSync(join(dir, "c1.test.ts"), "one");
-  writeFileSync(join(dir, "c1.files"), "src/a.ts\n");
   writeFileSync(join(dir, "c2.test.ts"), "two");
-  writeFileSync(join(dir, "c2.files"), "src/b.ts\n");
   return dir;
 }
 
+const passesOf = (dir: string): Passes => ({
+  C1: { sha: "s1", hash: claimHash(dir, "C1"), files: ["src/a.ts"] },
+  C2: { sha: "s2", hash: claimHash(dir, "C2"), files: ["src/b.ts"] },
+});
+
 test("keptClaims keeps a claim only when its files and its test did not change", () => {
   const dir = proofDir();
-  const passes = { C1: { sha: "s1", hash: claimHash(dir, "C1") }, C2: { sha: "s2", hash: claimHash(dir, "C2") } };
+  const passes = passesOf(dir);
   assert.deepEqual(keptClaims(claims, dir, passes, () => ["src/a.ts"]), { C2: "s2" });
   assert.deepEqual(keptClaims(claims, dir, passes, () => ["README.md"]), {});
   assert.deepEqual(keptClaims(claims, dir, passes, () => null), {});
@@ -58,12 +80,14 @@ test("keptClaims keeps a claim only when its files and its test did not change",
   assert.deepEqual(keptClaims(claims, dir, {}, () => ["src/a.ts"]), {});
 });
 
-test("keptClaims never keeps a claim that is not a test claim", () => {
+test("keptClaims runs a claim that has no recorded files", () => {
   const dir = proofDir();
-  const passes = { C2: { sha: "s2", hash: claimHash(dir, "C2") } };
-  assert.deepEqual(keptClaims([{ id: "C2", text: "b" }], dir, passes, () => ["src/a.ts"]), {});
+  const passes = passesOf(dir);
+  passes.C2.files = [];
+  assert.deepEqual(keptClaims(claims, dir, passes, () => ["src/a.ts"]), {});
 });
 
-test("the test writer prompt asks for a .files file for each claim", () => {
-  assert.match(testWriterPrompt(claims, "s.sh"), /c1\.files/);
+test("keptClaims never keeps a claim that is not a test claim", () => {
+  const dir = proofDir();
+  assert.deepEqual(keptClaims([{ id: "C2", text: "b" }], dir, passesOf(dir), () => ["src/a.ts"]), {});
 });

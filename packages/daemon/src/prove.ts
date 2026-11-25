@@ -3,12 +3,12 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runGate, claimTable, junitReport, type Carried, type Claim, type GateResult, type Report } from "./gate.ts";
-import { parseRunMd, parseSeed, parseTest, fillTest } from "./run-md.ts";
+import { parseRunMd, parseSeed, parseTest, fillTest, quote } from "./run-md.ts";
 import type { Task } from "./stacks.ts";
 import { PLAYWRIGHT, git, run, startApp } from "./process.ts";
 import { seedCache, seedCopy } from "./seed.ts";
 import { PROOF_DIR, removeTests, repoTests, testFileClaim, testHash } from "./proof-tests.ts";
-import { claimHash, keptClaims, readPasses, savePasses, type Passes } from "./claim-files.ts";
+import { claimHash, coverageFiles, keptClaims, readPasses, savePasses, type Passes } from "./claim-files.ts";
 import { runTestWriter, runWriter, writeMissing, eachClaim, type ProveDeps, type WriterEnd } from "./writer.ts";
 
 export { run, killChildren } from "./process.ts";
@@ -44,8 +44,14 @@ async function runRepoTests(folder: string, worktree: string, testCmd: string, l
     for (const f of files) copyFileSync(join(from, "proof-tests", f), join(work, f));
     const cmd = fillTest(testCmd, files.map((f) => `${PROOF_DIR}/${f}`), join(folder, "proof", `${name}.xml`));
     log(`proof run${name === "base-junit" ? " on the base commit" : ""}: ${cmd}`);
-    const r = await run("sh", ["-c", `export PYTHONDONTWRITEBYTECODE=1\n${cmd}`], worktree, "", 0, signal);
+    const cov = name === "junit" ? join(folder, "proof", "coverage") : "";
+    const covEnv = cov ? `export NODE_V8_COVERAGE=${quote(cov)}\n` : "";
+    const r = await run("sh", ["-c", `export PYTHONDONTWRITEBYTECODE=1\n${covEnv}${cmd}`], worktree, "", 0, signal);
     writeFileSync(join(folder, "proof", `${name.replace(/junit$/, "test")}.log`), r.out);
+    if (cov) {
+      writeFileSync(join(folder, "proof", "claim-files.json"), JSON.stringify(Object.fromEntries(coverageFiles(cov, worktree))));
+      rmSync(cov, { recursive: true, force: true });
+    }
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -180,11 +186,16 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
 
     const gate = gateFromDisk(task.claims, folder, worktree);
     writeFileSync(join(proof, "gate.json"), JSON.stringify(gate, null, 2));
+    const coveredFile = join(proof, "claim-files.json");
+    const covered: Record<string, string[]> = existsSync(coveredFile) ? JSON.parse(readFileSync(coveredFile, "utf8")) : {};
     const next: Passes = { ...passes };
     for (const c of testClaims) {
       const row = gate.rows.find((r) => r.id === c.id);
-      if (row?.status === "PASS" && !kept[c.id]) next[c.id] = { sha: gate.head, hash: claimHash(tests, c.id) };
-      else if (row?.status !== "PASS") delete next[c.id];
+      if (row?.status !== "PASS") delete next[c.id];
+      else if (!kept[c.id]) {
+        if (covered[c.id]?.length) next[c.id] = { sha: gate.head, hash: claimHash(tests, c.id), files: covered[c.id] };
+        else delete next[c.id];
+      }
     }
     savePasses(folder, next);
     return { gate, table: claimTable(gate), folder, writer };
