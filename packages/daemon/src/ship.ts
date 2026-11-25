@@ -25,15 +25,7 @@ export type BodyInput = {
   folder: string;
   specs: { name: string; text: string }[];
   stack?: { title: string; pr: number | null; current: boolean }[];
-  template?: string | null;
 };
-
-const TEMPLATES = [".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE.md", "pull_request_template.md", "docs/pull_request_template.md"];
-
-export function readTemplate(worktree: string): string | null {
-  const f = TEMPLATES.map((t) => join(worktree, t)).find((p) => existsSync(p));
-  return f ? readFileSync(f, "utf8").trim() || null : null;
-}
 
 const cell = (s: string) => s.replaceAll("|", "\\|").replaceAll("\n", " ");
 
@@ -53,15 +45,6 @@ export function prBody(b: BodyInput): string {
 | # | PR | What it does |
 | --- | --- | --- |
 ${order.join("\n")}
-
-</details>
-
-`
-    : "";
-  const template = b.template
-    ? `<details><summary><b>PR template</b> (awb does not fill it)</summary>
-
-${b.template}
 
 </details>
 
@@ -122,7 +105,7 @@ ${specs}
 
 </details>
 
-${output}${template}🤖 Generated with [Claude Code](https://claude.com/claude-code)
+${output}🤖 Generated with [Claude Code](https://claude.com/claude-code)
 `;
 }
 
@@ -204,10 +187,9 @@ export async function ship(task: Task, worktree: string, runMdText: string, log:
     .trim()
     .split("\n")
     .filter(Boolean);
-  const template = readTemplate(worktree);
   const body = (videoUrls: Record<string, string[]>, number: number | null = null) =>
     prBody({
-      title: task.title, context: task.context, description: task.description, output, commits, claims: task.claims, gate, videoUrls, start, tests: testsLine, folder, specs, template,
+      title: task.title, context: task.context, description: task.description, output, commits, claims: task.claims, gate, videoUrls, start, tests: testsLine, folder, specs,
       stack: stackTasks.map((t) => ({ title: t.title, pr: t.id === task.id ? number : t.pr_number, current: t.id === task.id })),
     });
 
