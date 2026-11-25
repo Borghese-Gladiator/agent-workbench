@@ -208,13 +208,14 @@ test("run() with an aborted signal kills the child and its group", async () => {
   ctrl.abort();
   const r = await p;
   assert.notEqual(r.code, 0);
-  for (let i = 0; i < 40; i++) {
+  let dead = false;
+  for (let i = 0; i < 40 && !dead; i++) {
     try {
       process.kill(pid, 0);
+      await new Promise((ok) => setTimeout(ok, 50));
     } catch {
-      break;
+      dead = true;
     }
-    await new Promise((ok) => setTimeout(ok, 50));
   }
-  assert.throws(() => process.kill(pid, 0));
+  assert.ok(dead, "the sleep child is still alive");
 });
