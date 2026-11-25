@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { claimsAffected, readClaimFiles } from "../src/claim-files.ts";
+import { claimHash, claimsAffected, keptClaims, readClaimFiles } from "../src/claim-files.ts";
 import { testWriterPrompt } from "../src/writer.ts";
 
 const claims = [
@@ -36,6 +36,32 @@ test("readClaimFiles reads each .files file and ignores blank lines and a leadin
   writeFileSync(join(dir, "c1.files"), "./src/a.ts\n\n  src/b.ts  \n");
   writeFileSync(join(dir, "c2.test.ts"), "");
   assert.deepEqual([...readClaimFiles(dir)], [["C1", ["src/a.ts", "src/b.ts"]]]);
+});
+
+function proofDir() {
+  const dir = mkdtempSync(join(tmpdir(), "awb-kept-"));
+  writeFileSync(join(dir, "c1.test.ts"), "one");
+  writeFileSync(join(dir, "c1.files"), "src/a.ts\n");
+  writeFileSync(join(dir, "c2.test.ts"), "two");
+  writeFileSync(join(dir, "c2.files"), "src/b.ts\n");
+  return dir;
+}
+
+test("keptClaims keeps a claim only when its files and its test did not change", () => {
+  const dir = proofDir();
+  const passes = { C1: { sha: "s1", hash: claimHash(dir, "C1") }, C2: { sha: "s2", hash: claimHash(dir, "C2") } };
+  assert.deepEqual(keptClaims(claims, dir, passes, () => ["src/a.ts"]), { C2: "s2" });
+  assert.deepEqual(keptClaims(claims, dir, passes, () => ["README.md"]), {});
+  assert.deepEqual(keptClaims(claims, dir, passes, () => null), {});
+  writeFileSync(join(dir, "c2.test.ts"), "changed");
+  assert.deepEqual(keptClaims(claims, dir, passes, () => ["src/a.ts"]), {});
+  assert.deepEqual(keptClaims(claims, dir, {}, () => ["src/a.ts"]), {});
+});
+
+test("keptClaims never keeps a claim that is not a test claim", () => {
+  const dir = proofDir();
+  const passes = { C2: { sha: "s2", hash: claimHash(dir, "C2") } };
+  assert.deepEqual(keptClaims([{ id: "C2", text: "b" }], dir, passes, () => ["src/a.ts"]), {});
 });
 
 test("the test writer prompt asks for a .files file for each claim", () => {

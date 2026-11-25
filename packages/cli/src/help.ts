@@ -34,15 +34,15 @@ The value is from 1 to 5. A lower limit never stops a run. It refuses new runs u
   cleanup: `usage: awb cleanup
 
 Stop the app servers that an earlier proof left running.`,
-  prove: `usage: awb prove [--json] [--rewrite a,b]
+  prove: `usage: awb prove [--json] [--rewrite a,b] [--all]
 
-Run the proof checks.
+Run the proof checks. A test claim keeps its last pass when the files that it lists did not change.
 
   --rewrite a,b   Rewrite the listed items.
+  --all           Run every claim again. Keep no earlier pass.
+  --json          Print the result as JSON.
 
-To guide the test writer, write notes in .awb/prove.md in the worktree.
-
-  --json          Print the result as JSON.`,
+To guide the test writer, write notes in .awb/prove.md in the worktree.`,
   ship: `usage: awb ship [--json]
 
 Ship the work.

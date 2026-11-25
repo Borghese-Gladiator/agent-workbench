@@ -7,7 +7,8 @@ import { parseRunMd, parseSeed, parseTest, fillTest } from "./run-md.ts";
 import type { Task } from "./stacks.ts";
 import { PLAYWRIGHT, git, run, startApp } from "./process.ts";
 import { seedCache, seedCopy } from "./seed.ts";
-import { PROOF_DIR, removeTests, repoTests, testHash } from "./proof-tests.ts";
+import { PROOF_DIR, removeTests, repoTests, testFileClaim, testHash } from "./proof-tests.ts";
+import { claimHash, keptClaims, readPasses, savePasses, type Passes } from "./claim-files.ts";
 import { runTestWriter, runWriter, writeMissing, eachClaim, type ProveDeps, type WriterEnd } from "./writer.ts";
 
 export { run, killChildren } from "./process.ts";
@@ -34,8 +35,8 @@ export default defineConfig({
 `;
 }
 
-async function runRepoTests(folder: string, worktree: string, testCmd: string, log: (l: string) => void, from = folder, name = "junit", signal?: AbortSignal) {
-  const files = repoTests(join(from, "proof-tests"));
+async function runRepoTests(folder: string, worktree: string, testCmd: string, log: (l: string) => void, from = folder, name = "junit", signal?: AbortSignal, skip: string[] = []) {
+  const files = repoTests(join(from, "proof-tests")).filter((f) => !skip.includes(testFileClaim(f)!));
   const work = join(worktree, PROOF_DIR);
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work);
@@ -60,7 +61,7 @@ function mergeBase(worktree: string, base: string | null): string | null {
   return null;
 }
 
-async function runBaseTests(task: Task, folder: string, worktree: string, testCmd: string, log: (l: string) => void, signal?: AbortSignal) {
+async function runBaseTests(task: Task, folder: string, worktree: string, testCmd: string, log: (l: string) => void, signal?: AbortSignal, skip: string[] = []) {
   const sha = mergeBase(worktree, task.base);
   if (!sha) return log(`base run skipped: no merge base with ${task.base ?? "(no base)"}`);
   if (git(worktree, "status", "--porcelain") !== "") return log("base run skipped: the worktree has uncommitted changes");
@@ -68,7 +69,7 @@ async function runBaseTests(task: Task, folder: string, worktree: string, testCm
   const branch = git(worktree, "rev-parse", "--abbrev-ref", "HEAD");
   git(worktree, "switch", "-q", "--detach", sha);
   try {
-    await runRepoTests(folder, worktree, testCmd, log, folder, "base-junit", signal);
+    await runRepoTests(folder, worktree, testCmd, log, folder, "base-junit", signal, skip);
   } finally {
     git(worktree, "switch", "-q", ...(branch === "HEAD" ? ["--detach", head] : [branch]));
   }
@@ -89,6 +90,7 @@ export function gateFromDisk(claims: Claim[], folder: string, worktree: string):
     dirty: git(worktree, "status", "--porcelain") !== "",
     testHashAtStart: read("test-hash.txt"),
     testHashNow: testHash(join(folder, "proof-tests")),
+    kept: read("kept.json") ? JSON.parse(read("kept.json")) : undefined,
     fileExists: existsSync,
     writerEnd: read("writer-end.txt") || undefined,
     baseReport: read("base-junit.xml") ? junitReport(read("base-junit.xml")) : undefined,
@@ -102,7 +104,15 @@ export type CarriedTask = { label: string; claims: Claim[]; folder: string };
 
 export type ProveResult = { gate: GateResult; table: string; folder: string; writer: WriterEnd | null };
 
-export async function prove(task: Task, worktree: string, runMdText: string, deps: ProveDeps, rewrite: string[] = [], carried: CarriedTask[] = []): Promise<ProveResult> {
+function changedSince(worktree: string, sha: string): string[] | null {
+  try {
+    return git(worktree, "diff", "--name-only", `${sha}..HEAD`).split("\n").filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+export async function prove(task: Task, worktree: string, runMdText: string, deps: ProveDeps, rewrite: string[] = [], carried: CarriedTask[] = [], all = false): Promise<ProveResult> {
   const browserClaims = task.claims.filter((c) => c.proof !== "test");
   const testClaims = task.claims.filter((c) => c.proof === "test");
   const runMd = browserClaims.length ? parseRunMd(runMdText) : null;
@@ -153,9 +163,14 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
       const pw = await run(process.execPath, [PLAYWRIGHT, "test", "--config", "playwright.config.ts"], folder, "", 0, deps.signal);
       writeFileSync(join(proof, "run.log"), pw.out);
     }
-    if (testClaims.length && testCmd) {
-      await runRepoTests(folder, worktree, testCmd, deps.log, folder, "junit", deps.signal);
-      await runBaseTests(task, folder, worktree, testCmd, deps.log, deps.signal);
+    const passes = readPasses(folder);
+    const kept = all ? {} : keptClaims(testClaims, tests, passes, (sha) => changedSince(worktree, sha));
+    const keptIds = Object.keys(kept);
+    writeFileSync(join(proof, "kept.json"), JSON.stringify(kept));
+    if (keptIds.length) deps.log(`kept from an earlier pass, files not changed: ${keptIds.join(", ")}`);
+    if (testClaims.length && testCmd && keptIds.length < testClaims.length) {
+      await runRepoTests(folder, worktree, testCmd, deps.log, folder, "junit", deps.signal, keptIds);
+      await runBaseTests(task, folder, worktree, testCmd, deps.log, deps.signal, keptIds);
     }
     if (carried.length && testCmd) {
       writeFileSync(join(proof, "carried.json"), JSON.stringify(carried));
@@ -165,6 +180,13 @@ export async function prove(task: Task, worktree: string, runMdText: string, dep
 
     const gate = gateFromDisk(task.claims, folder, worktree);
     writeFileSync(join(proof, "gate.json"), JSON.stringify(gate, null, 2));
+    const next: Passes = { ...passes };
+    for (const c of testClaims) {
+      const row = gate.rows.find((r) => r.id === c.id);
+      if (row?.status === "PASS" && !kept[c.id]) next[c.id] = { sha: gate.head, hash: claimHash(tests, c.id) };
+      else if (row?.status !== "PASS") delete next[c.id];
+    }
+    savePasses(folder, next);
     return { gate, table: claimTable(gate), folder, writer };
   } finally {
     app?.stop();

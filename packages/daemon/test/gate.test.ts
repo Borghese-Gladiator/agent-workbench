@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runGate, junitReport, type GateInput, type ReportSpec } from "../src/gate.ts";
+import { runGate, junitReport, claimTable, type GateInput, type ReportSpec } from "../src/gate.ts";
 
 const spec = (title: string, over: Partial<ReportSpec["tests"][0]> = {}, attachments = ["video", "trace"]): ReportSpec => ({
   title,
@@ -20,6 +20,15 @@ const base = (specs: ReportSpec[], over: Partial<GateInput> = {}): GateInput => 
 });
 
 const good = [spec("C1: a"), spec("C2: b")];
+
+test("a kept claim passes with no test in the report, shows its sha, and still fails on a global reason", () => {
+  const input = base([spec("C2: b")], { claims: [{ id: "C1", text: "a", proof: "test" }, { id: "C2", text: "b" }], kept: { C1: "1234567890abcdef" } });
+  const g = runGate(input);
+  assert.equal(g.pass, true);
+  assert.equal(g.rows[0].kept, "1234567890abcdef");
+  assert.match(claimTable(g), /C1\s+PASS\s+tests=0\s+kept from 1234567890/);
+  assert.equal(runGate({ ...input, dirty: true }).rows[0].status, "FAIL");
+});
 
 test("all rules hold: the gate passes and lists the evidence", () => {
   const g = runGate(base(good));

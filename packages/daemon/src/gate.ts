@@ -18,11 +18,12 @@ export type GateInput = {
   startError?: string;
   baseReport?: Report;
   carried?: Carried[];
+  kept?: Record<string, string>;
 };
 
 export type Carried = { label: string; claims: Claim[]; report: Report };
 
-export type GateRow = { id: string; tests: number; status: "PASS" | "FAIL"; reasons: string[]; videos: string[]; traces: string[] };
+export type GateRow = { id: string; tests: number; status: "PASS" | "FAIL"; reasons: string[]; videos: string[]; traces: string[]; kept?: string };
 export type GateResult = { pass: boolean; rows: GateRow[]; head: string; reasons: string[] };
 
 function specsOf(report: Report): ReportSpec[] {
@@ -41,7 +42,11 @@ export function runGate(input: GateInput): GateResult {
   if (input.dirty) global.push("source has uncommitted changes");
   if (input.testHashAtStart !== input.testHashNow) global.push("a test file changed after the run started");
 
-  const row = (c: Claim, specs: ReportSpec[], id = c.id, baseSpecs: ReportSpec[] = []): GateRow => {
+  const row = (c: Claim, specs: ReportSpec[], id = c.id, baseSpecs: ReportSpec[] = [], kept?: string): GateRow => {
+    if (kept) {
+      const reasons = [...global];
+      return { id, tests: 0, status: reasons.length ? "FAIL" : "PASS", reasons, videos: [], traces: [], kept };
+    }
     const mine = specs.filter((s) => new RegExp(`^${c.id}\\b`).test(s.title));
     const tests = mine.flatMap((s) => s.tests);
     const results = tests.flatMap((t) => t.results);
@@ -74,7 +79,7 @@ export function runGate(input: GateInput): GateResult {
   const specs = specsOf(input.report);
   const baseSpecs = input.baseReport ? specsOf(input.baseReport) : [];
   const rows = [
-    ...input.claims.map((c) => row(c, specs, c.id, baseSpecs)),
+    ...input.claims.map((c) => row(c, specs, c.id, baseSpecs, input.kept?.[c.id])),
     ...(input.carried ?? []).flatMap((k) => k.claims.map((c) => row(c, specsOf(k.report), `${k.label}/${c.id}`))),
   ];
   return { pass: rows.length > 0 && rows.every((r) => r.status === "PASS"), rows, head: input.head, reasons: global };
@@ -105,7 +110,7 @@ export function junitReport(xml: string): Report {
 
 export function claimTable(g: GateResult): string {
   const lines = g.rows.map(
-    (r) => `${r.id.padEnd(5)} ${r.status}  tests=${r.tests}${r.reasons.length ? "  " + r.reasons.join(", ") : ""}`,
+    (r) => `${r.id.padEnd(5)} ${r.status}  tests=${r.tests}${r.kept ? `  kept from ${r.kept.slice(0, 10)}` : ""}${r.reasons.length ? "  " + r.reasons.join(", ") : ""}`,
   );
   return [...lines, `gate: ${g.pass ? "PASS" : "FAIL"} at ${g.head.slice(0, 10)}`].join("\n");
 }

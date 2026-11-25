@@ -95,7 +95,7 @@ switch (cmd) {
     break;
   }
   case "prove":
-    process.exitCode = await proveCmd(rest.includes("--json"), flag("--rewrite")?.split(",").filter(Boolean) ?? []);
+    process.exitCode = await proveCmd(rest.includes("--json"), flag("--rewrite")?.split(",").filter(Boolean) ?? [], rest.includes("--all"));
     break;
   case "ship":
     process.exitCode = await shipCmd(rest.includes("--json"));
@@ -262,10 +262,10 @@ function defaultBranch(cwd: string): string {
   }
 }
 
-async function proveCmd(json: boolean, rewrite: string[]): Promise<number> {
+async function proveCmd(json: boolean, rewrite: string[], all: boolean): Promise<number> {
   const git = here();
   if (!git) return 1;
-  return streamNdjson("/api/prove", { ...git, sessionId: process.env.AWB_SESSION_ID, rewrite, deadline: Number(process.env.AWB_SESSION_DEADLINE) || undefined }, (r) => {
+  return streamNdjson("/api/prove", { ...git, sessionId: process.env.AWB_SESSION_ID, rewrite, all, deadline: Number(process.env.AWB_SESSION_DEADLINE) || undefined }, (r) => {
     if (json) console.log(JSON.stringify(r, null, 2));
     else {
       console.log(r.table);
